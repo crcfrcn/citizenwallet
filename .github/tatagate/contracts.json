@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "repository": "citizenwallet",
+  "workflows": [
+    "citizenwallet.android.ci",
+    "citizenwallet.android.release",
+    "citizenwallet.ios.ci",
+    "citizenwallet.ios.release"
+  ],
+  "node_tests": [
+    "scripts/ci/android/build-apk/test.mjs",
+    "scripts/ci/ios/check/test.mjs",
+    "scripts/ci/ios/ios/test.mjs",
+    "scripts/release/android/build-apk/test.mjs",
+    "scripts/release/ios/ios/test.mjs",
+    "test/release_manifest.test.mjs"
+  ],
+  "checks": [
+    "repository-contracts",
+    "cross-platform-contracts"
+  ],
+  "tools": {
+    "node": "25.2.1",
+    "actionlint": "1.7.12",
+    "rust": null
+  },
+  "platform_forbidden_values": [
+    "macOS ARM64",
+    "macos-arm64",
+    "macos_arm64"
+  ]
+}

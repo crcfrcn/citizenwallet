@@ -1,0 +1,287 @@
+import assert from 'node:assert/strict';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { test } from 'node:test';
+
+const settings = readFileSync(new URL('../android/settings.gradle.kts', import.meta.url), 'utf8');
+const root = readFileSync(new URL('../android/build.gradle.kts', import.meta.url), 'utf8');
+const application = readFileSync(new URL('../android/app/build.gradle.kts', import.meta.url), 'utf8');
+const properties = readFileSync(new URL('../android/gradle.properties', import.meta.url), 'utf8');
+const wrapper = readFileSync(new URL('../android/gradle-wrapper.properties', import.meta.url), 'utf8');
+const runner = readFileSync(new URL('../scripts/citizenwallet-run.sh', import.meta.url), 'utf8');
+const signerPodspec = readFileSync(new URL('../ios/signer/citizenwallet_signer.podspec', import.meta.url), 'utf8');
+const iosProject = readFileSync(new URL('../ios/Runner.xcodeproj/project.pbxproj', import.meta.url), 'utf8');
+const iosScheme = readFileSync(new URL('../ios/Runner.xcscheme', import.meta.url), 'utf8');
+const iosUiTestPlan = JSON.parse(readFileSync(new URL('../ios/RunnerUITests/RunnerUITests.xctestplan', import.meta.url), 'utf8'));
+const createUiTest = readFileSync(new URL('../ios/RunnerUITests/CreateWalletUITests.swift', import.meta.url), 'utf8');
+const importUiTest = readFileSync(new URL('../ios/RunnerUITests/ImportWalletUITests.swift', import.meta.url), 'utf8');
+
+test('钱包真实入口只在源码外工程执行Pub，缺参和链接逃逸必须在写入前失败', context => {
+  const fixture = mkdtempSync(join(tmpdir(), 'wallet-project-boundary-'));
+  context.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const source = fileURLToPath(new URL('..', import.meta.url));
+  const script = fileURLToPath(new URL('../scripts/citizenwallet-run.sh', import.meta.url));
+  const project = join(fixture, 'project');
+  const bin = join(fixture, 'bin');
+  mkdirSync(project);
+  mkdirSync(bin);
+  symlinkSync(join(source, 'pubspec.yaml'), join(project, 'pubspec.yaml'));
+  // 真实执行产品入口和路径校验；只替换Flutter，记录Pub实际工作目录后停止昂贵编译。
+  writeFileSync(join(bin, 'flutter'), '#!/bin/bash\ncase "$1" in\nconfig) exit 0;;\npub) mkdir .dart_tool; printf "%s" "$PWD" > "$TRACE"; exit 73;;\n*) exit 90;;\nesac\n', { mode: 0o755 });
+  const trace = join(fixture, 'trace');
+  const env = {
+    PATH: `${bin}:${process.env.PATH}`,
+    TMPDIR: fixture,
+    CITIZENWALLET_WORK_DIR: join(fixture, 'work'),
+    TRACE: trace,
+  };
+  function run(projectRoot, platform = 'ios') {
+    return spawnSync('/bin/bash', [script, platform], {
+      env: { ...env, ...(projectRoot === undefined ? {} : { CITIZENWALLET_PROJECT_ROOT: projectRoot }) },
+      encoding: 'utf8', timeout: 10000,
+    });
+  }
+  for (const platform of ['ios', 'android']) {
+    const missing = run(undefined, platform);
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /必须提供源码外/u);
+    for (const root of [source, resolve(source, 'ios', '..'), '.']) {
+      const rejected = run(root, platform);
+      assert.notEqual(rejected.status, 0);
+      assert.equal(existsSync(trace), false);
+    }
+  }
+  const sourceLink = join(fixture, 'source-link');
+  symlinkSync(source, sourceLink);
+  assert.match(run(sourceLink).stderr, /源码外绝对路径/u);
+  symlinkSync(source, join(project, '.dart_tool'));
+  assert.match(run(project).stderr, /源码外绝对路径/u);
+  assert.equal(existsSync(trace), false);
+  unlinkSync(join(project, '.dart_tool'));
+  // Kotlin持久目录同样不能通过已有链接把状态写回源码，且拒绝必须早于Pub。
+  const kotlinState = join(fixture, 'work', 'work', 'kotlin-project');
+  mkdirSync(join(fixture, 'work', 'work'), { recursive: true });
+  symlinkSync(source, kotlinState);
+  for (const platform of ['ios', 'android']) {
+    assert.match(run(project, platform).stderr, /源码外绝对路径/u);
+    assert.equal(existsSync(trace), false);
+  }
+  unlinkSync(kotlinState);
+  const projectIos = join(project, 'ios');
+  const projectLock = join(projectIos, 'Podfile.lock');
+  const sourceLock = join(source, 'ios', 'Podfile.lock');
+  mkdirSync(projectIos);
+  const foreignLock = join(fixture, 'foreign-lock');
+  writeFileSync(foreignLock, 'unrelated');
+  symlinkSync(foreignLock, projectLock);
+  assert.match(run(project, 'ios').stderr, /锁文件链接目标不是本产品源码/u);
+  assert.equal(existsSync(trace), false);
+  unlinkSync(projectLock);
+  symlinkSync(sourceLock, projectLock);
+  const originalLock = readFileSync(sourceLock);
+  for (const platform of ['ios', 'android']) {
+    const accepted = run(project, platform);
+    assert.equal(accepted.status, 73, accepted.stderr);
+    assert.equal(readFileSync(trace, 'utf8'), project);
+    assert.equal(existsSync(join(project, '.dart_tool')), true);
+    if (platform === 'ios') {
+      // 模拟源码外工程的链接锁文件；入口必须将其脱离并保持源码原字节。
+      assert.equal(lstatSync(projectLock).isSymbolicLink(), false);
+      assert.deepEqual(readFileSync(sourceLock), originalLock);
+      assert.deepEqual(readFileSync(projectLock), originalLock);
+    }
+    rmSync(join(project, '.dart_tool'), { recursive: true });
+  }
+});
+
+
+// 普通检出根可任意命名；错误包名、重复身份和链接来源必须在写入工作目录前拒绝。
+test('钱包源码身份来自唯一产品包名而非检出目录名称', context => {
+  const fixture = mkdtempSync(join(tmpdir(), 'wallet-source-identity-'));
+  context.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const source = join(fixture, 'independent-checkout');
+  mkdirSync(join(source, 'scripts'), { recursive: true });
+  const script = join(source, 'scripts/citizenwallet-run.sh');
+  writeFileSync(script, runner);
+  const manifest = join(source, 'pubspec.yaml');
+  const work = join(fixture, 'work');
+  const run = () => spawnSync('/bin/bash', [script, 'ios'], {
+    env: { PATH: process.env.PATH, CITIZENWALLET_WORK_DIR: work }, encoding: 'utf8', timeout: 10000,
+  });
+  writeFileSync(manifest, 'name: citizenwallet\n');
+  assert.match(run().stderr, /必须提供源码外/u);
+  for (const value of ['name: other_product\n', 'name: citizenwallet\nname: citizenwallet\n']) {
+    writeFileSync(manifest, value);
+    assert.match(run().stderr, /源码身份无效/u);
+    assert.equal(existsSync(work), false);
+  }
+  unlinkSync(manifest);
+  const foreign = join(fixture, 'foreign.yaml');
+  writeFileSync(foreign, 'name: citizenwallet\n');
+  symlinkSync(foreign, manifest);
+  assert.match(run().stderr, /源码身份无效/u);
+  assert.equal(existsSync(work), false);
+});
+
+test('Android从真实产品源码根启动Gradle并把可写状态放入外部工作目录', () => {
+  assert.match(settings, /System\.getenv\("CITIZENWALLET_PROJECT_ROOT"\)/u);
+  assert.match(settings, /settingsDir\.parentFile/u);
+  assert.match(settings, /resolve\("android\/local\.properties"\)/u);
+  assert.match(settings, /\.flutter-plugins-dependencies/u);
+  assert.doesNotMatch(settings, /dev\.flutter\.flutter-plugin-loader|System\.getProperty\("user\.dir"\)/u);
+  assert.doesNotMatch(settings, /id\("com\.android\.(?:application|library)"\)\s+version/u);
+  assert.match(root, /System\.getenv\("CITIZENWALLET_BUILD_DIR"\)/u);
+  assert.match(root, /System\.getProperty\("java\.io\.tmpdir"\)/u);
+  assert.match(application, /import java\.util\.Properties/u);
+  assert.doesNotMatch(application, /java\.util\.Properties\(\)/u);
+  assert.match(application, /compileSdk = 36/u);
+  assert.match(application, /ndkVersion = "28\.2\.13676358"/u);
+  assert.match(application, /minSdk = 24/u);
+  assert.match(application, /targetSdk = 36/u);
+  assert.doesNotMatch(application, /(?:compileSdk|ndkVersion|minSdk|targetSdk)\s*=.*\bflutter\./u);
+  assert.deepEqual(properties.split('\n').filter((line) => /^android\.(?:builtInKotlin|newDsl)=/u.test(line)), [
+    'android.builtInKotlin=true',
+    'android.newDsl=true',
+  ]);
+  assert.match(root, /classpath\("com\.android\.tools\.build:gradle:9\.0\.1"\)/u);
+  assert.match(root, /classpath\("org\.jetbrains\.kotlin:kotlin-gradle-plugin:2\.2\.20"\)/u);
+  assert.match(wrapper, /gradle-9\.1\.0-bin\.zip/u);
+  assert.match(wrapper, /distributionSha256Sum=a17ddd85a26b6a7f5ddb71ff8b05fc5104c0202c6e64782429790c933686c806/u);
+  assert.doesNotMatch(`${root}\n${wrapper}`, /gradle-(?:8\.|9\.1\.0-all)/u);
+  assert.match(application, /System\.getenv\("CITIZENWALLET_PROJECT_ROOT"\) \?: "\.\.\/\.\."/u);
+  assert.match(application, /System\.getenv\("CITIZENWALLET_NATIVE_ANDROID_DIR"\)/u);
+  assert.match(runner, /cd "\$CITIZENWALLET_DIR\/android"/u);
+  assert.match(runner, /gradle_bin="\$\{CITIZENWALLET_GRADLE_BIN:\?Android Build必须提供绝对Gradle工具路径\}"/u);
+  assert.match(runner, /distributionUrl=\.\*gradle-/u);
+  assert.match(runner, /actual_gradle_version=.*"\$gradle_bin" --version/u);
+  assert.match(runner, /FLUTTER_ROOT="\$flutter_sdk" "\$gradle_bin" "\$\{GRADLE_ARGS\[@\]\}"/u);
+  assert.doesNotMatch(runner, /"\$CITIZENWALLET_DIR\/android\/gradlew"/u);
+  assert.match(runner, /--init-script "\$CITIZENWALLET_GRADLE_INIT_SCRIPT"/u);
+  assert.match(runner, /-Pkotlin\.project\.persistent\.dir="\$BUILD_WORK_DIR\/kotlin-project"/u);
+  assert.match(runner, /CITIZENWALLET_FLUTTER_GRADLE_ROOT="\$flutter_sdk\/packages\/flutter_tools\/gradle"/u);
+  assert.match(runner, /cp "\$ANDROID_APK" "\$ARTIFACT_ROOT\/android\.apk"/u);
+});
+
+test('CitizenWallet依赖准备默认联网且离线模式必须显式选择', () => {
+  assert.match(runner, /PUB_GET_ARGS=\(--enforce-lockfile\)/u);
+  assert.match(runner, /CITIZENWALLET_OFFLINE:-false/u);
+  assert.match(runner, /CITIZENWALLET_PUB_OFFLINE:-false/u);
+  assert.match(runner, /GRADLE_ARGS=\(--no-daemon\)/u);
+  assert.match(runner, /project\.extensions\.extraProperties\.set\("kotlin\.project\.persistent\.dir", new File\(output, suffix \+ "\/kotlin-project"\)\.path\)/u);
+  assert.match(runner, /true\) PUB_OFFLINE=true; GRADLE_ARGS\+=\(--offline\); export CARGO_NET_OFFLINE=true/u);
+  assert.match(runner, /"\$gradle_bin" "\$\{GRADLE_ARGS\[@\]\}" --stacktrace/u);
+  assert.match(runner, /if \[\[ "\$PUB_OFFLINE" == true \]\]; then PUB_GET_ARGS\+=\(--offline\); fi/u);
+  assert.match(runner, /flutter pub get "\$\{PUB_GET_ARGS\[@\]\}"/u);
+});
+
+test('本机钱包Build在平台编译前先运行依赖宿主FFI的Flutter测试', () => {
+  const pub = runner.indexOf('flutter pub get "${PUB_GET_ARGS[@]}"');
+  const contract = runner.indexOf('"$node_bin" --test "$CITIZENWALLET_DIR/test/release_manifest.test.mjs"');
+  const host = runner.indexOf('"$SCRIPT_DIR/build-signer-native.sh" host');
+  const tests = runner.indexOf('flutter test --no-pub');
+  const platform = runner.indexOf('"$SCRIPT_DIR/build-signer-native.sh" "$PLATFORM"');
+  assert.ok(pub >= 0 && pub < contract && contract < host && host < tests && tests < platform);
+  assert.match(runner, /set -euo pipefail/u);
+});
+
+test('iOS真机只在Release配置运行钱包两页UI测试且不触发有效钱包操作', () => {
+  assert.match(iosProject, /RunnerUITests\.xctest.*com\.apple\.product-type\.bundle\.ui-testing/su);
+  assert.match(iosProject, /RunnerTests\.xctest.*DEVELOPMENT_TEAM = MHYMVRN6FC/su);
+  assert.match(iosScheme, /<TestAction\s+buildConfiguration = "Release"/u);
+  assert.match(iosProject, /RunnerUITests\.xctestplan.*path = RunnerUITests\.xctestplan/su);
+  assert.match(iosScheme, /reference = "container:RunnerUITests\/RunnerUITests\.xctestplan"/u);
+  assert.doesNotMatch(iosScheme, /<Testables>/u);
+  assert.equal(iosUiTestPlan.defaultOptions.uiTestingScreenshotsLifetime, 'keepNever');
+  assert.deepEqual(iosUiTestPlan.testTargets.map(({ target }) => target.name), ['RunnerTests', 'RunnerUITests']);
+  assert.match(runner, /-only-testing:RunnerUITests -parallel-testing-enabled NO/u);
+  assert.match(runner, /-collect-test-diagnostics never/u);
+  assert.match(runner, /-destination "platform=iOS,id=\$device_id"/u);
+  assert.match(runner, /-resultBundlePath "\$BUILD_WORK_DIR\/ios-ui-tests\.xcresult"/u);
+  assert.match(createUiTest, /192 位熵，词数与安全性平衡/u);
+  assert.match(createUiTest, /XCTAssertEqual\(password\.frame\.width, optionWidth/u);
+  assert.doesNotMatch(createUiTest, /app\.buttons\["创建钱包"\]\.tap\(\)/u);
+  assert.match(importUiTest, /count: 23/u);
+  assert.match(importUiTest, /label CONTAINS %@", "助记词必须为 12、18 或 24 个单词"/u);
+  assert.match(importUiTest, /input\.typeText\(" zzzz"\)/u);
+  assert.doesNotMatch(importUiTest, /typeText\("(?:abandon|ability|able)/u);
+});
+
+test('iOS签名库由外部构建路径强制链接且保留全部FFI符号', () => {
+  assert.match(signerPodspec, /library_path = File\.expand_path\('libcitizenwallet_signer\.a', native_dir\)/u);
+  assert.doesNotMatch(signerPodspec, /s\.vendored_libraries\s*=/u);
+  assert.match(signerPodspec, /'OTHER_LDFLAGS' => "-force_load #\{library_path\} /u);
+  for (const symbol of [
+    'citizen_sr25519_derive_hard',
+    'citizen_sr25519_public_key',
+    'citizen_sr25519_sign',
+    'citizen_sr25519_verify',
+    'account_crypto_derive_key',
+    'account_crypto_x25519_public_key',
+    'account_crypto_seal',
+    'account_crypto_open',
+  ]) {
+    assert.ok(signerPodspec.includes(`-Wl,-u,_${symbol}`), `缺少链接符号 ${symbol}`);
+  }
+});
+
+// 执行真实装配入口，不启动 Flutter、相机或密钥操作。
+test('钱包平台装配读取唯一扁平来源并拒绝重复目标', () => {
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'citizenwallet-platform-')));
+  const script = fileURLToPath(new URL('../scripts/citizenwallet-run.sh', import.meta.url));
+  const source = fileURLToPath(new URL('..', import.meta.url));
+  try {
+    // 工具原件用独立夹具提供，避免继承宿主环境或读取已删除的产品副本。
+    const flutter = join(work, 'flutter');
+    const names = ['gradlew', 'gradlew.bat', 'gradle/wrapper/gradle-wrapper.jar'];
+    for (const name of names) {
+      const path = join(flutter, 'bin/cache/artifacts/gradle_wrapper', name);
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, 'synthetic wrapper ' + name);
+    }
+    for (const platform of ['android', 'ios']) {
+      const env = { ...process.env, FLUTTER_ROOT: flutter,
+        CITIZENWALLET_WORK_DIR: join(work, platform) };
+      delete env.CITIZENWALLET_PROJECT_ROOT;
+      const run = () => spawnSync('/bin/bash', [script, `prepare-${platform}`], { env, encoding: 'utf8' });
+      const prepared = run();
+      assert.equal(prepared.status, 0, prepared.stderr);
+      const project = prepared.stdout.trim();
+      const target = platform === 'ios' ? 'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme'
+        : 'android/gradle/wrapper/gradle-wrapper.properties';
+      const original = platform === 'ios' ? 'ios/Runner.xcscheme' : 'android/gradle-wrapper.properties';
+      assert.deepEqual(readFileSync(join(project, target)), readFileSync(join(source, original)));
+      assert.equal(lstatSync(join(project, target)).isSymbolicLink(), false);
+      assert.notEqual(run().status, 0, '重复目标不能覆盖已有工程');
+      for (const name of names) {
+        const output = join(project, 'android', name);
+        const original = join(flutter, 'bin/cache/artifacts/gradle_wrapper', name);
+        if (platform === 'android') {
+          assert.equal(lstatSync(output).isSymbolicLink(), false);
+          assert.deepEqual(readFileSync(output), readFileSync(original));
+        } else {
+          assert.equal(existsSync(output), false);
+        }
+        assert.equal(readFileSync(original, 'utf8'), 'synthetic wrapper ' + name);
+      }
+      if (platform === 'android') assert.ok(lstatSync(join(project, 'android/gradlew')).mode & 0o100);
+    }
+  } finally { rmSync(work, { recursive: true }); }
+});
+
+// 防止 AGP 9 只登记 Java 源集而漏编 Kotlin：APK 可构建成功，但真机找不到 MainActivity。
+test('Android入口及测试显式登记独立Kotlin源集', () => {
+  assert.ok(application.includes('sourceSets.getByName("main").kotlin.directories.apply { clear(); add("src") }'));
+  assert.ok(application.includes('sourceSets.getByName("test").kotlin.directories.clear()'));
+  assert.ok(application.includes('if (name.endsWith("UnitTestKotlin"))'));
+  assert.ok(application.includes('source(layout.projectDirectory.file("HardwareSecretvaultPluginTest.kt"))'));
+  assert.doesNotMatch(application, /setSrcDirs|include\("HardwareSecretvaultPluginTest/u);
+});
+
+test('Android插件注册表来自本轮外部Flutter工程', () => {
+  const javaSources = application.slice(application.indexOf('sourceSets.getByName("main").java.directories.apply'),
+    application.indexOf('sourceSets.getByName("main").java.directories.apply') + 260);
+  assert.ok(javaSources.includes('add(flutterProductRoot.resolve("android/app/src/main/java").absolutePath)'));
+});
