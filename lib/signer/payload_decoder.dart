@@ -5,7 +5,6 @@ import 'package:polkadart_keyring/polkadart_keyring.dart' show Keyring;
 
 import '../chain_constants.dart';
 import '../qr/generated/qr_action_registry.g.dart';
-import '../security/account_data_key_provision.dart';
 import 'institution_code.dart';
 import 'pallet_registry.dart';
 
@@ -203,37 +202,13 @@ class PayloadDecoder {
           return defaultAccountSwitch;
         }
       }
-      if (expectedAction == 'square_device_bind') {
-        final deviceBinding = _decodeSquareDeviceBind(raw);
+      if (expectedAction == 'mls_device_bind') {
+        final deviceBinding = _decodeMlsDeviceBind(raw);
         if (deviceBinding != null) return deviceBinding;
       }
       if (expectedAction == 'square_account_action') {
         final squareAction = _decodeSquareAccountAction(raw);
         if (squareAction != null) return squareAction;
-      }
-      if (expectedAction == 'account_data_key_provision') {
-        final request = AccountDataKeyProvisionRequest.decode(raw);
-        if (request != null) {
-          final fields = <String, String>{
-            'genesis_hash': _bytesToLowerHex(request.genesisHash),
-            'cid_number': request.cidNumber,
-            'binding_revision': request.bindingRevision.toString(),
-            'account_id': request.accountId,
-            'recipient_public_key': _bytesToLowerHex(
-              request.recipientPublicKey,
-            ),
-            'key_purposes': request.purposes
-                .map((entry) => '${entry.purpose}:${entry.context}')
-                .join(','),
-            'expires_at': request.expiresAt.toString(),
-          };
-          return DecodedPayload(
-            action: 'account_data_key_provision',
-            summary: '为 ${request.cidNumber} 的当前设备提供加密用途钥',
-            fields: fields,
-            reviewFields: fields,
-          );
-        }
       }
       if (expectedAction == 'publish') {
         final publish = _decodePublishAuthorization(raw);
@@ -320,6 +295,9 @@ class PayloadDecoder {
 
       // ── CitizenIdentity(10) · 公民链上投票/参选身份注册 + 注册局占号/吊销 ──
       if (palletIndex == PalletRegistry.citizenIdentityPallet) {
+        if (callIndex == PalletRegistry.selfOccupyCidCall) {
+          return _decodeSelfOccupyCid(bytes);
+        }
         if (callIndex == PalletRegistry.registerVotingIdentityCall) {
           return _decodeRegisterVotingIdentity(bytes);
         }
@@ -683,9 +661,9 @@ class PayloadDecoder {
     );
   }
 
-  /// 解码 P-256 设备子钥绑定载荷，字节与现有 `OP_SIGN_SQUARE_DEVICE_BIND=0x1C`
-  /// 完全一致：`cid_number || binding_revision || account_id || device_public_key || issued_at`。
-  static DecodedPayload? _decodeSquareDeviceBind(Uint8List bytes) {
+  /// 解码同一MLS公钥登记；当前CID绑定账户授权，签名域固定0x1C。
+  /// SCALE顺序：cid_number、binding_revision、account_id、public_key、issued_at。
+  static DecodedPayload? _decodeMlsDeviceBind(Uint8List bytes) {
     var offset = 0;
     final cid = _readCidNumber(bytes, offset);
     if (cid == null) return null;
@@ -700,16 +678,12 @@ class PayloadDecoder {
       return null;
     }
     offset = account.$2;
-    final devicePublicKey = _readStrictBoundedUtf8(
-      bytes,
-      offset,
-      maxLength: 130,
-    );
-    if (devicePublicKey == null ||
-        !RegExp(r'^04[0-9a-f]{128}$').hasMatch(devicePublicKey.$1)) {
+    final publicKey = _readStrictBoundedUtf8(bytes, offset, maxLength: 66);
+    if (publicKey == null ||
+        !RegExp(r'^0x[0-9a-f]{64}$').hasMatch(publicKey.$1)) {
       return null;
     }
-    offset = devicePublicKey.$2;
+    offset = publicKey.$2;
     if (offset + 8 != bytes.length) return null;
     final issuedAt = _readU64Le(bytes, offset);
     if (issuedAt <= 0) return null;
@@ -718,12 +692,12 @@ class PayloadDecoder {
       'cid_number': cid.$1,
       'binding_revision': bindingRevision.toString(),
       'account_id': account.$1,
-      'device_public_key': devicePublicKey.$1,
+      'public_key': publicKey.$1,
       'issued_at': issuedAt.toString(),
     };
     return DecodedPayload(
-      action: 'square_device_bind',
-      summary: '绑定 ${cid.$1} 的本机设备子钥',
+      action: 'mls_device_bind',
+      summary: '登记 ${cid.$1} 的本机MLS公钥',
       fields: fields,
       reviewFields: fields,
     );
@@ -2888,6 +2862,34 @@ class PayloadDecoder {
         'actor_role_code': roleRead.$1,
         'cid_number': cidRead.$1,
       },
+    );
+  }
+
+  /// 自助占号只有一个规范 SCALE CID 参数，绑定账户取外层签名者。
+  /// 只允许 CN 下的 CTZN/NATP 匿名类型；旧参数、尾字节及非规范长度均拒绝。
+  static DecodedPayload? _decodeSelfOccupyCid(Uint8List bytes) {
+    final cid = _readCidNumber(bytes, 2);
+    if (cid == null ||
+        bytes[2] != (cid.$1.length << 2) ||
+        !RegExp(r'^CN[0-9]{3}-(CTZN|NATP)[0-9]-[0-9]{9}-[0-9]{4}$')
+            .hasMatch(cid.$1) ||
+        !_hasValidSigningTail(bytes, cid.$2)) {
+      return null;
+    }
+    // 与 Runtime 的四字符盈利码 M1 校验一致，拒绝仅外形正确的 CID。
+    final parts = cid.$1.split('-');
+    final checksumInput =
+        '${parts[0]}${parts[1].substring(0, 4)}${parts[2]}${parts[3]}';
+    const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    var checksum = 0;
+    for (var i = 0; i < checksumInput.length; i++) {
+      checksum += (i + 1) * alphabet.indexOf(checksumInput[i]);
+    }
+    if (parts[1][4] != (checksum % 10).toString()) return null;
+    return DecodedPayload(
+      action: 'self_occupy_cid',
+      summary: '自助注册匿名身份：${cid.$1}',
+      fields: {'cid_number': cid.$1},
     );
   }
 

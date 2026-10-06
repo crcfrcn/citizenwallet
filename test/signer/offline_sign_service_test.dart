@@ -73,7 +73,7 @@ List<int> _scaleString(String value) {
   return <int>[..._compactU32(bytes.length), ...bytes];
 }
 
-List<int> _squareDeviceBindPayload({
+List<int> _mlsDeviceBindPayload({
   required String cidNumber,
   required String accountId,
   required int issuedAtMillis,
@@ -81,7 +81,7 @@ List<int> _squareDeviceBindPayload({
   ..._scaleString(cidNumber),
   ..._u64Le(4),
   ..._scaleString(accountId),
-  ..._scaleString('04${'ab' * 64}'),
+  ..._scaleString('0x${'ab' * 32}'),
   ..._u64Le(issuedAtMillis),
 ];
 
@@ -326,25 +326,25 @@ void main() {
       expect(service.verifyPayload(mismatch).rejectReason, contains('过期时间'));
     });
 
-    test('设备子钥绑定复用 0x1C，且只接受载荷账户和签发时间一致的请求', () async {
+    test('MLS设备登记复用 0x1C，且只接受载荷账户和签发时间一致的请求', () async {
       const cid = 'CN220-CTZN2-198805200-2026';
       final issuedAtMillis = DateTime.now().millisecondsSinceEpoch;
-      final payload = _squareDeviceBindPayload(
+      final payload = _mlsDeviceBindPayload(
         cidNumber: cid,
         accountId: signingAccount.accountId,
         issuedAtMillis: issuedAtMillis,
       );
       final request = _buildTestRequest(
-        requestId: 'offline-square-device-bind',
+        requestId: 'offline-mls-device-bind',
         signerPublicKey: signingAccount.accountId,
         payloadHex: '0x${_toHex(payload)}',
-        action: QrActions.squareDeviceBind,
+        action: QrActions.mlsDeviceBind,
         expiresAt: issuedAtMillis ~/ 1000 + 120,
       );
 
       final verification = service.verifyPayload(request);
       expect(verification.status, SignDecisionStatus.normal);
-      expect(verification.actionLabel, '设备子钥绑定');
+      expect(verification.actionLabel, 'MLS设备登记');
       expect(verification.decoded?.fields['cid_number'], cid);
       final response = await service.signParsedRequest(
         accountId: signingAccount.accountId,
@@ -360,10 +360,10 @@ void main() {
       );
 
       final mismatchedExpiry = _buildTestRequest(
-        requestId: 'offline-square-device-bind-expiry',
+        requestId: 'offline-mls-device-bind-expiry',
         signerPublicKey: signingAccount.accountId,
         payloadHex: '0x${_toHex(payload)}',
-        action: QrActions.squareDeviceBind,
+        action: QrActions.mlsDeviceBind,
         expiresAt: request.expiresAt! + 1,
       );
       expect(
@@ -598,35 +598,31 @@ void main() {
       expect(verification.decoded?.fields['expected_price_fen'], contains('分'));
     });
 
-    test(
-      'verifyPayload rejects platform price payload with mismatched action',
-      () {
-        const cid = 'GZ018-SFGYR-201206100-2026';
-        final cidBytes = cid.codeUnits;
-        const role = 'GENESIS_PRODUCT_MANAGER';
-        final roleBytes = role.codeUnits;
-        final price = List<int>.filled(16, 0)..[0] = 100;
-        final request = _buildTestRequest(
-          requestId: 'offline-platform-price-mismatch',
-          signerPublicKey: signingAccount.accountId,
-          payloadHex: _withSigningTailHex(
-            '0x${_toHex([34, 5, cidBytes.length << 2, ...cidBytes, roleBytes.length << 2, ...roleBytes, 0, ...price])}',
-          ),
-          action: QrActions.transferWithRemark,
-        );
+    test('verifyPayload rejects platform price payload with mismatched action', () {
+      const cid = 'GZ018-SFGYR-201206100-2026';
+      final cidBytes = cid.codeUnits;
+      const role = 'GENESIS_PRODUCT_MANAGER';
+      final roleBytes = role.codeUnits;
+      final price = List<int>.filled(16, 0)..[0] = 100;
+      final request = _buildTestRequest(
+        requestId: 'offline-platform-price-mismatch',
+        signerPublicKey: signingAccount.accountId,
+        payloadHex: _withSigningTailHex(
+          '0x${_toHex([34, 5, cidBytes.length << 2, ...cidBytes, roleBytes.length << 2, ...roleBytes, 0, ...price])}',
+        ),
+        action: QrActions.transferWithRemark,
+      );
 
-        final verification = service.verifyPayload(request);
-        expect(verification.status, SignDecisionStatus.reject);
-        expect(verification.rejectReason, contains('不匹配'));
-      },
-    );
+      final verification = service.verifyPayload(request);
+      expect(verification.status, SignDecisionStatus.reject);
+      expect(verification.rejectReason, contains('不匹配'));
+    });
 
     test('verifyPayload 拒绝普通链交易 32 字节 hash-only payload', () {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-hash-only-reject',
         signerPublicKey: signingAccount.accountId,
-        payloadHex:
-            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        payloadHex: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         action: QrActions.privateInstitutionGovernance,
       );
 
@@ -636,6 +632,171 @@ void main() {
       expect(verification.canSign, isFalse);
       expect(verification.actionLabel, '发起私权机构治理');
       expect(verification.rejectReason, contains('普通链交易不能只签 32 字节哈希'));
+    });
+
+    // 固定公开合成载荷，验证新动作可签及旧格式/伪装/错误链不能被放行。
+    for (final kind in ['CTZN', 'NATP']) {
+      test('verifyPayload 严格支持自助注册 $kind CID', () {
+        final cid = 'CN202-${kind}${kind == 'CTZN' ? 6 : 9}-123456789-1234';
+        final call = <int>[10, 5, ..._scaleString(cid)];
+        final request = _buildTestRequest(
+          requestId: 'self-occupy-$kind',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: _withSigningTailHex('0x${_toHex(call)}'),
+          action: 0x0a05,
+        );
+        final verified = service.verifyPayload(request);
+        expect(verified.canSign, isTrue);
+        expect(verified.actionLabel, '自助注册CID');
+        expect(verified.decoded?.fields['cid_number'], cid);
+        expect(
+          verified.decoded?.reviewFields['account_id'],
+          signingAccount.accountId,
+        );
+      });
+    }
+    for (final variant in [
+      'bare',
+      'truncated',
+      'extra',
+      'old',
+      'wrong_chain',
+      'wrong_version',
+      'wrong_action',
+      'wrong_type',
+      'noncanonical',
+      'wrong_checksum',
+    ]) {
+      test('verifyPayload 自助注册拒绝 $variant 载荷', () {
+        const cid = 'CN202-CTZN6-123456789-1234';
+        var call = <int>[10, 5, ..._scaleString(cid)];
+        if (variant == 'wrong_checksum') {
+          call = [10, 5, ..._scaleString('CN202-CTZN7-123456789-1234')];
+        }
+        if (variant == 'extra') call.add(0);
+        if (variant == 'old')
+          call.addAll([..._u64Le(1800000000), ...List.filled(64, 1)]);
+        if (variant == 'wrong_type')
+          call = [10, 5, ..._scaleString('CN202-SMTP6-123456789-1234')];
+        if (variant == 'noncanonical')
+          call = [10, 5, (cid.length << 2) | 1, 0, ...cid.codeUnits];
+        var payload = _withSigningTailHex(
+          '0x${_toHex(call)}',
+          genesisHash: variant == 'wrong_chain'
+              ? '0x${'11' * 32}'
+              : ChainConstants.genesisHash,
+          transactionVersion: variant == 'wrong_version'
+              ? ChainConstants.transactionVersion + 1
+              : ChainConstants.transactionVersion,
+        );
+        if (variant == 'bare') payload = '0x${_toHex(call)}';
+        if (variant == 'truncated')
+          payload = payload.substring(0, payload.length - 2);
+        final request = _buildTestRequest(
+          requestId: 'self-occupy-reject-$variant',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: payload,
+          action: variant == 'wrong_action' ? 0x0a06 : 0x0a05,
+        );
+        expect(service.verifyPayload(request).canSign, isFalse);
+      });
+    }
+
+    // 新动作沿用签名主体、时效和防重放校验，拒绝时不能触发密钥签名。
+    for (final invalid in ['expired', 'wrong_account']) {
+      test('signParsedRequest 自助注册拒绝 $invalid', () async {
+        final request = _buildTestRequest(
+          requestId: 'self-occupy-sign-$invalid',
+          signerPublicKey: invalid == 'wrong_account'
+              ? '0x${'aa' * 32}'
+              : signingAccount.accountId,
+          payloadHex: _withSigningTailHex(
+            '0x${_toHex([10, 5, ..._scaleString('CN202-CTZN6-123456789-1234')])}',
+          ),
+          action: 0x0a05,
+          expiresAt: invalid == 'expired'
+              ? DateTime.now().millisecondsSinceEpoch ~/ 1000 - 1
+              : null,
+        );
+        await expectLater(
+          service.signParsedRequest(
+            accountId: signingAccount.accountId,
+            request: request,
+          ),
+          throwsA(
+            isA<OfflineSignException>().having(
+              (e) => e.code,
+              'code',
+              invalid == 'expired'
+                  ? OfflineSignErrorCode.expired
+                  : OfflineSignErrorCode.accountMismatch,
+            ),
+          ),
+        );
+        expect(walletManager.signCallCount, 0);
+      });
+    }
+    test('signParsedRequest 自助注册签完整载荷且拒绝重放', () async {
+      final request = _buildTestRequest(
+        requestId: 'self-occupy-signed-once',
+        signerPublicKey: signingAccount.accountId,
+        payloadHex: _withSigningTailHex(
+          '0x${_toHex([10, 5, ..._scaleString('CN202-CTZN6-123456789-1234')])}',
+        ),
+        action: 0x0a05,
+      );
+      final response = await service.signParsedRequest(
+        accountId: signingAccount.accountId,
+        request: request,
+      );
+      expect(response.body.signerPublicKeyHex, signingAccount.accountId);
+      expect(
+        _verifySr25519(
+          signerPublicKeyHex: signingAccount.accountId,
+          message: QrSigner.signingBytesFor(request.body),
+          signatureHex: response.body.signatureHex,
+        ),
+        isTrue,
+      );
+      await expectLater(
+        service.signParsedRequest(
+          accountId: signingAccount.accountId,
+          request: request,
+        ),
+        throwsA(
+          isA<OfflineSignException>().having(
+            (e) => e.code,
+            'code',
+            OfflineSignErrorCode.replayed,
+          ),
+        ),
+      );
+      expect(walletManager.signCallCount, 1);
+    });
+
+    test('伪装为已登记转账动作的Revive载荷不能调用签名器', () async {
+      for (final call in [0, 1, 4, 7, 10, 11]) {
+        final request = _buildTestRequest(
+          requestId: 'offline-revive-$call',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: _withSigningTailHex(
+            '0x23${call.toRadixString(16).padLeft(2, '0')}00',
+          ),
+          action: 0x0400,
+        );
+        expect(
+          service.verifyPayload(request).status,
+          SignDecisionStatus.reject,
+        );
+        await expectLater(
+          service.signParsedRequest(
+            accountId: signingAccount.accountId,
+            request: request,
+          ),
+          throwsA(isA<OfflineSignException>()),
+        );
+      }
+      expect(walletManager.signCallCount, 0);
     });
 
     test('verifyPayload 拒绝未登记 action', () {
@@ -696,8 +857,7 @@ void main() {
     test('signParsedRequest should reject wrong signer public key', () async {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-0002',
-        signerPublicKey:
-            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        signerPublicKey: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         payloadHex: '0x0102',
         action: QrActions.login,
       );
@@ -727,8 +887,7 @@ void main() {
 
       expect(
         () => service.signParsedRequest(
-          accountId:
-              '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0',
+          accountId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0',
           request: request,
         ),
         throwsA(

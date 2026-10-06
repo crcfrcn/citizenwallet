@@ -787,13 +787,68 @@ void main() {
     );
   });
 
-  test('addAccount 指定序号:上界 1989 可加', () async {
+  test('addAccount 指定序号:上界 19890604 可加', () async {
     final created = await manager.importWallet(kDevPhrase);
     final top = await manager.addAccount(
       created.wallet.masterId,
       index: WalletManager.maxAccountIndex,
     );
     expect(top.accountIndex, WalletManager.maxAccountIndex);
+  });
+
+  test('高序号跳选、到顶顺序拒绝、空缺回填及读取签名一致', () async {
+    final created = await manager.importWallet(kDevPhrase);
+    final masterId = created.wallet.masterId;
+    for (final index in [1989, 1990, WalletManager.maxAccountIndex - 1]) {
+      await manager.addAccount(masterId, index: index);
+    }
+    final top = await manager.addAccount(masterId);
+    expect(top.accountIndex, 19890604);
+    await expectLater(
+      manager.addAccount(masterId),
+      throwsA(isA<WalletAuthException>()),
+    );
+    await expectLater(
+      manager.addAccount(masterId, index: top.accountIndex),
+      throwsA(isA<WalletAuthException>()),
+    );
+    await manager.addAccount(masterId, index: 8);
+    final accounts = await WalletManager().getAccounts(masterId);
+    expect(accounts.map((a) => a.accountIndex).toList(), [
+      0,
+      8,
+      1989,
+      1990,
+      19890603,
+      19890604,
+    ]);
+    final reference = await Keyring.sr25519.fromUri('$kDevPhrase//19890604');
+    final refId =
+        '0x${reference.bytes().map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+    expect(top.accountId, refId);
+    expect(
+      await manager.getAccountPrivateKey(top.accountId),
+      await WalletManager().getAccountPrivateKey(top.accountId),
+    );
+    final payload = Uint8List.fromList(List<int>.generate(48, (i) => i));
+    final signature = await WalletManager().signForAccount(
+      top.accountId,
+      payload,
+    );
+    expect(reference.verify(payload, signature), isTrue);
+  });
+
+  test('非法指定序号在硬件种子解封前拒绝且不新增账户', () async {
+    final created = await manager.importWallet(kDevPhrase);
+    final calls = hardwareVault.decryptCalls;
+    for (final index in [-1, 0, 19890605]) {
+      await expectLater(
+        manager.addAccount(created.wallet.masterId, index: index),
+        throwsA(isA<WalletAuthException>()),
+      );
+    }
+    expect(hardwareVault.decryptCalls, calls);
+    expect((await manager.getAccounts(created.wallet.masterId)).length, 1);
   });
 
   test('并发添加下一个账户在事务内分配不重复序号', () async {

@@ -404,4 +404,27 @@ void main() {
     expect(find.text('100'), findsOneWidget);
     await releasePage(tester);
   });
+  testWidgets('到顶禁用顺序添加并保留指定序号入口，八位徽章正常展示', (tester) async {
+    late Wallet wallet;
+    await tester.runAsync(() async {
+      final created = await WalletManager().importWallet(kDevPhrase);
+      wallet = created.wallet;
+      await WalletManager().addAccount(wallet.masterId, index: 19890604);
+      await tester.pumpWidget(
+        MaterialApp(home: WalletDetailPage(wallet: wallet)),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await tester.pump();
+    expect(find.text('19890604'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '添加账户'));
+    await tester.pumpAndSettle();
+    expect(find.text('已达账户序号上限'), findsOneWidget);
+    final tile = find
+        .ancestor(of: find.text('添加下一个账户'), matching: find.byType(InkWell))
+        .first;
+    expect(tester.widget<InkWell>(tile).onTap, isNull);
+    expect(find.text('指定序号添加'), findsOneWidget);
+    await releasePage(tester);
+  });
 }

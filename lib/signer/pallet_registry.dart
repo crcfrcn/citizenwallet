@@ -55,8 +55,7 @@ class PalletRegistry {
   /// `revoke_identity(actor_cid_number, cid_number)`。
   static const int revokeIdentityCall = 4;
 
-  /// `self_occupy_cid(cid_number, expires_at, citizen_signature)`。
-  /// 在线 CitizenApp 自助首次绑定入口；冷钱包当前不登记 decoder、不签该在线调用。
+  /// `self_occupy_cid(cid_number)`；绑定账户签完整交易，自付费并取得匿名身份。
   static const int selfOccupyCidCall = 5;
 
   /// `occupy_cid(actor_cid_number, actor_role_code, cid_number, account_id, expires_at, citizen_signature)`
@@ -228,6 +227,10 @@ class PalletRegistry {
   static const int removeAddressNameCall = 2;
   static const int setAddressCall = 3;
   static const int removeAddressCall = 4;
+
+  // Revive(35) 不登记冷签动作。现有 sr25519/QR_V1 不能提交 Ethereum 包装或
+  // SetOrigin 转换入口；普通 call/upload/map_account 亦不属于本钱包签名范围。
+  // 未识别请求必须红色拒签，禁止仅因存在 pallet35 就按原生交易签名。
 
   // ---- SquarePost (34) · 广场发布与会员订阅 ----
   static const int squarePostPallet = 34;

@@ -34,6 +34,23 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+// JNI使用产品统一CMake版本，避免Gradle请求另一版本。
+subprojects {
+    if (name == "jni") {
+        plugins.withId("com.android.library") {
+            extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+                externalNativeBuild.cmake.version = "3.31.6"
+            }
+        }
+    } else if (name == "app") {
+        plugins.withId("com.android.application") {
+            extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
+                externalNativeBuild.cmake.version = "3.31.6"
+            }
+        }
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }

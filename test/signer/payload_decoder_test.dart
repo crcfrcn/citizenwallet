@@ -350,49 +350,6 @@ void main() {
       );
     });
 
-    test('账户用途钥请求只在 action 14 下严格解码并拒绝重复用途', () {
-      const cid = 'CN220-CTZN2-198805200-2026';
-      const expiresAt = 1900000000;
-      final payload = <int>[
-        ...List<int>.filled(32, 0x11),
-        ...compactVec(cid),
-        ...u64Le(3),
-        ...List<int>.filled(32, 0x22),
-        ...List<int>.filled(32, 0x33),
-        ...compactU32(2),
-        1,
-        0,
-        6,
-        1,
-        ...u64Le(expiresAt),
-        ...List<int>.filled(16, 0x44),
-      ];
-
-      final decoded = PayloadDecoder.decode(
-        hexOf(payload),
-        expectedAction: 'account_data_key_provision',
-      );
-      expect(decoded?.action, 'account_data_key_provision');
-      expect(decoded?.fields['cid_number'], cid);
-      expect(decoded?.fields['binding_revision'], '3');
-      expect(decoded?.fields['account_id'], '0x${'22' * 32}');
-      expect(decoded?.fields['key_purposes'], '1:0,6:1');
-      expect(PayloadDecoder.decode(hexOf(payload)), isNull);
-
-      final duplicate = List<int>.from(payload);
-      final purposeOffset =
-          32 + compactVec(cid).length + 8 + 32 + 32 + compactU32(2).length;
-      duplicate[purposeOffset + 2] = 1;
-      duplicate[purposeOffset + 3] = 0;
-      expect(
-        PayloadDecoder.decode(
-          hexOf(duplicate),
-          expectedAction: 'account_data_key_provision',
-        ),
-        isNull,
-      );
-    });
-
     test('默认账户切换只在明确动作下严格解码完整账户顺序', () {
       final payload = <int>[
         ...List<int>.filled(32, 0x11),
@@ -433,39 +390,56 @@ void main() {
       );
     });
 
-    test('设备子钥绑定只在 action 13 下严格解码 CID、账户和 P-256 公钥', () {
+    test('MLS设备登记只接受动作13下的规范32字节公钥和完整载荷', () {
       const cid = 'CN220-CTZN2-198805200-2026';
-      const accountId =
-          '0x1111111111111111111111111111111111111111111111111111111111111111';
-      final devicePublicKey = '04${'ab' * 64}';
-      final payload = <int>[
+      final accountId = '0x${'11' * 32}';
+      final publicKey = '0x${'ab' * 32}';
+      List<int> payloadFor(String key, {int revision = 3}) => <int>[
         ...compactVec(cid),
-        ...u64Le(3),
+        ...u64Le(revision),
         ...compactVec(accountId),
-        ...compactVec(devicePublicKey),
+        ...compactVec(key),
         ...u64Le(1700000000123),
       ];
-
+      final payload = payloadFor(publicKey);
       final decoded = PayloadDecoder.decode(
         hexOf(payload),
-        expectedAction: 'square_device_bind',
+        expectedAction: 'mls_device_bind',
       );
-      expect(decoded?.action, 'square_device_bind');
+      expect(decoded?.action, 'mls_device_bind');
       expect(decoded?.fields['cid_number'], cid);
       expect(decoded?.fields['binding_revision'], '3');
       expect(decoded?.fields['account_id'], accountId);
-      expect(decoded?.fields['device_public_key'], devicePublicKey);
+      expect(decoded?.fields['public_key'], publicKey);
       expect(decoded?.fields['issued_at'], '1700000000123');
       expect(PayloadDecoder.decode(hexOf(payload)), isNull);
-
-      final malformed = List<int>.from(payload);
-      final keyOffset =
-          compactVec(cid).length + 8 + compactVec(accountId).length;
-      malformed[keyOffset + 3] = '5'.codeUnitAt(0);
+      for (final key in [
+        '04${'ab' * 64}',
+        '0x${'ab' * 31}',
+        '0x${'ab' * 33}',
+        '0x${'AB' * 32}',
+        '0X${'ab' * 32}',
+        '0x${'gg' * 32}',
+      ]) {
+        expect(
+          PayloadDecoder.decode(
+            hexOf(payloadFor(key)),
+            expectedAction: 'mls_device_bind',
+          ),
+          isNull,
+        );
+      }
       expect(
         PayloadDecoder.decode(
-          hexOf(malformed),
-          expectedAction: 'square_device_bind',
+          hexOf(payloadFor(publicKey, revision: 0)),
+          expectedAction: 'mls_device_bind',
+        ),
+        isNull,
+      );
+      expect(
+        PayloadDecoder.decode(
+          hexOf([...payload, 0]),
+          expectedAction: 'mls_device_bind',
         ),
         isNull,
       );
@@ -1270,43 +1244,48 @@ void main() {
       expect(decoded.reviewFields['cid_number'], 'CTZN-430100-0001');
     });
 
-    test('decodes admin_rebind_cid_account_id (call 7) and rejects self_occupy call 5', () {
-      // 链上 call 7 = admin_rebind_cid_account_id；已删除的旧批量绑定调用不得恢复。
-      // 布局:actor_cid actor_role cid new_account_id[32] revision:u64 expires:u64 signature:Vec。
-      final accountId = List<int>.filled(32, 0x11);
-      final signature = List<int>.filled(64, 0xdd);
-      final rebindCall = [
-        0x0a,
-        0x07,
-        ...compactVec(registryActorCid),
-        ...compactVec('REGISTRAR'),
-        ...compactVec('CTZN-430100-0001'),
-        ...accountId,
-        ...u64Le(7),
-        ...u64Le(1800000000),
-        ...compactU32(64),
-        ...signature,
-      ];
-      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(rebindCall)));
-      expect(decoded?.action, 'admin_rebind_cid_account_id');
-      expect(decoded?.fields['actor_cid_number'], registryActorCid);
-      expect(decoded?.fields['cid_number'], 'CTZN-430100-0001');
-      expect(decoded?.fields['new_account_id'], '0x${hexLower(accountId)}');
-      expect(decoded?.fields['expected_binding_revision'], '7');
-      expect(decoded?.fields['expires_at'], '1800000000');
+    test(
+      'decodes admin_rebind_cid_account_id and rejects obsolete call 5 layout',
+      () {
+        // 链上 call 7 = admin_rebind_cid_account_id；已删除的旧批量绑定调用不得恢复。
+        // 布局:actor_cid actor_role cid new_account_id[32] revision:u64 expires:u64 signature:Vec。
+        final accountId = List<int>.filled(32, 0x11);
+        final signature = List<int>.filled(64, 0xdd);
+        final rebindCall = [
+          0x0a,
+          0x07,
+          ...compactVec(registryActorCid),
+          ...compactVec('REGISTRAR'),
+          ...compactVec('CTZN-430100-0001'),
+          ...accountId,
+          ...u64Le(7),
+          ...u64Le(1800000000),
+          ...compactU32(64),
+          ...signature,
+        ];
+        final decoded = PayloadDecoder.decode(
+          hexOf(withSigningTail(rebindCall)),
+        );
+        expect(decoded?.action, 'admin_rebind_cid_account_id');
+        expect(decoded?.fields['actor_cid_number'], registryActorCid);
+        expect(decoded?.fields['cid_number'], 'CTZN-430100-0001');
+        expect(decoded?.fields['new_account_id'], '0x${hexLower(accountId)}');
+        expect(decoded?.fields['expected_binding_revision'], '7');
+        expect(decoded?.fields['expires_at'], '1800000000');
 
-      // CitizenIdentity call 5 = self_occupy_cid(自助路径),不在注册局冷签 decoder 覆盖内,须拒。
-      final snapshotCall = [
-        0x0a,
-        0x05,
-        1, // Province
-        ...compactVec('GZ'),
-      ];
-      expect(
-        PayloadDecoder.decode(hexOf(withSigningTail(snapshotCall))),
-        isNull,
-      );
-    });
+        // 旧省份快照布局不是当前 self_occupy_cid 的单 CID 参数，必须继续拒绝。
+        final snapshotCall = [
+          0x0a,
+          0x05,
+          1, // Province
+          ...compactVec('GZ'),
+        ];
+        expect(
+          PayloadDecoder.decode(hexOf(withSigningTail(snapshotCall))),
+          isNull,
+        );
+      },
+    );
 
     test('cast_referendum 夹带旧凭证字段时拒绝解码', () {
       // 当前投票只携带 proposal_id + approve，旧凭证尾必须拒绝。
@@ -1327,6 +1306,17 @@ void main() {
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
       expect(decoded!.action, 'finalize_proposal');
       expect(decoded.fields['proposal_id'], '15');
+    });
+
+    test('Revive35所有入口均拒绝原生冷签，零字节SetOrigin不增添二维码尾字段', () {
+      // pallet35 已由链端登记，但本钱包没有 Ethereum 账户或授权签名协议。
+      for (final call in [0, 1, 4, 7, 10, 11, 12, 13]) {
+        final payload = withSigningTail([35, call, 0]);
+        expect(PayloadDecoder.decode(hexOf(payload)), isNull);
+      }
+      // 原生扩展的字节金标继续只有 era/nonce/tip/mode、版本、两个hash和None。
+      expect(signingTail(), hasLength(77));
+      expect(signingTail().take(4), [0, 4, 0, 0]);
     });
 
     test('returns null for unknown pallet', () {

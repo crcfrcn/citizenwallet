@@ -6,8 +6,7 @@ export 'package:citizenwallet/qr/generated/qr_bodies.g.dart' show QrKind;
 /// 唯一事实源：`citizenchain/crates/qr-protocol/registry.json`。
 /// Golden fixtures:`citizenchain/crates/qr-protocol/tests/fixtures/*.json`
 ///
-/// 与 citizenapp/lib/qr/qr_protocols.dart 逐字节一致(两个独立 Flutter app,
-/// 无代码依赖,靠 fixture 对齐)。
+/// 由共享注册表正式生成并经一致性测试核对。
 class QrProtocols {
   QrProtocols._();
 
@@ -54,8 +53,7 @@ class QrActions {
   static int get citizenOccupy => _code('citizen_occupy');
   static int get citizenRebind => _code('citizen_rebind');
   static int get switchDefaultAccount => _code('switch_default_account');
-  static int get squareDeviceBind => _code('square_device_bind');
-  static int get accountDataKeyProvision => _code('account_data_key_provision');
+  static int get mlsDeviceBind => _code('mls_device_bind');
   static int get publish => _code('publish');
   static int get onchinaAdmin => _code('onchina_admin_action');
   static int get activateAdmin => _code('activate_admin_account');

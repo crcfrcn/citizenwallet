@@ -6,7 +6,6 @@ import 'package:citizenwallet/qr/bodies/sign_request_body.dart';
 import 'package:citizenwallet/qr/bodies/sign_response_body.dart';
 import 'package:citizenwallet/qr/bodies/user_contact_body.dart';
 import 'package:citizenwallet/qr/bodies/account_id_code_body.dart';
-import 'package:citizenwallet/qr/bodies/account_data_key_response_body.dart';
 
 /// 公民钱包接受的临时签名码最长有效期；限制异常长的防重放记录占用。
 const int maxQrRequestLifetimeSeconds = 24 * 60 * 60;
@@ -15,7 +14,7 @@ bool isQrRequestExpiryValid(int expiresAt, int nowSeconds) =>
     expiresAt > nowSeconds &&
     expiresAt - nowSeconds <= maxQrRequestLifetimeSeconds;
 
-/// QR_V1 统一 envelope。与 citizenapp/lib/qr/envelope.dart 逐字节一致。
+/// QR_V1统一信封；字段与码型由共享注册表生成的Schema严格验证。
 class QrEnvelope<T extends QrBody> {
   const QrEnvelope({
     required this.kind,
@@ -86,8 +85,6 @@ class QrEnvelope<T extends QrBody> {
         throw const FormatException('收款码请用「公民」App 扫描');
       case QrKind.accountIdCode:
         body = AccountIdCodeBody.fromJson(bodyRaw);
-      case QrKind.accountDataKeyResponse:
-        body = AccountDataKeyResponseBody.fromJson(bodyRaw);
     }
 
     return QrEnvelope<QrBody>(

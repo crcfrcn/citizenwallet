@@ -8,7 +8,6 @@ import 'package:pointycastle/digests/blake2b.dart';
 import 'package:citizenwallet/qr/bodies/sign_request_body.dart';
 import 'package:citizenwallet/qr/qr_protocols.dart';
 import 'package:citizenwallet/signer/qr_signer.dart';
-import 'package:citizenwallet/security/account_data_key_provision.dart';
 
 // 冷钱包哈希域金标锁(citizenwallet ⇔ citizenchain)。
 //
@@ -26,8 +25,7 @@ import 'package:citizenwallet/security/account_data_key_provision.dart';
 // 规范实现:citizenchain/runtime/primitives/src/sign.rs::signing_message
 // 契约:被签消息 = blake2_256( GMB(3B) || op_tag(1B) || payload )
 
-const String _vectorsPath =
-    'test/signer/fixtures/signing_domain_vectors.json';
+const String _vectorsPath = 'test/signer/fixtures/signing_domain_vectors.json';
 
 /// 测试签名公钥占位:哈希域摘要不含 b.u,取值不影响被签字节。
 const String _testSignerPublicKeyHex =
@@ -165,20 +163,18 @@ void main() {
       );
     });
 
-    test('OP_SIGN_ACCOUNT_DATA_KEY_PROVISION 走 0x22 专用入口产出链端金标摘要', () {
-      final vector = vectorNamed('OP_SIGN_ACCOUNT_DATA_KEY_PROVISION');
-      expect(
-        vector,
-        isNotNull,
-        reason: '真源缺少 OP_SIGN_ACCOUNT_DATA_KEY_PROVISION 向量',
-      );
-      final actual = accountDataKeyProvisionSigningMessage(
-        _hexToBytes(vector!['scale_payload_hex'] as String),
+    test('OP_SIGN_MLS_DEVICE_BIND保留0x1C并与链端金标一致', () {
+      final vector = vectorNamed('OP_SIGN_MLS_DEVICE_BIND')!;
+      final body = SignRequestBody.fromHex(
+        action: QrActions.mlsDeviceBind,
+        signerPublicKeyHex: _testSignerPublicKeyHex,
+        payloadHex: '0x${vector['scale_payload_hex']}',
       );
       expect(
-        _bytesToHex(actual),
-        (vector['message_hex'] as String).toLowerCase(),
+        _bytesToHex(QrSigner.signingBytesFor(body)),
+        vector['message_hex'],
       );
+      expect(vector['op_tag'], '0x1c');
     });
 
     test('OP_SIGN_PUBLISH 走 signingBytesFor 产出链端金标摘要', () {
@@ -203,10 +199,7 @@ void main() {
       expect(vectorNamed('cid_admin_rebind')?['op_tag'], '0x1f');
       expect(vectorNamed('OP_SIGN_SWITCH_DEFAULT_ACCOUNT')?['op_tag'], '0x21');
       expect(vectorNamed('OP_SIGN_SQUARE_ACTION')?['op_tag'], '0x1d');
-      expect(
-        vectorNamed('OP_SIGN_ACCOUNT_DATA_KEY_PROVISION')?['op_tag'],
-        '0x22',
-      );
+      expect(vectorNamed('OP_SIGN_MLS_DEVICE_BIND')?['op_tag'], '0x1c');
       expect(vectorNamed('OP_SIGN_PUBLISH')?['op_tag'], '0x24');
     });
   });

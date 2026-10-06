@@ -99,6 +99,39 @@ void main() {
     await releasePage(tester);
   });
 
+  testWidgets('未登记动作14显示拒绝且不提供可用签名入口', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final request = QrEnvelope<SignRequestBody>(
+      kind: QrKind.signRequest,
+      id: 'offline-reject-0014',
+      expiresAt: now + 90,
+      body: SignRequestBody.fromHex(
+        action: 14,
+        signerPublicKeyHex: signerPk,
+        payloadHex: '0x0102',
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OfflineSignPage(
+          account: account,
+          walletName: '钱包1',
+          raw: QrSigner().encodeRequest(request),
+        ),
+      ),
+    );
+    await ScreenshotGuard.waitForIdleForTest();
+    await tester.pump();
+    // 拒绝原因可同时出现在横幅和审阅区；安全边界由下方禁用签名按钮证明。
+    expect(find.text('未登记的签名动作，已拒绝签名'), findsWidgets);
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '确认签名'),
+    );
+    expect(button.onPressed, isNull);
+    expect(tester.takeException(), isNull);
+    await releasePage(tester);
+  });
+
   testWidgets('占号请求(空 b.u)渲染签名页不崩溃,展示自选绑定账户', (tester) async {
     // 回归:占号/换绑请求 b.u 留空,曾因展示行无条件求值 signerPublicKeyHex
     // (对空 u 抛 FormatException)导致整页崩溃。

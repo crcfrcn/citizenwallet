@@ -5,9 +5,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'app_theme.dart';
 import '../qr/qr_protocols.dart';
-import '../qr/envelope.dart';
-import '../qr/bodies/account_data_key_response_body.dart';
-import '../qr/bodies/sign_response_body.dart';
 import '../signer/field_labels.dart';
 import '../signer/offline_sign_service.dart';
 import '../signer/qr_signer.dart';
@@ -40,7 +37,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
   Timer? _timer;
   bool _signing = false;
   SignRequestEnvelope? _request;
-  QrEnvelope<QrBody>? _response;
+  SignResponseEnvelope? _response;
   OfflineSignVerification? _verification;
   String? _parseError;
   int _remainingSeconds = 0;
@@ -148,18 +145,10 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
       _signing = true;
     });
     try {
-      final QrEnvelope<QrBody> response;
-      if (request.body.action == QrActions.accountDataKeyProvision) {
-        response = await _offlineSignService.provisionAccountDataKeys(
-          accountId: widget.account.accountId,
-          request: request,
-        );
-      } else {
-        response = await _offlineSignService.signParsedRequest(
-          accountId: widget.account.accountId,
-          request: request,
-        );
-      }
+      final response = await _offlineSignService.signParsedRequest(
+        accountId: widget.account.accountId,
+        request: request,
+      );
       if (!mounted ||
           epoch != _securityEpoch ||
           !ScreenshotGuard.canDisplaySensitiveContent)
@@ -446,14 +435,9 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
     );
   }
 
-  Widget _buildResponseView(QrEnvelope<QrBody> response) {
+  Widget _buildResponseView(SignResponseEnvelope response) {
     final responseJson = response.toRawJson();
-    final signerPublicKey = switch (response.body) {
-      SignResponseBody body => body.signerPublicKeyHex,
-      AccountDataKeyResponseBody body => body.signerPublicKeyHex,
-      _ => '',
-    };
-    final isDataKeyResponse = response.kind == QrKind.accountDataKeyResponse;
+    final signerPublicKey = response.body.signerPublicKeyHex;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -461,9 +445,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
         _buildBanner(
           color: AppTheme.success,
           icon: Icons.check_circle_rounded,
-          text: isDataKeyResponse
-              ? '用途钥已加密，请用公民扫描下方响应二维码'
-              : '签名已完成，请用在线手机扫描下方签名响应二维码',
+          text: '签名已完成，请用在线手机扫描下方签名响应二维码',
         ),
         const SizedBox(height: 24),
         // QR 码容器

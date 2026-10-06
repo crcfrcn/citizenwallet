@@ -339,7 +339,10 @@ node_bin="${CITIZENWALLET_NODE_BIN:?本机Build必须提供绝对Node工具路�
 # 编译宿主 FFI 动态库，再运行 Flutter 测试；测试失败立即阻止后续平台编译与安装。
 echo "==> 编译宿主签名库并运行钱包测试..."
 "$SCRIPT_DIR/build-signer-native.sh" host
+# 测试缓存留在源码外工程视图，避免相对路径重复拼接越界。
+flutter config --build-dir=test-build >/dev/null
 flutter test --no-pub
+flutter config --build-dir="$FLUTTER_BUILD_RELATIVE" >/dev/null
 # Isar 与 QR 生成文件已经纳入仓库。本机四端编译只消费同一份源码，禁止两个平台在
 # 构建过程中同时运行 build_runner 改写源文件。
 

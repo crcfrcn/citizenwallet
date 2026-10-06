@@ -10,7 +10,6 @@ import 'package:citizenwallet/wallet/native_sr25519.dart';
 import 'package:citizenwallet/chain_constants.dart';
 import 'package:citizenwallet/isar/wallet_isar.dart';
 import 'package:citizenwallet/qr/qr_protocols.dart';
-import 'package:citizenwallet/security/account_data_key_provision.dart';
 import 'package:citizenwallet/signer/qr_signer.dart';
 import 'package:citizenwallet/wallet/wallet_secure_keys.dart';
 
@@ -265,13 +264,18 @@ class WalletManager {
   }
 
   /// 账户序号上界（`//index` 的 index 最大值;账户0 为创建时主账户）。
-  static const int maxAccountIndex = 1989;
+  // 本产品独立维护可选派生范围；仅保存实际选择的账户，不预生成整个范围。
+  static const int maxAccountIndex = 19890604;
 
   /// 在指定钱包下新增账户：读存储种子，派生 `//index`（不产生新助记词）。
   ///
   /// [index] 为空 = 添加"下一个"(max+1);非空 = 指定序号(`1..maxAccountIndex`,
   /// 用于恢复非连续账户 / 加别处已注资的特定账户)。序号可非连续。校验先于读种子。
   Future<Account> addAccount(String masterId, {int? index}) async {
+    // 非法显式序号在读取种子前拒绝；事务内仍复核范围和重复以保护最终写入。
+    if (index != null && (index < 1 || index > maxAccountIndex)) {
+      throw const WalletAuthException('账户序号需在 1–$maxAccountIndex');
+    }
     final isar = await WalletIsar.instance.db();
     final wallet = await isar.walletEntitys
         .filter()
@@ -504,58 +508,6 @@ class WalletManager {
   // ── 签名（按账户；读种子现场派生，签名完成立即清零可控密钥缓冲）──
   Future<Uint8List> signForAccount(String accountId, Uint8List payload) =>
       _signWithAccount(accountId, payload);
-
-  /// 一次生物识别内完成冷账户用途钥派生、X25519/AES-GCM 封装和 `0x22` 授权签名。
-  /// 账户 child、用途钥和一次性发送私钥都只在内存短暂存在，用后立即清零。
-  Future<({AccountDataKeyProvisionMaterial material, Uint8List signature})>
-  provisionAccountDataKeys({
-    required String accountId,
-    required AccountDataKeyProvisionRequest request,
-  }) async {
-    if (request.expiresAt <= DateTime.now().millisecondsSinceEpoch ~/ 1000) {
-      throw const WalletAuthException('用途钥请求已过期，请重新扫描');
-    }
-    final isar = await WalletIsar.instance.db();
-    final account = await isar.accountEntitys
-        .filter()
-        .accountIdEqualTo(accountId)
-        .findFirst();
-    if (account == null || request.accountId != accountId) {
-      throw const WalletAuthException('用途钥请求账户与当前账户不一致');
-    }
-    final seed = await _readMasterMiniSecretKey(account.masterId);
-    if (seed == null) {
-      throw const WalletAuthException('密钥不可用，请重新导入钱包');
-    }
-    try {
-      final child = _childMiniSecret(seed, account.accountIndex);
-      final childBytes = Uint8List.fromList(child);
-      try {
-        if (_accountIdFromBytes(NativeSr25519.publicKeyOf(childBytes)) !=
-            accountId) {
-          throw const WalletAuthException('本地签名密钥与账户不一致，请重新导入钱包');
-        }
-        final material = createAccountDataKeyProvision(
-          request: request,
-          accountSecret: childBytes,
-        );
-        final message = accountDataKeyProvisionSigningMessage(
-          material.authorizationPayload,
-        );
-        try {
-          final signature = NativeSr25519.sign(childBytes, message);
-          return (material: material, signature: signature);
-        } finally {
-          message.fillRange(0, message.length, 0);
-        }
-      } finally {
-        childBytes.fillRange(0, childBytes.length, 0);
-        _zeroList(child);
-      }
-    } finally {
-      _zeroList(seed);
-    }
-  }
 
   Future<WalletSignResult> signUtf8ForAccount(
     String accountId,

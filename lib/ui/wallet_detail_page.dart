@@ -156,11 +156,13 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
     }
   }
 
-  int get _nextIndex =>
-      _accounts
-          .map((e) => e.accountIndex)
-          .fold<int>(-1, (m, e) => e > m ? e : m) +
-      1;
+  // 只作展示；最终编号仍由本产品WalletManager在写事务内分配。
+  int? get _nextIndex {
+    final maximum = _accounts
+        .map((e) => e.accountIndex)
+        .fold<int>(-1, (m, e) => e > m ? e : m);
+    return maximum >= WalletManager.maxAccountIndex ? null : maximum + 1;
+  }
 
   /// 混合式添加:默认"下一个" + 高级"指定序号"(恢复非连续账户 / 特定注资账户)。
   void _showAddAccountSheet() {
@@ -185,11 +187,13 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
               _sheetItem(
                 icon: Icons.add_circle_outline,
                 label: '添加下一个账户',
-                subtitle: '将派生 //$_nextIndex',
-                onTap: () {
-                  Navigator.pop(context);
-                  _doAdd();
-                },
+                subtitle: _nextIndex == null ? '已达账户序号上限' : '将派生 //$_nextIndex',
+                onTap: _nextIndex == null
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        _doAdd();
+                      },
               ),
               const SizedBox(height: 8),
               _sheetItem(
@@ -212,7 +216,7 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
     required IconData icon,
     required String label,
     required String subtitle,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
   }) {
     return Material(
       color: Colors.transparent,
@@ -555,7 +559,7 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
   }
 
   /// 序号徽章:两位数以内 `#xx` 单行居中;三位数起 `#` 缩小减淡挪到方框左上角,
-  /// 数字另起一行居中并按位数自动缩小(序号上限 //1989,整串单行会撑满方框)。
+  /// 数字另起一行居中并按位数自动缩小(序号上限 //19890604,整串单行会撑满方框)。
   Widget _buildIndexBadge(int index) {
     const numberStyle = TextStyle(
       fontSize: 13,

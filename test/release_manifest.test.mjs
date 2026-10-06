@@ -127,6 +127,24 @@ test('钱包源码身份来自唯一产品包名而非检出目录名称', conte
 });
 
 test('Android从真实产品源码根启动Gradle并把可写状态放入外部工作目录', () => {
+  // 中文注释：JNI只消费唯一CMake版本，不修改上游插件或要求另一套工具。
+  const jni = root.match(/if \(name == "jni"\) \{([\s\S]*?)\n    \}/u)?.[1];
+  assert.equal(typeof jni, 'string');
+  assert.match(jni, /plugins\.withId\("com\.android\.library"\)/u);
+  assert.match(jni, /extensions\.configure<com\.android\.build\.api\.dsl\.LibraryExtension>/u);
+  assert.match(jni, /externalNativeBuild\.cmake\.version = "3\.31\.6"/u);
+  const appCmake = root.match(/else if \(name == "app"\) \{([\s\S]*?)\n    \}/u)?.[1];
+  assert.equal(typeof appCmake, 'string');
+  assert.match(appCmake, /plugins\.withId\("com\.android\.application"\)/u);
+  assert.match(appCmake, /extensions\.configure<com\.android\.build\.api\.dsl\.ApplicationExtension>/u);
+  assert.match(appCmake, /externalNativeBuild\.cmake\.version = "3\.31\.6"/u);
+  assert.equal((root.match(/externalNativeBuild\.cmake\.version/g) ?? []).length, 2);
+  // 两处版本必须在应用求值锁定DSL之前登记。
+  const evaluation = root.indexOf('project.evaluationDependsOn(":app")');
+  assert.ok(evaluation > 0);
+  for (const version of root.matchAll(/externalNativeBuild\.cmake\.version/g)) {
+    assert.ok(version.index < evaluation, 'CMake版本登记不得晚于应用求值');
+  }
   assert.match(settings, /System\.getenv\("CITIZENWALLET_PROJECT_ROOT"\)/u);
   assert.match(settings, /settingsDir\.parentFile/u);
   assert.match(settings, /resolve\("android\/local\.properties"\)/u);
@@ -187,6 +205,31 @@ test('本机钱包Build在平台编译前先运行依赖宿主FFI的Flutter测�
   assert.match(runner, /set -euo pipefail/u);
 });
 
+// 中文注释：执行真实测试段，验证输出恢复及失败阻断；不执行编译或钱包操作。
+test('宿主测试缓存保持工程视图内，成功恢复平台输出且失败阻断', () => {
+  const begin = runner.indexOf('flutter config --build-dir=test-build');
+  const endText = 'flutter config --build-dir="$FLUTTER_BUILD_RELATIVE" >/dev/null';
+  const end = runner.indexOf(endText, begin) + endText.length;
+  assert.ok(begin > 0 && end > begin);
+  const fragment = runner.slice(begin, end);
+  for (const status of [0, 73]) {
+    const result = spawnSync('/bin/bash', ['-c',
+      'set -euo pipefail\nFLUTTER_BUILD_RELATIVE=../../../../work/flutter\n'
+      + 'flutter() { case "$1" in config) printf "%s\\n" "$2" >&2;; test) printf "%s\\n" "$*" >&2; return "$TEST_STATUS";; *) return 90;; esac; }\n'
+      + fragment + '\nprintf "platform-ready"'], {
+      env: { TEST_STATUS: String(status) }, encoding: 'utf8', timeout: 3000,
+    });
+    assert.equal(result.status, status, result.stderr);
+    assert.deepEqual(result.stderr.trim().split('\n'), status === 0
+      ? ['--build-dir=test-build', 'test --no-pub', '--build-dir=../../../../work/flutter']
+      : ['--build-dir=test-build', 'test --no-pub']);
+    assert.equal(result.stdout, status === 0 ? 'platform-ready' : '');
+  }
+  const project = '/fixture/work/project';
+  const cache = resolve(project, 'test-build', 'test_cache', 'test-build', 'cache.dill');
+  assert.ok(cache.startsWith(project + '/'));
+});
+
 test('iOS真机只在Release配置运行钱包两页UI测试且不触发有效钱包操作', () => {
   assert.match(iosProject, /RunnerUITests\.xctest.*com\.apple\.product-type\.bundle\.ui-testing/su);
   assert.match(iosProject, /RunnerTests\.xctest.*DEVELOPMENT_TEAM = MHYMVRN6FC/su);
@@ -209,19 +252,16 @@ test('iOS真机只在Release配置运行钱包两页UI测试且不触发有效�
   assert.doesNotMatch(importUiTest, /typeText\("(?:abandon|ability|able)/u);
 });
 
-test('iOS签名库由外部构建路径强制链接且保留全部FFI符号', () => {
+test('iOS签名库只强制链接四个sr25519导出', () => {
   assert.match(signerPodspec, /library_path = File\.expand_path\('libcitizenwallet_signer\.a', native_dir\)/u);
   assert.doesNotMatch(signerPodspec, /s\.vendored_libraries\s*=/u);
+  assert.doesNotMatch(signerPodspec, /account_crypto_/u);
   assert.match(signerPodspec, /'OTHER_LDFLAGS' => "-force_load #\{library_path\} /u);
   for (const symbol of [
     'citizen_sr25519_derive_hard',
     'citizen_sr25519_public_key',
     'citizen_sr25519_sign',
     'citizen_sr25519_verify',
-    'account_crypto_derive_key',
-    'account_crypto_x25519_public_key',
-    'account_crypto_seal',
-    'account_crypto_open',
   ]) {
     assert.ok(signerPodspec.includes(`-Wl,-u,_${symbol}`), `缺少链接符号 ${symbol}`);
   }
@@ -284,4 +324,53 @@ test('Android插件注册表来自本轮外部Flutter工程', () => {
   const javaSources = application.slice(application.indexOf('sourceSets.getByName("main").java.directories.apply'),
     application.indexOf('sourceSets.getByName("main").java.directories.apply') + 260);
   assert.ok(javaSources.includes('add(flutterProductRoot.resolve("android/app/src/main/java").absolutePath)'));
+});
+
+test('原生构建只检查当前Rust目标库，缺失或查询失败不得自动补装', context => {
+  const native = readFileSync(new URL('../scripts/build-signer-native.sh', import.meta.url), 'utf8');
+  const ensure = native.match(/^ensure_target\(\) \{\n[\s\S]*?^\}/mu)?.[0];
+  assert.ok(ensure, '目标库检查函数存在');
+  assert.doesNotMatch(native, /rustup|sh[.]rustup[.]rs/u);
+  const fixture = mkdtempSync(join(tmpdir(), 'wallet-rust-target-'));
+  context.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const library = join(fixture, 'target libraries');
+  mkdirSync(library);
+  const core = join(library, 'libcore-fixture.rlib');
+  const standard = join(library, 'libstd-fixture.rlib');
+  const trace = join(fixture, 'query');
+  // 运行真实检查函数；仅模拟Rust查询与标准库文件，不执行编译或下载。
+  function run(mode = 'ready', directory = library) {
+    const script = [
+      'set -euo pipefail',
+      'rustc() { printf "%s\\n" "$*" >"$TRACE"; [[ "$MODE" != query_failure ]] || return 85; printf "%s" "$LIBDIR"; }',
+      'rustup() { echo "禁止调用安装器" >&2; exit 95; }',
+      ensure,
+      'ensure_target aarch64-linux-android',
+    ].join('\n');
+    return spawnSync('/bin/bash', ['-c', script], {
+      env: { ...process.env, TRACE: trace, MODE: mode, LIBDIR: directory },
+      encoding: 'utf8', timeout: 3000,
+    });
+  }
+  writeFileSync(core, 'fixture');
+  writeFileSync(standard, 'fixture');
+  const ready = run();
+  assert.equal(ready.status, 0, ready.stderr);
+  assert.equal(readFileSync(trace, 'utf8'), '--print target-libdir --target aarch64-linux-android\n');
+  for (const missing of [standard, core]) {
+    unlinkSync(missing);
+    const rejected = run();
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /缺少已安装目标库/u);
+    assert.doesNotMatch(rejected.stderr, /禁止调用安装器/u);
+    writeFileSync(missing, 'fixture');
+  }
+  for (const [mode, directory] of [
+    ['query_failure', library], ['ready', 'relative'],
+    ['ready', join(fixture, 'not-installed')],
+  ]) {
+    const rejected = run(mode, directory);
+    assert.notEqual(rejected.status, 0);
+    assert.doesNotMatch(rejected.stderr, /禁止调用安装器/u);
+  }
 });

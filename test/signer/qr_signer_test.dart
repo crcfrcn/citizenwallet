@@ -107,6 +107,21 @@ void main() {
       );
     });
 
+    test('未知码型6不能进入签名请求或通用二维码解析', () {
+      final envelope = validEnvelope()..['k'] = 6;
+      expect(
+        () => signer.parseRequest(jsonEncode(envelope)),
+        throwsA(
+          isA<QrSignException>().having(
+            (error) => error.code,
+            'code',
+            QrSignErrorCode.invalidFormat,
+          ),
+        ),
+      );
+      expect(() => QrEnvelope.fromJson(envelope), throwsFormatException);
+    });
+
     test('拒绝错误协议版本', () {
       final json = validEnvelope()..['p'] = 'WRONG_PROTO';
       expect(

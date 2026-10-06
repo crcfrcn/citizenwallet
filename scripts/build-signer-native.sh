@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # 编译 CitizenWallet 冷钱包原生密码学库，放到 Flutter 能自动打包的位置。
 #
-# sr25519 与账户用途钥实现分别来自 citizenwallet/rust/src/sr25519.rs、citizenwallet/rust/src/account_crypto.rs，
-# 均属于本产品；本库是冷端 FFI 外壳（冷钱包永久离线、不需要链）。
+# sr25519签名实现只属于citizenwallet/rust/src/sr25519.rs。
+# 本库是冷端FFI外壳，永久离线且不需要链。
 #
-# 前置条件：安装 Rust (rustup)
-#   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# 前置条件：当前Rust编译器已具备目标平台标准库；本脚本只读检查，不自动安装。
 #
 # 用法：
 #   ./scripts/build-signer-native.sh            # 编译所有平台
@@ -41,14 +40,18 @@ if not target.is_absolute() or target.resolve().is_relative_to(source.resolve())
 CHECK_TARGET
 
 ensure_target() {
-  local target="$1"
-  if ! rustup target list --installed | grep -q "$target"; then
-    echo "安装 Rust 目标: $target"
-    rustup target add "$target"
-  fi
+  local target="$1" target_lib
+  # 只检查当前Rust编译器已有的目标库；缺失即停止，构建不得自动安装工具。
+  target_lib="$(rustc --print target-libdir --target "$target")" || return 1
+  [[ "$target_lib" == /* && -d "$target_lib" ]] \
+    || { echo "错误: Rust目标库目录无效：$target" >&2; return 1; }
+  local core_libraries=("$target_lib"/libcore-*.rlib)
+  local std_libraries=("$target_lib"/libstd-*.rlib)
+  [[ -f "${core_libraries[0]}" && -f "${std_libraries[0]}" ]] \
+    || { echo "错误: 当前Rust缺少已安装目标库：${target}；构建停止" >&2; return 1; }
 }
 
-# 两组 C 符号必须齐全，否则 Dart 侧 lookupFunction 会在运行时才失败。
+# 4个sr25519 C符号必须齐全，禁止交付额外用途钥符号，否则 Dart 侧 lookupFunction 会在运行时才失败。
 # 注意平台差异：ELF 用 -D，Mach-O 用 -g，用错标志会误判为 0。
 verify_symbols() {
   local lib="$1"
@@ -63,14 +66,14 @@ verify_symbols() {
     echo "错误: 未找到 llvm-nm，不能验证原生库导出符号。"
     return 1
   fi
-  local signer_count account_crypto_count
+  local signer_count removed_export_count
   signer_count="$("$nm_bin" "$nm_flag" "$lib" 2>/dev/null | grep -c 'citizen_sr25519' || true)"
-  account_crypto_count="$("$nm_bin" "$nm_flag" "$lib" 2>/dev/null | grep -c 'account_crypto_' || true)"
-  if [ "$signer_count" != "4" ] || [ "$account_crypto_count" != "4" ]; then
-    echo "错误: $lib 符号不完整（citizen_sr25519_*=$signer_count/4, account_crypto_*=$account_crypto_count/4）"
+  removed_export_count="$("$nm_bin" "$nm_flag" "$lib" 2>/dev/null | grep -c 'account_crypto_' || true)"
+  if [ "$signer_count" != "4" ] || [ "$removed_export_count" != "0" ]; then
+    echo "错误: $lib 符号不完整（citizen_sr25519_*=$signer_count/4, 禁用导出=$removed_export_count/0）"
     return 1
   fi
-  echo "    符号检查通过：citizen_sr25519_*=4, account_crypto_*=4"
+  echo "    符号检查通过：citizen_sr25519_*=4, 禁用导出=0"
 }
 
 verify_android_package() {
@@ -111,10 +114,10 @@ verify_ios_package() {
   [[ "$(printf '%s\n' "$symbols" | grep -c '^citizen_sr25519_' || true)" = "4" ]] || {
     echo "错误: iOS Runner 的 citizen_sr25519_* 符号不完整。"; return 1;
   }
-  [[ "$(printf '%s\n' "$symbols" | grep -c '^account_crypto_' || true)" = "4" ]] || {
-    echo "错误: iOS Runner 的 account_crypto_* 符号不完整。"; return 1;
+  [[ "$(printf '%s\n' "$symbols" | grep -c '^account_crypto_' || true)" = "0" ]] || {
+    echo "错误: iOS Runner包含禁用的用途钥导出。"; return 1;
   }
-  echo "iOS 包原生库门禁通过：arm64 与两组 FFI 符号完整"
+  echo "iOS 包原生库门禁通过：arm64与4个sr25519 FFI符号完整，禁用导出为零"
 }
 
 build_android() {

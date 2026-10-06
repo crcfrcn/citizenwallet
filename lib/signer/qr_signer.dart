@@ -50,8 +50,8 @@ class QrSigner {
   /// 本机默认账户切换；与 primitives::sign::OP_SIGN_SWITCH_DEFAULT_ACCOUNT 同值。
   static const int _opSignSwitchDefaultAccount = 0x21;
 
-  /// 广场/Chat P-256 设备子钥绑定；复用 primitives 既有 0x1C 域。
-  static const int _opSignSquareDeviceBind = 0x1c;
+  /// 同一MLS公钥登记；与primitives的OP_SIGN_MLS_DEVICE_BIND=0x1C一致。
+  static const int _opSignMlsDeviceBind = 0x1c;
 
   /// 广场账户敏感动作；与 primitives::sign::OP_SIGN_SQUARE_ACTION 同值。
   static const int _opSignSquareAction = 0x1d;
@@ -195,18 +195,14 @@ class QrSigner {
     if (body.action == QrActions.switchDefaultAccount) {
       return _gmbSigningMessage(_opSignSwitchDefaultAccount, payload);
     }
-    if (body.action == QrActions.squareDeviceBind) {
-      return _gmbSigningMessage(_opSignSquareDeviceBind, payload);
+    if (body.action == QrActions.mlsDeviceBind) {
+      return _gmbSigningMessage(_opSignMlsDeviceBind, payload);
     }
     if (body.action == QrActions.squareAccountAction) {
       return _gmbSigningMessage(_opSignSquareAction, payload);
     }
     if (body.action == QrActions.publish) {
       return _gmbSigningMessage(_opSignPublish, payload);
-    }
-    if (body.action == QrActions.accountDataKeyProvision) {
-      // 真正签名内容还必须包含发送公钥、nonce 和密文摘要；普通签名路径无法构造。
-      return Uint8List(0);
     }
     if (QrActions.isChainAction(body.action) && payload.length > 256) {
       final digest = Blake2bDigest(digestSize: 32)
