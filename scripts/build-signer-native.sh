@@ -27,7 +27,19 @@ TARGET="${1:-all}"
 
 # 所有本机编译（包括宿主测试）都使用产品源码外目录；调用方可以为并行任务
 # 提供独立路径，普通开发者直接调用时使用系统临时目录。
-CITIZENWALLET_NATIVE_WORK_DIR="${CITIZENWALLET_NATIVE_WORK_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/citizenwallet/native}"
+# 所有独立入口的工具临时状态归本产品target；宿主已交付的产品工作根继续归当前任务。
+PRODUCT_TEMP_SCRIPT="${BASH_SOURCE[0]}"
+while [[ -L "$PRODUCT_TEMP_SCRIPT" ]]; do
+  PRODUCT_TEMP_LINK="$(readlink "$PRODUCT_TEMP_SCRIPT")"
+  [[ "$PRODUCT_TEMP_LINK" == /* ]] || PRODUCT_TEMP_LINK="$(cd "$(dirname "$PRODUCT_TEMP_SCRIPT")" && pwd -P)/$PRODUCT_TEMP_LINK"
+  PRODUCT_TEMP_SCRIPT="$PRODUCT_TEMP_LINK"
+done
+PRODUCT_TEMP_SOURCE="$(cd "$(dirname "$PRODUCT_TEMP_SCRIPT")/.." && pwd -P)"
+PRODUCT_TARGET_TEMP_ROOT="$("${PRODUCT_NODE_BIN:-${NODE:-node}}" "$PRODUCT_TEMP_SOURCE/scripts/build.mjs" temporary-root "${PLATFORM:-${platform:-}}" 'ios')" || exit 1
+if [[ -z "${PRODUCT_WORK_DIR:-}" && "${TMPDIR:-}" != "$PRODUCT_TEMP_SOURCE/target/"* ]]; then
+  export TMPDIR="$PRODUCT_TARGET_TEMP_ROOT/"
+fi
+CITIZENWALLET_NATIVE_WORK_DIR="${CITIZENWALLET_NATIVE_WORK_DIR:-${RUNNER_TEMP:-${TMPDIR:-$PRODUCT_TARGET_TEMP_ROOT}}/citizenwallet/native}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/cargo-target}"
 export CITIZENWALLET_NATIVE_ANDROID_DIR="${CITIZENWALLET_NATIVE_ANDROID_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/android}"
 export CITIZENWALLET_NATIVE_IOS_DIR="${CITIZENWALLET_NATIVE_IOS_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/ios}"

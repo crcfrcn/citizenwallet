@@ -36,6 +36,18 @@
         {
           "id": "posix",
           "version": "27.0"
+        },
+        {
+          "id": "bash",
+          "version": "5.3.20"
+        },
+        {
+          "id": "grep",
+          "version": "3.12"
+        },
+        {
+          "id": "sed",
+          "version": "4.10"
         }
       ],
       "locks": [
@@ -120,8 +132,25 @@
             "id": "rust",
             "version": "1.97.1"
           }
-        ]
-      }
+        ],
+        "version_source": {
+          "kind": "pubspec",
+          "path": "pubspec.yaml"
+        },
+        "record_source": {
+          "kind": "manifest",
+          "asset_names": [],
+          "metadata_asset": "citizenwallet-release-ios.json",
+          "source_field": "head_sha",
+          "version_field": "version",
+          "marker_prefix": "GMB",
+          "immutable": false
+        }
+      },
+      "completion": "device-install",
+      "files": [
+        "ios.app.zip"
+      ]
     },
     "android": {
       "tools": [
@@ -182,6 +211,18 @@
         {
           "id": "xcode",
           "version": "27.0"
+        },
+        {
+          "id": "bash",
+          "version": "5.3.20"
+        },
+        {
+          "id": "grep",
+          "version": "3.12"
+        },
+        {
+          "id": "sed",
+          "version": "4.10"
         }
       ],
       "locks": [
@@ -290,8 +331,72 @@
             "id": "android-ndk",
             "version": "28.2.13676358"
           }
-        ]
-      }
+        ],
+        "version_source": {
+          "kind": "pubspec",
+          "path": "pubspec.yaml"
+        },
+        "record_source": {
+          "kind": "manifest",
+          "asset_names": [],
+          "metadata_asset": "citizenwallet-release-android.json",
+          "source_field": "head_sha",
+          "version_field": "version",
+          "marker_prefix": "GMB",
+          "immutable": false
+        }
+      },
+      "completion": "device-install",
+      "files": [
+        "android.apk"
+      ]
     }
-  }
+  },
+  "remote_routes": [
+    {
+      "canonicalID": "citizenwallet.android.ci",
+      "repository": "citizenwallet",
+      "productID": "citizenwallet",
+      "productTitle": "公民钱包",
+      "flow": "ci",
+      "platform": "android",
+      "expectedTitle": "公民钱包 · CI · Android",
+      "tagPrefix": null,
+      "recordsFormalRelease": false
+    },
+    {
+      "canonicalID": "citizenwallet.android.release",
+      "repository": "citizenwallet",
+      "productID": "citizenwallet",
+      "productTitle": "公民钱包",
+      "flow": "release",
+      "platform": "android",
+      "expectedTitle": "公民钱包 · Release · Android",
+      "tagPrefix": "citizenwallet-android-v",
+      "recordsFormalRelease": true
+    },
+    {
+      "canonicalID": "citizenwallet.ios.ci",
+      "repository": "citizenwallet",
+      "productID": "citizenwallet",
+      "productTitle": "公民钱包",
+      "flow": "ci",
+      "platform": "ios",
+      "expectedTitle": "公民钱包 · CI · iOS",
+      "tagPrefix": null,
+      "recordsFormalRelease": false
+    },
+    {
+      "canonicalID": "citizenwallet.ios.release",
+      "repository": "citizenwallet",
+      "productID": "citizenwallet",
+      "productTitle": "公民钱包",
+      "flow": "release",
+      "platform": "ios",
+      "expectedTitle": "公民钱包 · Release · iOS",
+      "tagPrefix": "citizenwallet-ios-v",
+      "recordsFormalRelease": true
+    }
+  ],
+  "flow_entry": "scripts/flow.mjs"
 }

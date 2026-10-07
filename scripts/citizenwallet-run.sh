@@ -25,7 +25,19 @@ fi
 [[ "$PLATFORM" == ios || "$PLATFORM" == android ]] \
   || { echo "本机目标平台只接受 ios 或 android：$PLATFORM" >&2; exit 1; }
 
-CITIZENWALLET_WORK_DIR="${CITIZENWALLET_WORK_DIR:-${TMPDIR:-/tmp}/citizenwallet/$PLATFORM}"
+# 所有独立入口的工具临时状态归本产品target；宿主已交付的产品工作根继续归当前任务。
+PRODUCT_TEMP_SCRIPT="${BASH_SOURCE[0]}"
+while [[ -L "$PRODUCT_TEMP_SCRIPT" ]]; do
+  PRODUCT_TEMP_LINK="$(readlink "$PRODUCT_TEMP_SCRIPT")"
+  [[ "$PRODUCT_TEMP_LINK" == /* ]] || PRODUCT_TEMP_LINK="$(cd "$(dirname "$PRODUCT_TEMP_SCRIPT")" && pwd -P)/$PRODUCT_TEMP_LINK"
+  PRODUCT_TEMP_SCRIPT="$PRODUCT_TEMP_LINK"
+done
+PRODUCT_TEMP_SOURCE="$(cd "$(dirname "$PRODUCT_TEMP_SCRIPT")/.." && pwd -P)"
+PRODUCT_TARGET_TEMP_ROOT="$("${PRODUCT_NODE_BIN:-${NODE:-node}}" "$PRODUCT_TEMP_SOURCE/scripts/build.mjs" temporary-root "${PLATFORM:-${platform:-}}" 'ios')" || exit 1
+if [[ -z "${PRODUCT_WORK_DIR:-}" && "${TMPDIR:-}" != "$PRODUCT_TEMP_SOURCE/target/"* ]]; then
+  export TMPDIR="$PRODUCT_TARGET_TEMP_ROOT/"
+fi
+CITIZENWALLET_WORK_DIR="${CITIZENWALLET_WORK_DIR:-${TMPDIR:-$PRODUCT_TARGET_TEMP_ROOT}/citizenwallet/$PLATFORM}"
 # 源码根只读；两个端的Flutter、Pods和Gradle状态分别写入当前产品工作目录。
 # 中文注释：检出目录名称由调用方选择；产品身份只取普通 pubspec 文件中的唯一包名。
 python3 - "$CITIZENWALLET_DIR" <<'CHECK_SOURCE'
@@ -81,8 +93,8 @@ source = Path(sys.argv[1]).resolve()
 for value in sys.argv[2:]:
     raw = Path(value)
     target = raw.resolve()
-    if not raw.is_absolute() or target == source or source in target.parents:
-        raise SystemExit(f'CitizenWallet可写目录必须是源码外绝对路径：{value}')
+    if not raw.is_absolute() or source / 'target' not in target.parents:
+        raise SystemExit(f'CitizenWallet可写目录必须是本产品target内绝对路径：{value}')
 CHECK_OUTPUTS
 # 固定平台布局只装配到本轮工程；逐层拒绝目录链接，禁止生成物回写源目录。
 python3 - "$CITIZENWALLET_DIR" "$CITIZENWALLET_PROJECT_ROOT" "$PLATFORM" "$PREPARE_ONLY" <<'PREPARE_PLATFORM'
