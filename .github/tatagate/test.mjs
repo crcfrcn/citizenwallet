@@ -1,3 +1,5 @@
+import {readFileSync} from 'node:fs';
+import {dirname} from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gateContract, validateWorkflowSource, validateVectorGroup, validatePalletRegistry, readPublicChain } from './index.mjs';
@@ -81,11 +83,14 @@ test('保留源码不按每文件汉字数量判定，真实第一方临时注�
     import('node:fs'), import('node:path'), import('../../scripts/build.mjs'), import('node:child_process'), import('./index.mjs'),
   ]);
   const root = mkdtempSync(join(tmpdir(), 'tatagate-quality-'));
-  const env = { HOME: process.env.HOME, PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C',
+  const env = { HOME: process.env.HOME,
+    PRODUCT_BASH_BIN:process.env.PRODUCT_BASH_BIN,PRODUCT_GIT_BIN:process.env.PRODUCT_GIT_BIN,
+    PRODUCT_GREP_BIN:process.env.PRODUCT_GREP_BIN,PRODUCT_SED_BIN:process.env.PRODUCT_SED_BIN,
+    PATH:[...['PRODUCT_GIT_BIN','PRODUCT_BASH_BIN','PRODUCT_GREP_BIN','PRODUCT_SED_BIN'].map(key=>dirname(process.env[key])),'/usr/bin','/bin'].join(':'), LANG:'C', LC_ALL:'C',
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
     GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
-  const git = (...args) => execFileSync('/usr/bin/git', ['-C', root, ...args], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const git = (...args) => execFileSync(process.env.PRODUCT_GIT_BIN, ['-C', root, ...args], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   try {
     git('init', '--quiet', '--initial-branch=main');
     mkdirSync(join(root, 'test'));
@@ -133,11 +138,14 @@ test('增量防护执行真实归属判断并支持超过argv单项限制的输�
     import('node:fs'), import('node:path'), import('../../scripts/build.mjs'), import('node:child_process'), import('./index.mjs'),
   ]);
   const root = mkdtempSync(join(tmpdir(), 'tatagate-guard-'));
-  const env = { HOME: process.env.HOME, PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C',
+  const env = { HOME: process.env.HOME,
+    PRODUCT_BASH_BIN:process.env.PRODUCT_BASH_BIN,PRODUCT_GIT_BIN:process.env.PRODUCT_GIT_BIN,
+    PRODUCT_GREP_BIN:process.env.PRODUCT_GREP_BIN,PRODUCT_SED_BIN:process.env.PRODUCT_SED_BIN,
+    PATH:[...['PRODUCT_GIT_BIN','PRODUCT_BASH_BIN','PRODUCT_GREP_BIN','PRODUCT_SED_BIN'].map(key=>dirname(process.env[key])),'/usr/bin','/bin'].join(':'), LANG:'C', LC_ALL:'C',
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
     GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
-  const git = (...args) => execFileSync('/usr/bin/git', ['-C', root, ...args], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const git = (...args) => execFileSync(process.env.PRODUCT_GIT_BIN, ['-C', root, ...args], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   let output;
   const execute = (command, args, options) => {
     output = spawnSync(command, args, { ...options, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: 20_000 });
@@ -295,8 +303,11 @@ test('官方Flutter归档字段不冒充旧平台标识，其它残留和伪造�
   const { testRoot } = await import('../../scripts/build.mjs');
   const { validatePlatformNaming } = await import('./index.mjs');
   const root = mkdtempSync(join(testRoot(), 'tatagate-platform-'));
-  const gitBin = '/usr/bin/git';
-  const env = { HOME: process.env.HOME, PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C',
+  const gitBin = process.env.PRODUCT_GIT_BIN;
+  const env = { HOME: process.env.HOME,
+    PRODUCT_BASH_BIN:process.env.PRODUCT_BASH_BIN,PRODUCT_GIT_BIN:process.env.PRODUCT_GIT_BIN,
+    PRODUCT_GREP_BIN:process.env.PRODUCT_GREP_BIN,PRODUCT_SED_BIN:process.env.PRODUCT_SED_BIN,
+    PATH:[...['PRODUCT_GIT_BIN','PRODUCT_BASH_BIN','PRODUCT_GREP_BIN','PRODUCT_SED_BIN'].map(key=>dirname(process.env[key])),'/usr/bin','/bin'].join(':'), LANG:'C', LC_ALL:'C',
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
   const git = (...args) => execFileSync(gitBin, ['-C', root, ...args], { env, stdio: ['ignore','pipe','pipe'] });
   const source = readFileSync(new URL('../../scripts/resources.mjs', import.meta.url), 'utf8');
@@ -384,3 +395,47 @@ test('官方Flutter归档字段不冒充旧平台标识，其它残留和伪造�
     assert.throws(() => validatePlatformNaming(root), /禁用平台目录/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// 检查实际入口的交付顺序，防止本机通过而远端遗漏同一资源阶段。
+test('本机和远端原门禁入口先取得本仓工具再运行全部检查', () => {
+ const source=readFileSync(new URL('./index.mjs',import.meta.url),'utf8');
+ const workflow=readFileSync(new URL('../workflows/tatagate.yml',import.meta.url),'utf8');
+ assert.ok(source.indexOf('await prepareGateResources(resourceWork,{signal:cancellation.signal})')<source.indexOf('return await repositoryGatePrepared(args)'));
+ assert.match(source,/Object\.assign\(process\.env,await verifyGateResourceDelivery\(receipt\)\)/u);
+ assert.match(workflow,/node \.github\/tatagate\/index\.mjs remote/u);
+ assert.doesNotMatch(workflow,/curl --fail|sha256sum -c/u);
+ assert.doesNotMatch(source,/execFileSync\('\/usr\/bin\/git'|execute\('bash'/u);
+});
+
+// 保留真实错误tag和供给输入；移位、重复、修改断言或写入生产路径都不能成为允许上下文。
+test('版本判定只认可本仓既有软件记录拒绝断言与依赖供给夹具', async () => {
+ const {protocolAssertionLines}=await import('./index.mjs');
+ for(const path of ['scripts/flow.test.mjs','scripts/resources.test.mjs']) {
+  const source=readFileSync(new URL('../../'+path,import.meta.url),'utf8');
+  const allowed=protocolAssertionLines(path,source);assert.ok(allowed.length>0);
+  assert.deepEqual(protocolAssertionLines('scripts/production.mjs',source),[]);
+  for(const line of allowed) {
+   assert.ok(!protocolAssertionLines(path,line).includes(line));
+   assert.ok(!protocolAssertionLines(path,source+'\n'+line).includes(line));
+  }
+  const changed=source.replaceAll('assert.rejects','assert.doesNotReject').replaceAll('assert.throws','assert.doesNotThrow');
+  assert.ok(!protocolAssertionLines(path,changed).some(line=>allowed.includes(line)));
+  assert.deepEqual(protocolAssertionLines(path,JSON.stringify(source)),[]);
+ }
+});
+
+// 无效输入在资源阶段之前失败，不能触发联网或留下准备目录。
+test('原门禁拒绝错误提交和工作根后不进入资源取得',async()=>{
+ const {repositoryGateMain}=await import('./index.mjs');
+ const {resolve}=await import('node:path'),{readdirSync}=await import('node:fs');
+ const {fileURLToPath}=await import('node:url'),{testRoot}=await import('../../scripts/build.mjs');
+ const root=resolve(fileURLToPath(new URL('../..',import.meta.url))),directory=testRoot();
+ const before=readdirSync(directory).filter(name=>name.startsWith('tatagate-resources-')).sort();
+ await assert.rejects(repositoryGateMain(['local',root,'bad','b'.repeat(40),'relative']),/提交范围/u);
+ await assert.rejects(repositoryGateMain(['local',root,'a'.repeat(40),'b'.repeat(40),'relative']),/临时目录/u);
+ assert.deepEqual(readdirSync(directory).filter(name=>name.startsWith('tatagate-resources-')).sort(),before);
+});
+
+// 本仓门禁真实执行资源回归，不只核对存在或字符串。
+await import('../../scripts/resources.test.mjs');
+await import('../../scripts/flow.test.mjs');

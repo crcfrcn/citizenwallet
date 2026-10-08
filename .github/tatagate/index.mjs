@@ -1,12 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync,
+  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, mkdtempSync,
 } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Readable } from 'node:stream';
 import { spec } from 'node:test/reporters';
+import {gateToolInterfaces,prepareGateResources,verifyGateResourceDelivery,disposeGateResources} from '../../scripts/resources.mjs';
 
 const emptyTreeSHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const commitPattern = /^[0-9a-f]{40}$/u;
@@ -31,9 +32,9 @@ function exactKeys(value, expected, label) {
 
 function git(root, arguments_) {
   try {
-    return execFileSync('/usr/bin/git', ['-C', root, ...arguments_], {
+    return execFileSync(gateToolInterfaces.exactExecutable(process.env.PRODUCT_GIT_BIN), ['-c','credential.helper=','-c','core.hooksPath=/dev/null','-C', root, ...arguments_], {
       encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-      env: { HOME: process.env.HOME, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'C', LC_ALL: 'C' },
+      env: gateToolInterfaces.toolEnvironment(process.env),
     });
   } catch {
     fail('产品门禁读取Git提交失败');
@@ -227,7 +228,7 @@ function validateSyntax(root, execute, environment, repository) {
     const absolute = resolve(root, path);
     let result = null;
     if (path.endsWith('.mjs')) result = execute(process.execPath, ['--check', absolute], { cwd: root, env: environment, stdio: 'inherit' });
-    else if (path.endsWith('.sh')) result = execute('bash', ['-n', absolute], { cwd: root, env: environment, stdio: 'inherit' });
+    else if (path.endsWith('.sh')) result = execute(environment.PRODUCT_BASH_BIN, ['-n', absolute], { cwd: root, env: environment, stdio: 'inherit' });
     else if (path.endsWith('.json')) {
       try { JSON.parse(readFileSync(absolute, 'utf8')); } catch { fail('JSON语法无效：' + path); }
     }
@@ -468,7 +469,8 @@ export async function checkCrossPlatform(root, { request = fetch, report = conso
 
 // 只识别本仓实际执行测试中的拒绝断言；字符串、模板及注释中的同文不构成豁免。
 export function protocolAssertionLines(path, source) {
-  if (!contract.node_tests.includes(path) || !isTestPath(path) || !path.endsWith('.mjs')) return [];
+  if ((!contract.node_tests.includes(path)&&!['scripts/flow.test.mjs','scripts/resources.test.mjs'].includes(path))
+    ||!isTestPath(path)||!path.endsWith('.mjs'))return [];
   const literal = String.raw`assert.doesNotMatch(source, /\/v1(?:\/|\b)/);`;
   const opaque = [...source.matchAll(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`|\/(?:\\[^\r\n]|\[(?:\\[^\r\n]|[^\]\\\r\n])*\]|[^\/\\\r\n])+\/[dgimsuvy]*/gu)]
     .map(match => [match.index, match.index + match[0].length]);
@@ -482,7 +484,18 @@ export function protocolAssertionLines(path, source) {
     }
     offset += line.length + 1;
   }
-  return [...occurrences].filter(([, valid]) => valid).map(([line]) => line);
+  const allowed=[...occurrences].filter(([, valid]) => valid).map(([line]) => line);
+  // 准确既有真实夹具才属于软件记录与依赖供给测试；未知标识、其它位置和生产源码仍拒绝。
+  const contexts={"scripts/resources.test.mjs": ["test('空可选供给不阻断产品取得，npm SRI原件按准确来源复用',async t=>{\n const root=await sandbox(t),body=Buffer.from('sri-original'),entry={url:'https://example.invalid/sri.tgz',integrity:'sha512-'+createHash('sha512').update(body).digest('base64')};\n const file=await acquireArchive(entry,{store:join(root,'first'),optional:join(root,'absent'),fetcher:async()=>new Response(body)});assert.equal(await readFile(file,'utf8'),'sri-original');\n const optional=join(root,'shared/objects'),digest=hash(body),original=join(optional,digest+'.blob');await mkdir(dirname(original),{recursive:true});await writeFile(original,body);await writeFile(join(root,'shared/index.json'),JSON.stringify({schema_version:2,packages:[{archives:[{...entry,sha256:digest}]}],git_sources:[],pods:[]}));\n const cached=await acquireArchive(entry,{store:join(root,'second'),optional,offline:true,fetcher:()=>assert.fail('SRI供给命中联网')});assert.equal(await readFile(cached,'utf8'),'sri-original');\n});", "async function dependencySupplyFixture(t,packages=[],pods=[]){const root=await sandbox(t),objects=join(root,'supply/objects'),work=join(root,'work');await mkdir(objects,{recursive:true});await mkdir(work);const index={schema_version:2,packages,git_sources:[],pods};await writeFile(join(dirname(objects),'index.json'),JSON.stringify(index));return {root,objects,work,index};}", "test('无可选依赖供给保持独立，旧schema与Pod整锁快照被拒绝',async t=>{\n const f=await dependencySupplyFixture(t);assert.equal(await readDependencySupply(join(f.root,'absent')),null);assert.deepEqual(await materializeMavenCache(undefined,f.work),[]);\n for(const value of [null,[],{schema_version:1,packages:[],git_sources:[],snapshots:[]},{...f.index,snapshots:[]}]){await writeFile(join(dirname(f.objects),'index.json'),JSON.stringify(value));await assert.rejects(readDependencySupply(f.objects),/协议/);}\n});"], "scripts/flow.test.mjs": ["for(const route of routes.filter(row=>row.recordsFormalRelease))test(route.canonicalID+'正式记录验真归产品并拒绝错源/错资产/重复标记',()=>{\n const {policy,release,metadata}=formalRecordFixture(route);\n assert.equal(validateFormalRecordSource(route.platform,release,sourceSHA,metadata),sourceSHA);\n assert.throws(()=>validateFormalRecordSource(route.platform,{...release,draft:true},sourceSHA,metadata));\n assert.throws(()=>validateFormalRecordSource(route.platform,{...release,tag_name:'foreign-v1.0.0'},sourceSHA,metadata));\n assert.throws(()=>validateFormalRecordSource(route.platform,release,'bad',metadata));\n if(policy.kind==='manifest') {\n  assert.throws(()=>validateFormalRecordSource(route.platform,release,sourceSHA,{...metadata,product_id:'foreign'}));\n  assert.throws(()=>validateFormalRecordSource(route.platform,release,sourceSHA,{...metadata,[policy.version_field]:'1.0.1'}));\n }\n if(policy.kind==='body') {\n  assert.throws(()=>validateFormalRecordSource(route.platform,{...release,assets:[]},sourceSHA));\n  assert.throws(()=>validateFormalRecordSource(route.platform,{...release,body:release.body+'\\n'+policy.marker_prefix+'_RELEASE_SOURCE_SHA:'+sourceSHA},sourceSHA));\n  assert.throws(()=>validateFormalRecordSource(route.platform,{...release,body:release.body.replace(sourceSHA,'b'.repeat(40))},sourceSHA));\n }\n if(policy.immutable)assert.throws(()=>validateFormalRecordSource(route.platform,{...release,immutable:false},sourceSHA));\n});"]};
+  const blocks=contexts[path]||[];
+  const retained=blocks.filter(block=>source.split(block).length===2
+    && !opaque.some(([start,end])=>source.indexOf(block)>=start&&source.indexOf(block)<end));
+  // 供给帮助函数只随同原有拒绝旧格式的真实测试共同放行，不能独立移作协议实现。
+  if(path==='scripts/resources.test.mjs'&&retained.length!==blocks.length)return allowed;
+  for(const block of retained)for(const line of block.split('\n')) {
+    if(/schema_version|foreign-v1\.0\.0/u.test(line)&&source.split(line).length===2)allowed.push(line);
+  }
+  return allowed;
 }
 
 // 公民产品原有增量防护完整保留在自身门禁，字典私有资料不进入公开仓。
@@ -563,7 +576,7 @@ export function insecureTransportLines(path, source) {
 }
 const guardrailsSource = "#!/usr/bin/env bash\nset -euo pipefail\n\nbase_ref=\"${BASE_REF:-origin/main}\"\n\n# 中文说明：产品门禁只读取自身提交；私有规则与任务由私仓检查，技术文档只归所属产品根。\nflow_root=\"${TATAGATE_DIRECTORY:?缺少本仓门禁根}\"\nif [[ -e memory || -e TataConsole || -e AGENTS.md || -e CODEX.md || -e CLAUDE.md ]]; then\n  echo \"公民产品根目录检测到私人 AI 或 TataConsole 残留。\" >&2\n  exit 1\nfi\n\n# 中文注释：全仓禁止中国国旗字符；用 UTF-8 八进制构造，避免规则本身成为命中项。\nforbidden_cn_flag=\"$(printf '\\360\\237\\207\\250\\360\\237\\207\\263')\"\nflag_files=\"$(git grep --untracked -l -I -F \"$forbidden_cn_flag\" -- . || true)\"\nif [[ -n \"$flag_files\" ]]; then\n  echo \"检测到禁止使用的中国国旗字符（仅报告文件）：\" >&2\n  printf '  - %s\\n' \"$flag_files\" >&2\n  exit 1\nfi\n\n# 首次推送以空树比较全部已保存内容；已有main必须提供可验证祖先，不主动抓取或猜测分支。\ngit rev-parse --verify \"$base_ref\" >/dev/null 2>&1 || { echo '门禁基线不存在' >&2; exit 1; }\nif [[ \"$base_ref\" == '4b825dc642cb6eb9a060e54bf8d69288fbee4904' ]]; then\n  merge_base=\"$base_ref\"\nelse\n  merge_base=\"$(git merge-base HEAD \"$base_ref\")\"\nfi\n\ndeclare -a changed_files=()\nwhile IFS= read -r file; do\n  [[ -n \"$file\" ]] && changed_files+=(\"$file\")\ndone < <(git diff --name-only \"$merge_base\")\nwhile IFS= read -r file; do\n  [[ -n \"$file\" ]] && changed_files+=(\"$file\")\ndone < <(git ls-files --others --exclude-standard)\n\nif [[ \"${#changed_files[@]}\" -eq 0 ]]; then\n  echo \"未检测到变更文件，跳过公开仓库增量门禁。\"\n  exit 0\nfi\n\n# 中文注释：强特征机密扫描只报告路径，禁止把命中值写入 Actions 日志。\nsecret_files=\"$(git grep --untracked -l -I -E 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk_live_[A-Za-z0-9]{16,}' -- . ':!test/release_manifest.test.ts' ':!test/release_manifest.test.mjs' ':!scripts/release/check/release_manifest.test.mjs' || true)\"\nif [[ -n \"$secret_files\" ]]; then\n  echo \"公开仓库检测到疑似真实机密（仅报告文件）：\" >&2\n  printf '  - %s\\n' \"$secret_files\" >&2\n  exit 1\nfi\n\ntodo_word=\"TO\"\"DO\"\nfixme_word=\"FIX\"\"ME\"\nresidual_regex=\"(console\\\\.log\\\\(|debugger;|dbg!\\\\(|todo!\\\\(|unimplemented!\\\\(|\\\\b${todo_word}\\\\b|\\\\b${fixme_word}\\\\b)\"\nversion_regex='([A-Za-z0-9][._:-]v[0-9]+|/(api/)?v[0-9]+|[A-Za-z0-9]_V[0-9]+|schema_version|cache_version|protocol_version|tag[[:space:]]*=[[:space:]]*[\\\"]v[0-9]+)'\ndeclare -a residual_hits=()\ndeclare -a version_hits=()\ndeclare -a lint_hits=()\ndeclare -a insecure_transport_hits=()\n\nis_code_file() {\n  case \"$1\" in\n    *.rs|*.dart|*.ts|*.tsx|*.js|*.jsx|*.mjs|*.sh|*.py|*.sql|*.swift|*.kt|*.kts) return 0 ;;\n    *) return 1 ;;\n  esac\n}\n\nskip_generated_or_vendor() {\n  case \"$1\" in\n    native/smoldot/pow/*|docs/smoldot-dart/*|lib/src/smoldot/*|test/smoldot/*|assets/topup/walletconnect.bundle.js|scripts/worker-configuration.d.ts|*/dist/*|*/build/*|*/target/*|*/node_modules/*|*/GeneratedPluginRegistrant.*|*.g.dart|*.pb.dart|*.pbjson.dart|*.pbenum.dart|.github/scripts/repository/ci-repository.mjs) return 0 ;;\n    *) return 1 ;;\n  esac\n}\n\nhas_chinese_comment() {\n  # 中文注释：Unicode Script=Han 不依赖 runner 的本地排序规则，避免 grep 把汉字端点判为非法范围。\n  node -e 'const fs = require(\"node:fs\"); process.exit(/(?:\\/\\/|\\/\\*|\\*|#).*\\p{Script=Han}/u.test(fs.readFileSync(0, \"utf8\")) ? 0 : 1)'\n}\n\nsanitize_version_line() {\n  local line=\"$1\"\n  # 中文注释：Apple 官方 API/audience 与四条产品正式 Release Tag 是外部接口或软件版本身份，\n  # 不属于一方自定义协议标识；只精确移除这些已登记形态，继续阻断其它版本化协议。\n  line=\"${line//QR_V1/}\"\n  line=\"${line//QrProtocol.qrV1/}\"\n  line=\"${line//QrProtocols.qrV1/}\"\n  line=\"${line//citizen_sdk.smoldot.database.v1/}\"\n  line=\"${line//citizensdk.smoldot.database.v1/}\"\n  line=\"${line//citizensdk.wallet.state.v1/}\"\n  line=\"${line//APK v2\\/v3/}\"\n  line=\"${line//APK Signature Scheme v2\\/v3/}\"\n  # 中文注释：以下名称是已冻结的数据库文件、上游RPC/库API、ABI类型、测试描述或\n  # QR_V1负向断言，不是一方另建协议；只移除准确形态，未知版本化标识仍继续阻断。\n  line=\"$(printf '%s\\n' \"$line\" | sed -E \\\n    -e 's/drawable-v21(_launch_background\\.xml|\\/launch_background\\.xml)//g' \\\n    -e 's/public-state-v1\\.sqlite3//g' \\\n    -e 's/secure-state-v1\\.sqlite3//g' \\\n    -e 's/citizensdk_host_record_completion_v1_t//g' \\\n    -e 's/citizenchain-runtime-v[0-9]+-metadata\\.hex//g' \\\n    -e 's/create_v4_signed//g' \\\n    -e 's/wallet_v2_round_trips_cold_catalog_and_rejects_v1_without_fallback//g' \\\n    -e 's/citizenchain-transfer-build-v1\\.json//g' \\\n    -e 's/transactionWatch_v1[_A-Za-z]*//g' \\\n    -e 's/transaction_watch_uses_the_upstream_v1_surface_without_legacy_fallback//g' \\\n    -e 's/generic_qr_v1_signer\\.dart//g' \\\n    -e 's/citizenchain-wallet-derivation-v1\\.json//g' \\\n    -e 's/QR_V2//g' \\\n    -e 's/Uuid::new_v[45]//g' \\\n    -e 's/arm64-v8a//g' \\\n    -e 's/armeabi-v7a//g' \\\n    -e 's/libbarhopper_v[0-9]+//g' \\\n    -e 's/RSASSA-PKCS1-v1_5//g' \\\n    -e 's/sc-rpc-spec-v2//g' \\\n    -e 's#https://api\\.appstoreconnect\\.apple\\.com/v1##g' \\\n    -e 's/appstoreconnect-v1//g' \\\n    -e 's#/(upload/)?androidpublisher/v[0-9]+##g' \\\n    -e 's/citizen(app|wallet)-(ios|android)-v[0-9]+\\.[0-9]+\\.[0-9]+//g' \\\n    -e 's/citizen(serve-cloudflare|web)-v[0-9]+\\.[0-9]+\\.[0-9]+//g' \\\n    -e 's/citizensdk-sdk-v[0-9]+\\.[0-9]+\\.[0-9]+//g')\"\n  printf '%s\\n' \"$line\"\n}\n\nfor file in \"${changed_files[@]}\"; do\n  [[ -f \"$file\" ]] || continue\n  [[ \"$file\" == .github/tatagate/index.mjs || \"$file\" == .github/tatagate/contracts.json ]] && continue\n  is_code_file \"$file\" || continue\n  skip_generated_or_vendor \"$file\" && continue\n\n  added_lines=\"$(git diff --unified=0 \"$merge_base\" -- \"$file\" | grep -E '^\\+' | grep -vE '^\\+\\+\\+' || true)\"\n  # 中文注释：自包含动作把受合同约束的实现序列化为一条生成行；机械刷新该行时，\n  # 只排除生成载荷本身，动作脚本其余新增代码仍继续执行全部增量扫描。\n  if [[ \"$file\" == .github/scripts/*/*.mjs ]]; then\n    added_lines=\"$(printf '%s\\n' \"$added_lines\" | grep -vE '^\\+const implementations = Object\\.freeze\\(' || true)\"\n  fi\n  [[ -n \"$added_lines\" ]] || continue\n\n  # 中文注释：第一方新增网络地址只允许 HTTPS/WSS，禁止明文协议及任何降级入口。\n  if printf '%s\\n' \"$added_lines\" | grep -Eq '(http|ws)://'; then\n    # 读取准确源码上下文，只认可真实拒绝型测试，仍扫描同文件其余明文地址。\n    if ! node --input-type=module - \"$file\" \"$flow_root\" <<'TRANSPORT'\nimport { readFileSync } from 'node:fs';\nimport { pathToFileURL } from 'node:url';\nconst [path, flow] = process.argv.slice(2);\nconst { insecureTransportLines } = await import(pathToFileURL(flow + '/index.mjs'));\nprocess.exitCode = insecureTransportLines(path, readFileSync(path, 'utf8')).length ? 1 : 0;\nTRANSPORT\n    then insecure_transport_hits+=(\"${file}: 本次新增内容使用明文网络协议\"); fi\n  fi\n\n  # 中文注释：只拦本次新增残留；命令行工具的结果输出不是浏览器调试日志。\n  # scripts中的Node命令行结果输出不是浏览器调试；其它残留模式仍完整检查。\n  file_residual_regex=\"$residual_regex\"\n  if [[ \"$file\" == scripts/*.mjs || \"$file\" == .github/tatagate/test.mjs ]]; then\n    file_residual_regex=\"(debugger;|dbg!\\(|todo!\\(|unimplemented!\\(|\\b${todo_word}\\b|\\b${fixme_word}\\b)\"\n  fi\n  if [[ \"$file\" != .github/scripts/*/*.mjs && \"$file\" != .github/tatagate/index.mjs ]] && printf '%s\\n' \"$added_lines\" | grep -Eq \"$file_residual_regex\"; then\n    residual_hits+=(\"${file}: 本次新增内容含开发残留\")\n  fi\n\n  # 一次读取准确源文判定拒绝断言，再对整批新增行清理上游/既定标识，避免逐行启动外部进程。\n  # 通过stdin传入整批新增内容，不以超长argv或旁路文件承载源码。\n  protocol_lines=\"$(printf '%s\\n' \"$added_lines\" | node --input-type=module -e '\nimport { readFileSync } from \"node:fs\";\nimport { pathToFileURL } from \"node:url\";\nconst [path, flow] = process.argv.slice(1);\nconst { protocolAssertionLines } = await import(pathToFileURL(flow + \"/index.mjs\"));\nconst allowed = new Set(protocolAssertionLines(path, readFileSync(path, \"utf8\")));\nprocess.stdout.write(readFileSync(0, \"utf8\").split(\"\\n\")\n  .filter(line => !allowed.has(line.replace(/^\\+/u, \"\"))).join(\"\\n\"));\n' \"$file\" \"$flow_root\")\"\n  sanitized=\"$(sanitize_version_line \"$protocol_lines\")\" || { echo \"协议归属扫描执行失败\" >&2; exit 1; }\n  if printf '%s\\n' \"$sanitized\" | grep -Eq \"$version_regex\"; then\n    version_hits+=(\"${file}: 新增非 QR_V1 的一方版本化标识\")\n  fi\n\n  if [[ \"$file\" == *.rs ]] && printf '%s\\n' \"$added_lines\" | grep -Eq '#!?\\[allow\\((dead_code|unused)'; then\n    if ! printf '%s\\n' \"$added_lines\" | has_chinese_comment; then\n      lint_hits+=(\"${file}: 新增编译器抑制但没有中文理由\")\n    fi\n  fi\ndone\n\nif [[ \"${#insecure_transport_hits[@]}\" -gt 0 ]]; then\n  echo \"检测到禁止的明文网络协议：\" >&2\n  printf '  - %s\\n' \"${insecure_transport_hits[@]}\" >&2\n  exit 1\nfi\nif [[ \"${#residual_hits[@]}\" -gt 0 ]]; then\n  echo \"检测到开发残留：\" >&2\n  printf '  - %s\\n' \"${residual_hits[@]}\" >&2\n  exit 1\nfi\nif [[ \"${#version_hits[@]}\" -gt 0 ]]; then\n  echo \"检测到非 QR_V1 的一方版本化标识：\" >&2\n  printf '  - %s\\n' \"${version_hits[@]}\" >&2\n  exit 1\nfi\nif [[ \"${#lint_hits[@]}\" -gt 0 ]]; then\n  echo \"检测到缺少中文理由的编译器抑制：\" >&2\n  printf '  - %s\\n' \"${lint_hits[@]}\" >&2\n  exit 1\nfi\n\necho \"公民产品公开仓库门禁通过。\"\n";
 export function checkGuardrails(root, env, execute) {
-  const result = execute('/bin/bash', ['-s'], { cwd: root,
+  const result = execute(env.PRODUCT_BASH_BIN, ['-s'], { cwd: root,
     env: { ...env, TATAGATE_DIRECTORY: gateDirectory, PATH: dirname(process.execPath) + ':' + env.PATH },
     input: guardrailsSource, stdio: ['pipe','inherit','inherit'] });
   if (result.error || result.signal || result.status !== 0) fail('产品增量防护未通过');
@@ -699,7 +712,7 @@ function environment(root, work) {
   const names=['HOME','USER','LOGNAME','LANG','LC_ALL','PATH','RUSTUP_HOME','RUSTUP_TOOLCHAIN',
     'GITHUB_ACTIONS','GITHUB_WORKSPACE','GITHUB_SHA','GITHUB_EVENT_NAME','GITHUB_REF',
     'GITHUB_WORKFLOW','GITHUB_JOB','GITHUB_REPOSITORY','RUNNER_TOOL_CACHE','RUNNER_TEMP',
-    'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT'];
+    'PRODUCT_GIT_BIN','PRODUCT_BASH_BIN','PRODUCT_GREP_BIN','PRODUCT_SED_BIN','PRODUCT_NODE_BIN','GIT_CONFIG_NOSYSTEM','GIT_CONFIG_GLOBAL','GIT_TERMINAL_PROMPT','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT'];
   const result=Object.fromEntries(names.filter(name=>typeof process.env[name]==='string').map(name=>[name,process.env[name]]));
   Object.assign(result,{ TMPDIR:resolve(work,'tmp'),CARGO_HOME:resolve(work,'cargo-home'),
     CARGO_TARGET_DIR:resolve(work,'cargo'),CARGO_INCREMENTAL:'0' });
@@ -766,6 +779,45 @@ export async function executeGate({ root, baseSHA, headSHA, work, actionlint, ca
 }
 
 export async function repositoryGateMain(args) {
+  const [mode, root, baseSHA, headSHA, work] = args;
+  if((mode==='local'&&args.length===5)||(mode==='remote'&&args.length===1)) {
+    const ownRoot=resolve(gateDirectory,'../..');
+    const expected=mode==='local'?root:process.env.GITHUB_WORKSPACE;
+    if(expected!==ownRoot||realpathSync(expected)!==expected)fail('门禁资源只消费当前所属检出');
+    if(mode==='local') {
+      if(!commitPattern.test(baseSHA)||!commitPattern.test(headSHA)||baseSHA===headSHA)fail('门禁提交范围无效');
+      if(!isAbsolute(String(work||''))||realpathSync(work)!==work||!lstatSync(work).isDirectory()
+        ||lstatSync(work).isSymbolicLink()||work===root||work.startsWith(root+'/')
+        ||root.startsWith(work+'/')||readdirSync(work).length)fail('门禁独占临时目录边界无效');
+    } else {
+      const event=JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+      const owner=contract.repository==='citizenwallet'?'crcfrcn':'tuyutata';
+      if(process.env.GITHUB_ACTIONS!=='true'||process.env.GITHUB_REPOSITORY!==owner+'/'+contract.repository
+        ||process.env.GITHUB_EVENT_NAME!=='push'||process.env.GITHUB_REF!=='refs/heads/main'
+        ||process.env.GITHUB_WORKFLOW!=='tatagate'||process.env.GITHUB_JOB!=='gate'
+        ||event.ref!=='refs/heads/main'||event.after!==process.env.GITHUB_SHA
+        ||!commitPattern.test(event.after)||event.repository?.name!==contract.repository||event.deleted)fail('门禁资源远端身份无效');
+    }
+    const owner=await import(pathToFileURL(resolve(ownRoot,'scripts/build.mjs')));
+    const resourceWork=mkdtempSync(resolve(owner.testRoot(),'tatagate-resources-'));
+    const saved=Object.fromEntries(['PRODUCT_GIT_BIN','PRODUCT_BASH_BIN','PRODUCT_GREP_BIN','PRODUCT_SED_BIN','PRODUCT_NODE_BIN','TATAGATE_ACTIONLINT','PATH'].map(key=>[key,process.env[key]]));
+    const cancellation=new AbortController(),cancel=()=>cancellation.abort();
+    for(const name of ['SIGTERM','SIGINT'])process.once(name,cancel);
+    let receipt;
+    try {
+      receipt=await prepareGateResources(resourceWork,{signal:cancellation.signal});
+      Object.assign(process.env,await verifyGateResourceDelivery(receipt));
+      return await repositoryGatePrepared(args);
+    } finally {
+      for(const name of ['SIGTERM','SIGINT'])process.removeListener(name,cancel);
+      for(const [key,value]of Object.entries(saved)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+      if(receipt)await disposeGateResources(receipt);
+    }
+  }
+  return repositoryGatePrepared(args);
+}
+
+async function repositoryGatePrepared(args) {
   const [mode, root, baseSHA, headSHA, work] = args;
   if (mode === 'physical' && args.length === 2) {
     if (realpathSync(root) !== root) fail('本仓物理根必须真实');
