@@ -233,10 +233,7 @@ void main() {
           ...compactVec(versionTag),
           ...List<int>.filled(20, 0x11),
           ...List<int>.filled(32, 0x22),
-          ...compactVec(
-            previous ??
-                (product == 'citizenchatserver' ? '' : 'deployment-previous'),
-          ),
+          ...compactVec(previous ?? 'deployment-previous'),
           ...u64Le(expiresAt),
           ...List<int>.filled(32, 0x33),
         ];
@@ -246,7 +243,6 @@ void main() {
         'citizenapp': ['ios', 'android'],
         'citizenwallet': ['ios', 'android'],
         'citizenserve': ['cloudflare'],
-        'citizenchatserver': ['cloudflare'],
         'citizenweb': ['web'],
         'tuyulove': ['ios', 'android'],
         'tuyuserve': ['cloudflare'],
@@ -257,7 +253,6 @@ void main() {
         'citizenapp': '公民',
         'citizenwallet': '公民钱包',
         'citizenserve': '公民服务端',
-        'citizenchatserver': '公民聊天服务',
         'citizenweb': '公民官网',
         'tuyulove': '途遇',
         'tuyuserve': '途遇服务端',
@@ -289,15 +284,12 @@ void main() {
           expect(
             decoded?.summary,
             '授权发布 ${productNamesZh[productEntry.key]} '
-            '1.2.3 到 ${platformNames[platform]}'
-            '${productEntry.key == 'citizenchatserver' ? '；不授权回滚或删除资源' : ''}',
+            '1.2.3 到 ${platformNames[platform]}',
           );
         }
       }
 
       const invalidProductPlatforms = <(String, String)>[
-        ('citizenchatserver', 'ios'),
-        ('citizenchatserver', 'web'),
         ('citizenweb', 'cloudflare'),
         ('citizenserve', 'web'),
         ('tuyulove', 'web'),
@@ -322,13 +314,7 @@ void main() {
       final payload = publishPayload('citizenweb', 'web');
       expect(
         PayloadDecoder.decode(
-          hexOf(
-            publishPayload(
-              'citizenchatserver',
-              'cloudflare',
-              previous: 'forged-previous',
-            ),
-          ),
+          hexOf(publishPayload('citizenserve', 'cloudflare', previous: '')),
           expectedAction: 'publish',
         ),
         isNull,

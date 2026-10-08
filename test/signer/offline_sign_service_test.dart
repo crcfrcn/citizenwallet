@@ -140,7 +140,7 @@ List<int> _publishAuthorizationPayload({
   ..._scaleString('1.2.3'),
   ...List<int>.generate(20, (index) => index + 1),
   ...List<int>.generate(32, (index) => index + 21),
-  ..._scaleString(product == 'citizenchatserver' ? '' : 'deployment-stable-1'),
+  ..._scaleString('deployment-stable-1'),
   ..._u64Le(expiresAt),
   ...List<int>.filled(32, 0x66),
 ];
@@ -266,7 +266,7 @@ void main() {
     test('发布授权严格绑定外层期限、使用 0x24 域且同一请求只能签一次', () async {
       final expiresAt = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
       final payload = _publishAuthorizationPayload(
-        product: 'citizenchatserver',
+        product: 'citizenserve',
         platform: 'cloudflare',
         expiresAt: expiresAt,
       );
@@ -281,13 +281,13 @@ void main() {
       final verification = service.verifyPayload(request);
       expect(verification.status, SignDecisionStatus.normal);
       expect(verification.actionLabel, '生产发布授权');
-      expect(verification.decoded?.fields['product_id'], 'citizenchatserver');
+      expect(verification.decoded?.fields['product_id'], 'citizenserve');
       expect(verification.decoded?.fields['platform'], 'cloudflare');
-      expect(verification.decoded?.fields['previous_deployment_id'], '');
       expect(
-        verification.decoded?.summary,
-        '授权发布 公民聊天服务 1.2.3 到 Cloudflare；不授权回滚或删除资源',
+        verification.decoded?.fields['previous_deployment_id'],
+        'deployment-stable-1',
       );
+      expect(verification.decoded?.summary, '授权发布 公民服务端 1.2.3 到 Cloudflare');
 
       final response = await service.signParsedRequest(
         accountId: signingAccount.accountId,

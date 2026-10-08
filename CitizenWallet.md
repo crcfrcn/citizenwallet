@@ -262,9 +262,9 @@ Android 与 iOS CI 已接入统一 CI 缓存。移动端 Rust target 与 Flutter
   `/Users/rhett/.Trash/gmb-platform-naming-step2-12-final-20260902-165915`。未运行远程 CI、正式
   Release、商店发布或部署，也未启动、停止、安装或重启 TataConsole。
 
-## 公民聊天服务发布签名
+## 发布授权签名
 
-发布解码器登记 citizenchatserver/cloudflare，审阅名称为公民聊天服务；previous_deployment_id 必须为空，并显示不授权回滚或删除资源。空字符串仍占据原有 SCALE 字符串字段位置并参与签名，不增加协议版本，不放宽其它产品的非空锚点要求。有效载荷仍须通过外层期限、0x24 签名域及一次性请求检查。错误平台、非空聊天回滚锚点和尾随字节必须拒绝。
+发布解码器只登记现存产品与准确平台；previous_deployment_id必须非空。外层期限、0x24签名域、一次性请求和尾随字节校验保持。
 
 ## Flutter 独立缓存工程视图（2026-09-10）
 

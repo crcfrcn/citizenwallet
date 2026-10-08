@@ -3828,7 +3828,6 @@ class PayloadDecoder {
       // 只是部署实现；公民服务端的正式端才是 cloudflare。
       'citizenweb': {'web'},
       'citizenserve': {'cloudflare'},
-      'citizenchatserver': {'cloudflare'},
       'tuyulove': {'ios', 'android'},
       'tuyuserve': {'cloudflare'},
       'tuyuweb': {'web'},
@@ -3844,7 +3843,6 @@ class PayloadDecoder {
       'citizenapp': '公民',
       'citizenwallet': '公民钱包',
       'citizenserve': '公民服务端',
-      'citizenchatserver': '公民聊天服务',
       'citizenweb': '公民官网',
       'tuyulove': '途遇',
       'tuyuserve': '途遇服务端',
@@ -3866,12 +3864,7 @@ class PayloadDecoder {
     final artifactSha = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
     offset += 32;
     final previous = _readStrictBoundedUtf8(bytes, offset, maxLength: 128);
-    // 独立聊天安装器不申请回滚权限；空值属于已签名内容，不能替换成假编号。
-    if (previous == null ||
-        (product.$1 == 'citizenchatserver'
-            ? previous.$1.isNotEmpty
-            : previous.$1.isEmpty))
-      return null;
+    if (previous == null || previous.$1.isEmpty) return null;
     offset = previous.$2;
     if (offset + 8 + 32 != bytes.length) return null;
     final expiresAt = _readU64Le(bytes, offset);
@@ -3894,8 +3887,7 @@ class PayloadDecoder {
     return DecodedPayload(
       action: 'publish',
       summary:
-          '授权发布 ${productNamesZh[product.$1]} ${version.$1} 到 ${platformNames[platform.$1]}'
-          '${product.$1 == 'citizenchatserver' ? '；不授权回滚或删除资源' : ''}',
+          '授权发布 ${productNamesZh[product.$1]} ${version.$1} 到 ${platformNames[platform.$1]}',
       fields: fields,
       reviewFields: fields,
     );
