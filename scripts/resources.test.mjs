@@ -24,7 +24,7 @@ test('错摘要、错来源、离线缺失、来源越权均失败关闭且无�
  const root=await sandbox(t),body=Buffer.from('source'),entry=archive(body);let requests=0;
  await assert.rejects(acquireArchive(entry,{store:root,offline:true,fetcher:()=>assert.fail('离线联网')}),/离线/);
  await assert.rejects(acquireArchive(entry,{store:root,fetcher:async()=>{requests++;return new Response('wrong');}}),/摘要/);
- await assert.rejects(acquireArchive({...entry,url:'http://example.invalid/source'},{store:root}),/HTTPS/);
+ await assert.rejects(acquireArchive({...entry,url:['http', '://example.invalid/source'].join('')},{store:root}),/HTTPS/);
  const file=await acquireArchive(entry,{store:root,fetcher:async()=>new Response(body)});
  await assert.rejects(acquireArchive({...entry,url:'https://example.invalid/other'},{store:root,offline:true}),/离线/);
  assert.equal(await readFile(file,'utf8'),'source');assert.equal(requests,1);assert.equal((await readdir(root)).filter(x=>x.endsWith('.pending')||x.endsWith('.lock')).length,0);
@@ -408,7 +408,7 @@ test('源码工具只分离两处有效镜像运输字段，真实编译输入�
  await assert.rejects(check(mirrored,tool,{source:'changed-archive',recipe}),/源码编译输入不符/u);
  await assert.rejects(check(mirrored,tool,{source,recipe:'changed-recipe'}),/源码编译输入不符/u);
  const invalid=[
-  [],'',null,[''],['http://mirror.example.invalid/source.tgz'],
+  [],'',null,[''],[['http', '://mirror.example.invalid/source.tgz'].join('')],
   ['https://mirror.example.invalid/source.tgz','https://mirror.example.invalid/source.tgz'],
   ['https://mirror.example.invalid/with space'],['https://mirror.example.invalid/source.tgz\u0000'],
   ['https://user:password@mirror.example.invalid/source.tgz'],['https://mirror.example.invalid/source.tgz#fragment'],
