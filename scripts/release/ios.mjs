@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {withFixedWorkSync,claimFixedWork,releaseFixedWork} from '../target.mjs';
+import {fixedScratch} from '../target.mjs';
 const directEntry = process.argv[1] === import.meta.filename && !process.execArgv.some(argument => /^(?:-e|-p|--eval|--print)(?:=|$)/u.test(argument));
 const inlineTestEntry = directEntry && Boolean(process.env.NODE_TEST_CONTEXT) && process.argv.length === 2;
 import { remoteEnvironment as productRemoteEnvironment } from '../build.mjs';
@@ -46,7 +48,7 @@ function runReleaseAction(command, argumentsList, environment = process.env, exe
   if (!Object.hasOwn(implementations, command)) throw new Error('未登记动作子命令');
   const repositoryRoot = environment.GITHUB_WORKSPACE
     ? realpathSync(environment.GITHUB_WORKSPACE) : process.cwd();
-  const temporaryDirectory = mkdtempSync(join(temporaryRoot('ios', 'release'), 'citizenwallet-action-'));
+  const temporaryDirectory = fixedScratch(join(temporaryRoot('ios', 'release'), 'citizenwallet-action-'));
   const implementationPath = join(temporaryDirectory, 'implementation.mjs');
   try {
     writeFileSync(implementationPath, implementations[command], {mode: 0o700});
@@ -60,7 +62,8 @@ function runReleaseAction(command, argumentsList, environment = process.env, exe
   }
 }
 
-function main() {
+function main(){return withFixedWorkSync('build',()=>mainTask(),{retain:process.env.GITHUB_ACTIONS==='true'});}
+function mainTask(){
   const [command, ...argumentsList] = process.argv.slice(2);
   if (command === 'workflow-step') {
     requireExactRemoteJobEnvironment();

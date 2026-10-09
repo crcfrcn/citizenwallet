@@ -195,6 +195,10 @@ jobs:
         CI_CACHE_TERMINAL_STATE: success
       shell: bash
       run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 18
+    - name: 清空本产品固定构建目录
+      if: always()
+      shell: bash
+      run: node "$GITHUB_WORKSPACE/scripts/target.mjs" finish build
   flow:
     name: 构建 公民钱包 iOS CI
     runs-on: macos-15
@@ -332,3 +336,7 @@ jobs:
         CI_CACHE_TERMINAL_STATE: success
       shell: bash
       run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 17
+    - name: 清空本产品固定构建目录
+      if: always()
+      shell: bash
+      run: node "$GITHUB_WORKSPACE/scripts/target.mjs" finish build
