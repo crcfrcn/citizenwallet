@@ -16,7 +16,7 @@
     "scripts/release/ios.mjs",
     "scripts/resources.mjs",
     "test/release_manifest.test.mjs",
-    "scripts/target.test.mjs"
+    "scripts/target.mjs"
   ],
   "checks": [
     "repository-contracts",
@@ -265,6 +265,12 @@
       "path": "test/widget_test.dart",
       "runner": "flutter",
       "target": "flutter"
+    },
+    {
+      "function": "scripts-target",
+      "path": "scripts/target.mjs",
+      "runner": "node",
+      "target": "node"
     }
   ]
 }

@@ -1119,6 +1119,12 @@ export function validateFunctionalContract(functions) {
 }
 
 // 源码清单与受检提交直接回读；新增测试必须进入本仓门禁，声明本身不能证明执行成功。
+function isInlineNodeTest(path,root) {
+ if(!path.endsWith('.mjs'))return false;
+ const source=lexicalParts(path,readFileSync(resolve(root,path),'utf8')).code;
+ return /\bNODE_TEST_CONTEXT\b/u.test(source)&&/\btest\s*\(/u.test(source);
+}
+
 export function validateFunctionalInventory(root,functions=contract.functions) {
   validateFunctionalContract(functions);
   const owned=currentFiles(root).filter(path=>!path.startsWith('.github/')&&!functionalIgnoredPrefixes.some(prefix=>path.startsWith(prefix)));
