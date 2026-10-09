@@ -6,11 +6,11 @@ import 'package:local_auth/local_auth.dart';
 
 import 'security/app_lock_service.dart';
 import 'security/emergency_wipe_platform.dart';
-import 'security/pin_input_page.dart';
+import 'pages/pin_input_page.dart';
 import 'security/secure_storage.dart';
-import 'ui/app_theme.dart';
-import 'ui/biometric_auth_text.dart';
-import 'ui/home_page.dart';
+import 'pages/app_theme.dart';
+import 'pages/widgets/biometric_auth_text.dart';
+import 'pages/home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

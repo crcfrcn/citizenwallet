@@ -82,7 +82,7 @@ jobs:
         fetch-depth: 0
         persist-credentials: false
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 0
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 0
     - name: 装载准确Rust
       uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
       with:
@@ -112,7 +112,7 @@ jobs:
           flutter-build/ios/iphoneos/Runner.app
           flutter-build/release-candidate
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 1
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 1
     - name: 恢复上一次成功的CI增量缓存
       continue-on-error: true
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
@@ -120,46 +120,46 @@ jobs:
         path: "${{ steps.citizenwallet_ci_ios__check__ci_cache.outputs.success_paths }}"
         key: "${{ steps.citizenwallet_ci_ios__check__ci_cache.outputs.restore_key }}"
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 2
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 2
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 3
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 3
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 4
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 4
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 5
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 5
     - id: citizenwallet_ci_ios__check__flutter-version
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 6
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 6
     - name: 安装 Flutter
       uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
       with:
         flutter-version: "${{ steps.citizenwallet_ci_ios__check__flutter-version.outputs.version }}"
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 7
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 7
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 8
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 8
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 9
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 9
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 10
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 10
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 11
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 11
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 12
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 12
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 13
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 13
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 14
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 14
     - if: "${{ failure() && !cancelled() }}"
       env:
         CI_CACHE_TERMINAL_STATE: failure
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 15
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 15
     - if: "${{ failure() && !cancelled() }}"
       name: 保存本次失败的CI增量缓存
       id: citizenwallet_ci_ios__check__ci_cache_save_failure
@@ -174,12 +174,12 @@ jobs:
         GH_TOKEN: "${{ github.token }}"
         CI_CACHE_TERMINAL_STATE: failure
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 16
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 16
     - if: "${{ success() }}"
       env:
         CI_CACHE_TERMINAL_STATE: success
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 17
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 17
     - if: "${{ success() }}"
       name: 保存本次成功的CI增量缓存
       id: citizenwallet_ci_ios__check__ci_cache_save_success
@@ -194,7 +194,7 @@ jobs:
         GH_TOKEN: "${{ github.token }}"
         CI_CACHE_TERMINAL_STATE: success
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/check/execute.mjs" workflow-step 18
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step check 18
   flow:
     name: 构建 公民钱包 iOS CI
     runs-on: macos-15
@@ -221,7 +221,7 @@ jobs:
         fetch-depth: 0
         persist-credentials: false
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 0
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 0
     - name: 装载准确Rust
       uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
       with:
@@ -252,7 +252,7 @@ jobs:
           flutter-build/ios/iphoneos/Runner.app
           flutter-build/release-candidate
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 1
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 1
     - name: 恢复上一次成功的CI增量缓存
       continue-on-error: true
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
@@ -260,43 +260,43 @@ jobs:
         path: "${{ steps.citizenwallet_ci_ios__ios__ci_cache.outputs.success_paths }}"
         key: "${{ steps.citizenwallet_ci_ios__ios__ci_cache.outputs.restore_key }}"
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 2
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 2
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 3
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 3
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 4
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 4
     - id: citizenwallet_ci_ios__ios__flutter-version
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 5
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 5
     - name: 安装 Flutter
       uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
       with:
         flutter-version: "${{ steps.citizenwallet_ci_ios__ios__flutter-version.outputs.version }}"
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 6
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 6
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 7
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 7
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 8
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 8
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 9
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 9
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 10
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 10
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 11
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 11
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 12
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 12
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 13
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 13
     - if: "${{ failure() && !cancelled() }}"
       env:
         CI_CACHE_TERMINAL_STATE: failure
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 14
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 14
     - if: "${{ failure() && !cancelled() }}"
       name: 保存本次失败的CI增量缓存
       id: citizenwallet_ci_ios__ios__ci_cache_save_failure
@@ -311,12 +311,12 @@ jobs:
         GH_TOKEN: "${{ github.token }}"
         CI_CACHE_TERMINAL_STATE: failure
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 15
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 15
     - if: "${{ success() }}"
       env:
         CI_CACHE_TERMINAL_STATE: success
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 16
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 16
     - if: "${{ success() }}"
       name: 保存本次成功的CI增量缓存
       id: citizenwallet_ci_ios__ios__ci_cache_save_success
@@ -331,4 +331,4 @@ jobs:
         GH_TOKEN: "${{ github.token }}"
         CI_CACHE_TERMINAL_STATE: success
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/ci/ios/ios/execute.mjs" workflow-step 17
+      run: node "$GITHUB_WORKSPACE/scripts/ci/ios.mjs" workflow-step ios 17

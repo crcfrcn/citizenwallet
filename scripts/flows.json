@@ -58,6 +58,10 @@
         {
           "ecosystem": "cargo",
           "path": "rust/Cargo.lock"
+        },
+        {
+          "ecosystem": "cocoapods",
+          "path": "ios/Podfile.lock"
         }
       ],
       "ci": {
@@ -148,9 +152,7 @@
         }
       },
       "completion": "device-install",
-      "files": [
-        "ios.app.zip"
-      ]
+      "files": []
     },
     "android": {
       "tools": [
@@ -398,5 +400,6 @@
       "recordsFormalRelease": true
     }
   ],
-  "flow_entry": "scripts/flow.mjs"
+  "flow_entry": "scripts/flow.mjs",
+  "resource_entry": "scripts/resources.mjs"
 }

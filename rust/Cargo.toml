@@ -12,6 +12,7 @@ license = "MIT"
 description = "CitizenWallet 冷钱包 sr25519 签名原生库"
 
 [lib]
+path = "source/lib.rs"
 # 冷钱包永久离线，只需sr25519签名，不需要链；绝不引入轻节点。
 crate-type = ["cdylib", "staticlib"]
 name = "citizenwallet_signer"

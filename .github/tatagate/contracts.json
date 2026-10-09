@@ -8,11 +8,13 @@
     "citizenwallet.ios.release"
   ],
   "node_tests": [
-    "scripts/ci/android/build-apk/test.mjs",
-    "scripts/ci/ios/check/test.mjs",
-    "scripts/ci/ios/ios/test.mjs",
-    "scripts/release/android/build-apk/test.mjs",
-    "scripts/release/ios/ios/test.mjs",
+    "scripts/build.mjs",
+    "scripts/ci/android.mjs",
+    "scripts/ci/ios.mjs",
+    "scripts/flow.mjs",
+    "scripts/release/android.mjs",
+    "scripts/release/ios.mjs",
+    "scripts/resources.mjs",
     "test/release_manifest.test.mjs"
   ],
   "checks": [
@@ -28,5 +30,240 @@
     "macOS ARM64",
     "macos-arm64",
     "macos_arm64"
+  ],
+  "github_repository": "crcfrcn/citizenwallet",
+  "chain_source": {
+    "url": "https://github.com/crcfrcn/citizenchain.git",
+    "sha": "72690d8dc6e8fc1335c67a6dbc83bd40d6ef7b26"
+  },
+  "functions": [
+    {
+      "function": "rust/source/sr25519",
+      "path": "rust/source/sr25519.rs",
+      "runner": "cargo",
+      "target": "rust/Cargo.toml",
+      "package": "citizenwallet_signer",
+      "cases": [
+        "hard_derive_is_deterministic",
+        "sign_then_verify_roundtrip",
+        "null_arguments_are_rejected"
+      ]
+    },
+    {
+      "function": "scripts/build.test",
+      "path": "scripts/build.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts/ci/android.test",
+      "path": "scripts/ci/android.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts/ci/ios.test",
+      "path": "scripts/ci/ios.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts/flow.test",
+      "path": "scripts/flow.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts/release/android.test",
+      "path": "scripts/release/android.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts/release/ios.test",
+      "path": "scripts/release/ios.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts/resources.test",
+      "path": "scripts/resources.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "test/login_qr_handler_test",
+      "path": "test/signing/login_qr_handler_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/scanner/scanner_controller_test",
+      "path": "test/scanner/scanner_controller_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/scanner/scanner_view_test",
+      "path": "test/scanner/scanner_view_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/release_manifest.test",
+      "path": "test/release_manifest.test.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "test/security/app_lock_pbkdf2_test",
+      "path": "test/security/app_lock_pbkdf2_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/security/duress_mode_test",
+      "path": "test/security/duress_mode_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/security/hardware_secretvault_test",
+      "path": "test/security/hardware_secretvault_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/signing/field_labels_test",
+      "path": "test/signing/field_labels_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/signing/offline_sign_service_test",
+      "path": "test/signing/offline_sign_service_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/signing/pallet_registry_test",
+      "path": "test/signing/pallet_registry_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/signing/payload_decoder_test",
+      "path": "test/signing/payload_decoder_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/signing/qr_signer_test",
+      "path": "test/signing/qr_signer_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/signing/scale_codec_golden_test",
+      "path": "test/signing/scale_codec_golden_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/signing/signing_domain_golden_test",
+      "path": "test/signing/signing_domain_golden_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/pages/account_detail_page_test",
+      "path": "test/pages/account_detail_page_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/pages/biometric_auth_text_test",
+      "path": "test/pages/biometric_auth_text_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/pages/offline_sign_page_test",
+      "path": "test/pages/offline_sign_page_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/pages/product_manual_page_test",
+      "path": "test/pages/product_manual_page_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/pages/scan_target_test",
+      "path": "test/pages/scan_target_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/pages/wallet_detail_page_test",
+      "path": "test/pages/wallet_detail_page_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/helpers/amount_format_test",
+      "path": "test/helpers/amount_format_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/helpers/screenshot_guard_test",
+      "path": "test/helpers/screenshot_guard_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/wallet/derivation_golden_test",
+      "path": "test/wallet/derivation_golden_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/wallet/wallet_manager_test",
+      "path": "test/wallet/wallet_manager_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/wallet/wallet_mini_secret_test",
+      "path": "test/wallet/wallet_mini_secret_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/wallet/wallet_model_test",
+      "path": "test/wallet/wallet_model_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/wallet/wallet_password_test",
+      "path": "test/wallet/wallet_password_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/wallet/wallet_secure_keys_test",
+      "path": "test/wallet/wallet_secure_keys_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    },
+    {
+      "function": "test/widget_test",
+      "path": "test/widget_test.dart",
+      "runner": "flutter",
+      "target": "flutter"
+    }
   ]
 }

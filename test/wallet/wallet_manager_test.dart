@@ -9,10 +9,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
-import 'package:citizenwallet/isar/wallet_isar.dart';
-import 'package:citizenwallet/qr/envelope.dart';
-import 'package:citizenwallet/qr/qr_protocols.dart';
-import 'package:citizenwallet/qr/signature_message.dart';
+import 'package:citizenwallet/storage/wallet_isar.dart';
+import 'package:citizenwallet/protocol/envelope.dart';
+import 'package:citizenwallet/protocol/qr_protocols.dart';
+import 'package:citizenwallet/protocol/signature_message.dart';
 import 'package:citizenwallet/wallet/wallet_manager.dart';
 import 'package:citizenwallet/wallet/wallet_secure_keys.dart';
 
@@ -218,12 +218,13 @@ void main() {
   });
 
   test('community 引擎启动前幂等清理 Isar 3.1 旧锁文件', () async {
-    const directory = '/tmp/gmb-citizenwallet-isar31-compat';
     const databaseName = 'legacy_lock_cleanup_test';
-    final testDirectory = Directory(directory);
+    final testDirectory = await Directory.systemTemp.createTemp(
+      'citizenwallet-isar-compat-',
+    );
+    final directory = testDirectory.path;
     final legacyLock = File('$directory/$databaseName.isar.lock');
     try {
-      await testDirectory.create(recursive: true);
       await legacyLock.writeAsString('');
 
       await WalletIsar.instance.cleanupLegacyLockFileForTest(
@@ -238,9 +239,7 @@ void main() {
         databaseName,
       );
     } finally {
-      if (await testDirectory.exists() && await testDirectory.list().isEmpty) {
-        await testDirectory.delete();
-      }
+      await testDirectory.delete(recursive: true);
     }
   });
 

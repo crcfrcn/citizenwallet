@@ -7,10 +7,10 @@ import 'package:citizenwallet/wallet/wallet_mini_secret.dart';
 import 'package:isar_community/isar.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 import 'package:citizenwallet/wallet/native_sr25519.dart';
-import 'package:citizenwallet/chain_constants.dart';
-import 'package:citizenwallet/isar/wallet_isar.dart';
-import 'package:citizenwallet/qr/qr_protocols.dart';
-import 'package:citizenwallet/signer/qr_signer.dart';
+import 'package:citizenwallet/signing/chain_constants.dart';
+import 'package:citizenwallet/storage/wallet_isar.dart';
+import 'package:citizenwallet/protocol/qr_protocols.dart';
+import 'package:citizenwallet/signing/qr_signer.dart';
 import 'package:citizenwallet/wallet/wallet_secure_keys.dart';
 
 /// 钱包（master）：一套助记词 = 一个种子 = 一个 master，其下派生多个账户。

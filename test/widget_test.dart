@@ -3,13 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/isar/wallet_isar.dart';
+import 'package:citizenwallet/storage/wallet_isar.dart';
 import 'package:citizenwallet/main.dart';
-import 'package:citizenwallet/ui/app_theme.dart';
-import 'package:citizenwallet/ui/create_wallet_page.dart';
-import 'package:citizenwallet/ui/home_page.dart';
-import 'package:citizenwallet/ui/import_wallet_page.dart';
-import 'package:citizenwallet/util/screenshot_guard.dart';
+import 'package:citizenwallet/pages/app_theme.dart';
+import 'package:citizenwallet/pages/create_wallet_page.dart';
+import 'package:citizenwallet/pages/home_page.dart';
+import 'package:citizenwallet/pages/import_wallet_page.dart';
+import 'package:citizenwallet/helpers/screenshot_guard.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();

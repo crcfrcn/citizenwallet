@@ -31,8 +31,8 @@ target 'Runner' do
   use_frameworks!
 
   # sr25519 原生签名静态库（schnorrkel）。产物由
-  # scripts/build-signer-native.sh ios 生成，实现来自
-  # citizenwallet/rust/src/sr25519.rs，由公民钱包独立维护。
+  # node scripts/build.mjs native ios 生成，实现来自
+  # citizenwallet/rust/source/sr25519.rs，由公民钱包独立维护。
   pod 'citizenwallet_signer', :path => 'signer'
 
   # 源码外工程的 Podfile 可能是链接；插件清单必须从当前工程而非源码根读取。

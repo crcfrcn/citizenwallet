@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 
 /// sr25519 原生签名（schnorrkel）的 Dart 侧唯一入口。
 ///
-/// 实现来自 `citizenwallet/rust/src/sr25519.rs`，由钱包独立维护。
+/// 实现来自 `citizenwallet/rust/source/sr25519.rs`，由钱包独立维护。
 /// 派生语义保持迁移前一致。冷钱包永久离线，
 /// 只把这份签名实现编成独立小库 `libcitizenwallet_signer`（几百 KB），不引入链。
 ///
@@ -38,7 +38,7 @@ class NativeSr25519 {
   ///   本进程里，用 [DynamicLibrary.process] 取（iOS 不用 dylib：裸 dylib 要嵌入
   ///   加签名，且 App Store 要求动态库必须包在 .framework 里）；
   /// - macOS / Linux（`flutter test` 宿主）：找 `CARGO_TARGET_DIR/release` 下的构建产物，
-  ///   由 `scripts/build-signer-native.sh host` 产出；扩展名按宿主平台取
+  ///   由 `node scripts/build.mjs native host` 产出；扩展名按宿主平台取
   ///   （macOS `.dylib`、Linux `.so`），CI 在 Linux runner 上跑测试同样要能加载。
   static String _hostTargetDirectory() {
     final target = Platform.environment['CARGO_TARGET_DIR'];
@@ -59,7 +59,7 @@ class NativeSr25519 {
     );
     if (File(hostPath).existsSync()) return DynamicLibrary.open(hostPath);
     throw StateError(
-      '未找到原生签名库 $_libBase：请先执行 scripts/build-signer-native.sh',
+      '未找到原生签名库 $_libBase：请先执行 node scripts/build.mjs native',
     );
   }
 

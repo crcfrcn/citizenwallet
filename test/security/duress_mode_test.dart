@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:citizenwallet/security/app_lock_service.dart';
-import 'package:citizenwallet/security/pin_input_page.dart';
-import 'package:citizenwallet/ui/app_theme.dart';
-import 'package:citizenwallet/ui/settings_page.dart';
+import 'package:citizenwallet/pages/pin_input_page.dart';
+import 'package:citizenwallet/pages/app_theme.dart';
+import 'package:citizenwallet/pages/settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';

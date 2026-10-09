@@ -1,7 +1,6 @@
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
-import org.gradle.api.file.RelativePath
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.OutputDirectory
@@ -18,7 +17,7 @@ plugins {
 }
 
 
-// 限定资源的语义由明确映射保留；输入与输出隔离，正常编译自动依赖本任务。
+// 平台XML与当前工程生成的图标合并到Gradle资源输出；生成物不进入源码。
 @CacheableTask
 abstract class PrepareCitizenWalletResources @Inject constructor(
     private val files: FileSystemOperations,
@@ -27,37 +26,31 @@ abstract class PrepareCitizenWalletResources @Inject constructor(
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val sourceDirectory: DirectoryProperty
 
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val iconDirectory: DirectoryProperty
+
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 
     @TaskAction
     fun prepare() {
-        val names = mapOf(
-            "drawable_launch_background.xml" to "drawable/launch_background.xml",
-            "drawable-v21_launch_background.xml" to "drawable-v21/launch_background.xml",
-            "values-en_strings.xml" to "values-en/strings.xml",
-            "values-night_styles.xml" to "values-night/styles.xml",
-        )
         val source = sourceDirectory.get().asFile
-        names.keys.forEach { require(source.resolve(it).isFile) { "缺少平台资源输入：$it" } }
         require(!outputDirectory.get().asFile.toPath().toAbsolutePath().normalize()
             .startsWith(source.toPath().toAbsolutePath().normalize())) { "资源输出不得回写源码" }
         files.sync {
             from(sourceDirectory)
+            from(iconDirectory)
             into(outputDirectory)
             includeEmptyDirs = false
             exclude("**/.DS_Store")
-            eachFile {
-                names[relativePath.pathString]?.let { mapped ->
-                    relativePath = RelativePath(true, *mapped.split('/').toTypedArray())
-                }
-            }
         }
     }
 }
 
 val prepareCitizenWalletResources = tasks.register<PrepareCitizenWalletResources>("prepareCitizenWalletResources") {
-    sourceDirectory.set(layout.projectDirectory.dir("../../resources/android"))
+    sourceDirectory.set(layout.projectDirectory.dir("res"))
+    iconDirectory.set(layout.projectDirectory.dir("../build/generated-icons"))
     outputDirectory.set(layout.buildDirectory.dir("generated/qualified-resources"))
 }
 
@@ -72,14 +65,14 @@ val productVersionName = flutterBuildProperties.getProperty("flutter.versionName
 
 android {
     // AGP 9 的 Kotlin 与 Java 源集分别登记；单测位于 app 根，仅作为单文件测试输入。
-    sourceSets.getByName("main").kotlin.directories.apply { clear(); add("src") }
+    sourceSets.getByName("main").kotlin.directories.apply { clear(); add("source") }
     // Flutter 在当轮外部工程生成插件注册表；必须显式编译它，不能依赖源码内旧生成物。
     sourceSets.getByName("main").java.directories.apply {
         clear()
-        add("src")
+        add("source")
         add(flutterProductRoot.resolve("android/app/src/main/java").absolutePath)
     }
-    sourceSets.getByName("main").manifest.srcFile("src/AndroidManifest.xml")
+    sourceSets.getByName("main").manifest.srcFile("source/AndroidManifest.xml")
     sourceSets.getByName("test").kotlin.directories.clear()
     sourceSets.getByName("test").java.directories.clear()
     sourceSets.getByName("main").res.directories.clear()

@@ -12,7 +12,7 @@ import 'package:pointycastle/key_derivators/pbkdf2.dart';
 import 'package:pointycastle/macs/hmac.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../isar/wallet_isar.dart';
+import '../storage/wallet_isar.dart';
 import '../wallet/wallet_secure_keys.dart';
 import 'secure_storage.dart';
 

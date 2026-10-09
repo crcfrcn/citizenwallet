@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
   # 密钥派生 + 签名
   # sr25519 派生/签名/验签走原生 schnorrkel(lib/wallet/native_sr25519.dart →
-  # rust/src/sr25519.rs，由本产品独立维护)。
+  # rust/source/sr25519.rs，由本产品独立维护)。
   # polkadart_keyring 仅用于 SS58 地址编解码(base58 + 校验和，非密码学)。
   # 与 CitizenApp 的 polkadart 0.7.x 生态保持同一 ss58 1.x 依赖图。
   polkadart_keyring: 0.7.1
@@ -55,10 +55,11 @@ dev_dependencies:
   isar_community_generator: ^3.3.2
 
 flutter:
-  # 与 CitizenApp 共用 Flutter 3.44.4 + CocoaPods 的唯一 iOS 依赖模式；
+  # 与 CitizenApp 统一使用 CocoaPods 的 iOS 依赖模式；
   # 不读取本机全局 SPM 开关，避免两款产品生成不同的原生工程状态。
   config:
     enable-swift-package-manager: false
   uses-material-design: true
   assets:
-    - resources/icons/
+    - icons/citizen-logo.png
+    - icons/scan-line.svg

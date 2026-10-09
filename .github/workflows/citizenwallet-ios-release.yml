@@ -99,7 +99,7 @@ jobs:
         fetch-depth: 0
         persist-credentials: false
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 0
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 0
     - name: 装载准确Rust
       uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
       with:
@@ -108,39 +108,39 @@ jobs:
     - env:
         GH_TOKEN: "${{ github.token }}"
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 1
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 1
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 2
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 2
     - id: citizenwallet_release_ios__ios__flutter-version
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 3
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 3
     - name: 安装 Flutter
       uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
       with:
         flutter-version: "${{ steps.citizenwallet_release_ios__ios__flutter-version.outputs.version }}"
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 4
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 4
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 5
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 5
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 6
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 6
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 7
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 7
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 8
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 8
     - working-directory: .
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 9
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 9
     - env:
         IOS_KEY: "${{ secrets.IOS_KEY }}"
         IOS_PROVISIONING_PROFILE: "${{ secrets.WALLET_PROFILE }}"
       shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 10
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 10
     - shell: bash
-      run: node "$GITHUB_WORKSPACE/scripts/release/ios/ios/execute.mjs" workflow-step 11
+      run: node "$GITHUB_WORKSPACE/scripts/release/ios.mjs" workflow-step 11
     - name: 签署 iOS 正式资产构建来源
       uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
       with:
