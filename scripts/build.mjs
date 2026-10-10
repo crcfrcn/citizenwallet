@@ -189,7 +189,15 @@ const product=declaredProduct;
 const sessions=new AsyncLocalStorage();
 const scopes=new Set(['build','test']);
 const fail=message=>{throw Error(product+' target：'+message);};
-function fixedWork(scope){if(!scopes.has(scope))fail('工作根用途无效');return join(root,'target',scope);}
+function fixedWork(scope){
+ if(scope==='build'||scope==='test')return join(root,'target',scope);
+ if(typeof scope==='string'&&scope.startsWith('build/')){
+  const platform=scope.slice(6);if(Object.hasOwn(contract.platforms,platform))return join(root,'target/build',platform);
+ }
+ fail('工作根用途无效');
+}
+function isBuildWork(work){return typeof work==='string'&&Object.keys(contract.platforms).some(platform=>work===fixedWork('build/'+platform));}
+function validWork(work){return work===fixedWork('test')||isBuildWork(work);}
 function directory(path,create=false){
  let at=parse(path).root;
  for(const part of relative(at,path).split(sep)){
@@ -200,11 +208,11 @@ function directory(path,create=false){
  return fs.lstatSync(path);
 }
 function checkFixedWork(work,{create=false}={}){
- if(typeof work!=='string'||![fixedWork('build'),fixedWork('test')].includes(work))fail('工作根只允许本产品target/build或target/test固定目录');
+ if(typeof work!=='string'||!validWork(work))fail('工作根只允许本产品target/build或target/test固定目录');
  directory(work,create);return work;
 }
 function checkScratchPath(path){
- if(typeof path!=='string'||resolve(path)!==path||![fixedWork('build'),fixedWork('test')].some(work=>path===work||path.startsWith(work+sep)))fail('内部物化目录越出本产品固定工作根');
+ if(typeof path!=='string'||resolve(path)!==path||![fixedWork('test'),...Object.keys(contract.platforms).map(platform=>fixedWork('build/'+platform))].some(work=>path===work||path.startsWith(work+sep)))fail('内部物化目录越出本产品固定工作根');
  directory(path);return path;
 }
 function fixedScratch(prefix){
@@ -244,7 +252,7 @@ function empty(work,keep=[]){
  for(const name of fs.readdirSync(work)){if(keep.includes(name))continue;const path=join(work,name);removeTree(path);}
  const after=directory(work);if(before.dev!==after.dev||before.ino!==after.ino||fs.readdirSync(work).some(name=>!keep.includes(name)))fail('固定工作目录未完全清空或被替换');
 }
-function short(work,action){const path=join(work,'.claim.lock');try{fs.mkdirSync(path,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;
+function short(work,action){const path=isBuildWork(work)?join(fixedWork('build'),'.claim-'+relative(fixedWork('build'),work)):join(work,'.claim.lock');try{fs.mkdirSync(path,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;
  const record=join(path,'owner.json');let holder=null;
  if(fs.existsSync(record)){regular(record);try{holder=JSON.parse(fs.readFileSync(record,'utf8'));}catch{fail('领取锁损坏');}}
  const active=readOwner(work);
@@ -258,7 +266,7 @@ function clearFixedWork(work){
  if(owner&&!(owner.state==='retained'&&owner.pid===process.pid)&&(!session||session.owner.work!==work||session.owner.nonce!==owner.nonce))fail('固定工作目录属于其他活跃任务');
  if(owner&&owner.groups.some(pid=>alive(pid,true)))fail('工具后代退出未确认，禁止清场');
  if(fs.existsSync(join(work,'.product-build.lock')))fail('产品编译进程仍持有守卫，禁止清场');
- short(work,()=>empty(work,owner&&!(owner.state==='retained'&&owner.pid===process.pid)?['.active.json','.claim.lock']:['.claim.lock']));
+ const value=short(work,()=>{empty(work,owner&&!(owner.state==='retained'&&owner.pid===process.pid)?['.active.json','.claim.lock']:['.claim.lock']);if(isBuildWork(work)&&fs.readdirSync(work).length===0)fs.rmdirSync(work);});return value;
 }
 function remoteIdentity(env){return env.GITHUB_ACTIONS==='true'&&env.GITHUB_REPOSITORY?.split('/')[1]===product&&env.GITHUB_RUN_ID&&env.GITHUB_RUN_ATTEMPT?env.GITHUB_RUN_ID+':'+env.GITHUB_RUN_ATTEMPT+':'+env.GITHUB_JOB:null;}
 function claimFixedWork(scope,{environment=process.env,retain=false,run_id}={}){
@@ -283,7 +291,7 @@ function claimFixedWork(scope,{environment=process.env,retain=false,run_id}={}){
  });
 }
 function trackFixedProcess(work,pid){
- if(!pid||![fixedWork('build'),fixedWork('test')].includes(work))return;
+ if(!pid||!validWork(work))return;
  const owner=readOwner(work);if(!owner)return;
  if(owner.pid!==process.pid&&!(alive(owner.pid)&&process.env.PRODUCT_WORK_LEASE===owner.nonce))fail('工具进程不能写入其他任务');
  if(!owner.groups.includes(pid)){owner.groups.push(pid);writeOwner(owner);}
@@ -308,14 +316,14 @@ function retainWork(){const session=sessions.getStore();if(!session)fail('缺少
 function releaseFixedWork(session,{unsafe=false}={}){
  if(session.nested)return;
  const work=session.owner.work;
- return short(work,()=>{
+ const value=short(work,()=>{
   const owner=readOwner(work);if(owner?.nonce!==session.owner.nonce)fail('任务所有权漂移');
   const groups=owner.groups.filter(pid=>alive(pid,true));
   if(unsafe||groups.length){writeOwner({...owner,groups,state:'unsafe'});fail('工具后代退出未确认，保留守卫并禁止任务完成');}
   if(session.retain){writeOwner({...owner,groups:[],state:owner.remote?'remote':'retained'});return;}
   if(fs.existsSync(join(work,'.product-build.lock')))fail('产品编译守卫未释放，禁止完成');
-  empty(work,['.claim.lock']);
- });
+  empty(work,['.claim.lock']);if(isBuildWork(work))fs.rmdirSync(work);
+ });return value;
 }
 function withFixedWorkSync(scope,action,options={}){
  const session=claimFixedWork(scope,options);let unsafe=false;
@@ -331,19 +339,19 @@ async function withFixedWork(scope,action,options={}){
 }
 // 调用方在消费结果且产品进程退出后，只能收尾这个产品的准确固定目录。
 function finishFixedWork(work,{run_id,forceRemote=false}={}){
- if(run_id&&[fixedWork('build'),fixedWork('test')].includes(work)&&!fs.existsSync(work))return;
+ if(run_id&&validWork(work)&&!fs.existsSync(work))return;
  checkFixedWork(work);
- return short(work,()=>{
+ const value=short(work,()=>{
   const owner=readOwner(work);if(run_id&&!owner)return;if(run_id&&!owner.remote&&owner.run_id!==run_id)fail('编译收尾任务编号不一致');if(owner){
    if((alive(owner.pid)&&!(owner.pid===process.pid&&owner.state==='retained'))||owner.groups.some(pid=>alive(pid,true)))fail('产品进程退出未确认');
    if(owner.remote&&!forceRemote&&owner.remote!==remoteIdentity(process.env))fail('远端任务身份不符');
   }
   if(fs.existsSync(join(work,'.product-build.lock')))fail('产品守卫尚未释放');
   if(run_id&&fs.existsSync(join(work,'build-result.json'))){regular(join(work,'build-result.json'));if(JSON.parse(fs.readFileSync(join(work,'build-result.json'),'utf8')).run_id!==run_id)fail('结果任务编号不符');}
-  empty(work,['.claim.lock']);
- });
+  empty(work,['.claim.lock']);if(isBuildWork(work))fs.rmdirSync(work);
+ });return value;
 }
-function taskScope(work){checkFixedWork(work);return work===fixedWork('test')?'test':'build';}
+function taskScope(work){checkFixedWork(work);return work===fixedWork('test')?'test':'build/'+relative(fixedWork('build'),work);}
 
 // 内嵌测试：正式实现之后，仅由 node --test 直接运行本文件时注册。
 if (process.env.NODE_TEST_CONTEXT && process.argv.length === 2 && !process.execArgv.some(value=>/^(?:-e|--eval(?:=|$)|--input-type(?:=|$))/u.test(value)) && process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL((await import('node:path')).resolve(process.argv[1])).href) {
@@ -356,6 +364,35 @@ const {execFileSync} = await import('node:child_process');
 
 const root=join(import.meta.dirname,'..');
 const isEmpty=()=>assert.deepEqual(fs.readdirSync(fixedWork('test')),[]);
+
+// 各平台并发领取自己的工作根，正常退出后只删除本平台目录。
+test('平台编译现场独立领取且结束删除',async()=>{
+ const platforms=Object.keys(contract.platforms).slice(0,2),joined=[];let release;const both=new Promise(resolve=>{release=resolve;});
+ await Promise.all(platforms.map(platform=>withFixedWork('build/'+platform,async work=>{
+  fs.writeFileSync(join(work,'platform'),platform);joined.push(platform);if(joined.length===platforms.length)release();
+  await both;assert.equal(fs.readFileSync(join(work,'platform'),'utf8'),platform);
+ })));
+ assert.deepEqual(joined.sort(),platforms.sort());for(const platform of platforms)assert.equal(fs.existsSync(fixedWork('build/'+platform)),false);
+});
+test('调度回执收尾只删除当前钱包平台目录',async()=>{
+ const ios=fixedWork('build/ios'),android=fixedWork('build/android');
+ await withFixedWork('build/ios',async work=>fs.writeFileSync(join(work,'fixture'),'ios'),{retain:true,run_id:'123456789'});
+ await withFixedWork('build/android',async work=>fs.writeFileSync(join(work,'fixture'),'android'),{retain:true,run_id:'223456789'});
+ finishFixedWork(ios,{run_id:'123456789'});
+ assert.equal(fs.existsSync(ios),false);assert.equal(fs.readFileSync(join(android,'fixture'),'utf8'),'android');
+ finishFixedWork(android,{run_id:'223456789'});assert.equal(fs.existsSync(android),false);
+});
+test('同平台第二个进程立即拒绝，另一个平台可同时执行',async()=>{
+ const module=join(import.meta.dirname,'build.mjs');
+ await withFixedWork('build/ios',async ios=>{
+  const code='import {withFixedWork} from '+JSON.stringify(module)+';await withFixedWork("build/ios",()=>{});';
+  assert.throws(()=>execFileSync(process.execPath,['--input-type=module','-e',code],{env:{PATH:process.env.PATH},stdio:['ignore','pipe','pipe']}),/领取|活跃/);
+  await withFixedWork('build/android',async android=>{assert.notEqual(android,ios);fs.writeFileSync(join(android,'fixture'),'android');});
+  assert.equal(fs.readFileSync(join(ios,'.active.json'),'utf8').includes('ios'),true);
+ });
+ assert.equal(fs.existsSync(fixedWork('build/ios')),false);assert.equal(fs.existsSync(fixedWork('build/android')),false);
+});
+
 test('固定根拒绝任意任务目录、平台目录和外部临时根',()=>{
  for(const path of [join(root,'target'),join(root,'target/test/other'),join(root,'target/macos/test'),join(root,'target/build/run-123'),'/tmp/test'])assert.throws(()=>checkFixedWork(path),/固定目录/);
 });
@@ -387,7 +424,7 @@ test('真实工具超时和取消后停止进程组并清场',async()=>{
 });
 
 test('清场删除断开的链接且不跟随链接删除其它固定根',async()=>{
- await withFixedWork('test',async testWork=>{const keep=join(testWork,'keep');fs.writeFileSync(keep,'protected');await withFixedWork('build',async buildWork=>{fs.symlinkSync(keep,join(buildWork,'external'));fs.symlinkSync(join(buildWork,'missing'),join(buildWork,'broken'));});assert.equal(fs.readFileSync(keep,'utf8'),'protected');assert.deepEqual(fs.readdirSync(fixedWork('build')),[]);});isEmpty();
+ await withFixedWork('test',async testWork=>{const keep=join(testWork,'keep');fs.writeFileSync(keep,'protected');await withFixedWork('build/'+Object.keys(contract.platforms)[0],async buildWork=>{fs.symlinkSync(keep,join(buildWork,'external'));fs.symlinkSync(join(buildWork,'missing'),join(buildWork,'broken'));});assert.equal(fs.readFileSync(keep,'utf8'),'protected');assert.equal(fs.existsSync(fixedWork('build/'+Object.keys(contract.platforms)[0])),false);});isEmpty();
 });
 
 test('实际任务被强制终止后下一轮在同一固定根恢复并清场',async()=>{
@@ -1486,7 +1523,6 @@ async function verifyToolObject(directory,tool){
 const directoryCheck=path=>directory(path);
 // 基础工具的正式PATH投影排除发行件旧Shell/grep/sed；自举仅限本产品已声明GNU三工具。
 async function productFoundation(library,verify,{bootstrap=false,id}={}){
- if(library.gateLinuxFoundation)return library.gateLinuxFoundation;
  const base=await posixRecipe.controlledPosixTools(library,verify);if(bootstrap){if(!['bash','grep','sed'].includes(id))fail('自举仅限GNU三工具');return {...base,path:base.bin};}
  const tools={...base.tools},paths=[];for(const name of ['bash','grep','sed']){const tool=library.tools.find(x=>x.id===name),value=tool&&await verify(library,tool);if(!value)fail('GNU闭包缺失：'+name);tools[name]=value.path;paths.push(dirname(value.path));}tools.sh=tools.bash;delete tools.egrep;delete tools.fgrep;
  const view=join(library.work,'resource-tools');await directory(view,true);const shell=join(view,'sh');if(await stat(shell)){if(!((await lstat(shell)).isSymbolicLink())||await realpath(shell)!==tools.sh)fail('GNU sh交付漂移');}else await symlink(tools.sh,shell);for(const [name,path]of Object.entries(base.tools)){if(['sh','bash','grep','sed','egrep','fgrep'].includes(name))continue;const link=join(view,name);if(await stat(link)){if(!((await lstat(link)).isSymbolicLink())||await realpath(link)!==path)fail('基础交付漂移');}else await symlink(path,link);}return {tools,bin:view,path:[...paths,view].join(':')};
@@ -1868,597 +1904,6 @@ async function prepareToolSupply(tool,{original,payload,work,signal,offline,acqu
  });}finally{assertWorkQuiescent(work);await rm(at,{recursive:true,force:true});}
 }
 
-// 本仓门禁宿主资源配置，不改变原有生产配方。
-const gateProductID="citizenwallet";
-const gateBootstrapInputs={"platform":"linux","architecture":"x64","os":"24.04","commands":[{"name":"basename","path":"/usr/bin/basename","package":"coreutils"},{"name":"cat","path":"/usr/bin/cat","package":"coreutils"},{"name":"chmod","path":"/usr/bin/chmod","package":"coreutils"},{"name":"cp","path":"/usr/bin/cp","package":"coreutils"},{"name":"cut","path":"/usr/bin/cut","package":"coreutils"},{"name":"date","path":"/usr/bin/date","package":"coreutils"},{"name":"dd","path":"/usr/bin/dd","package":"coreutils"},{"name":"dirname","path":"/usr/bin/dirname","package":"coreutils"},{"name":"du","path":"/usr/bin/du","package":"coreutils"},{"name":"echo","path":"/usr/bin/echo","package":"coreutils"},{"name":"env","path":"/usr/bin/env","package":"coreutils"},{"name":"expr","path":"/usr/bin/expr","package":"coreutils"},{"name":"false","path":"/usr/bin/false","package":"coreutils"},{"name":"head","path":"/usr/bin/head","package":"coreutils"},{"name":"install","path":"/usr/bin/install","package":"coreutils"},{"name":"ln","path":"/usr/bin/ln","package":"coreutils"},{"name":"ls","path":"/usr/bin/ls","package":"coreutils"},{"name":"mkdir","path":"/usr/bin/mkdir","package":"coreutils"},{"name":"mv","path":"/usr/bin/mv","package":"coreutils"},{"name":"od","path":"/usr/bin/od","package":"coreutils"},{"name":"printf","path":"/usr/bin/printf","package":"coreutils"},{"name":"pwd","path":"/usr/bin/pwd","package":"coreutils"},{"name":"readlink","path":"/usr/bin/readlink","package":"coreutils"},{"name":"realpath","path":"/usr/bin/realpath","package":"coreutils"},{"name":"rm","path":"/usr/bin/rm","package":"coreutils"},{"name":"rmdir","path":"/usr/bin/rmdir","package":"coreutils"},{"name":"sleep","path":"/usr/bin/sleep","package":"coreutils"},{"name":"sort","path":"/usr/bin/sort","package":"coreutils"},{"name":"stat","path":"/usr/bin/stat","package":"coreutils"},{"name":"tail","path":"/usr/bin/tail","package":"coreutils"},{"name":"tee","path":"/usr/bin/tee","package":"coreutils"},{"name":"test","path":"/usr/bin/test","package":"coreutils"},{"name":"touch","path":"/usr/bin/touch","package":"coreutils"},{"name":"tr","path":"/usr/bin/tr","package":"coreutils"},{"name":"true","path":"/usr/bin/true","package":"coreutils"},{"name":"uname","path":"/usr/bin/uname","package":"coreutils"},{"name":"uniq","path":"/usr/bin/uniq","package":"coreutils"},{"name":"wc","path":"/usr/bin/wc","package":"coreutils"},{"name":"bash","path":"/usr/bin/bash","package":"bash"},{"name":"grep","path":"/usr/bin/grep","package":"grep"},{"name":"sed","path":"/usr/bin/sed","package":"sed"},{"name":"make","path":"/usr/bin/make","package":"make"},{"name":"patch","path":"/usr/bin/patch","package":"patch"},{"name":"tar","path":"/usr/bin/tar","package":"tar"},{"name":"gzip","path":"/usr/bin/gzip","package":"gzip"},{"name":"xz","path":"/usr/bin/xz","package":"xz-utils"},{"name":"awk","path":"/usr/bin/mawk","package":"mawk"},{"name":"diff","path":"/usr/bin/diff","package":"diffutils"},{"name":"cmp","path":"/usr/bin/cmp","package":"diffutils"},{"name":"find","path":"/usr/bin/find","package":"findutils"},{"name":"xargs","path":"/usr/bin/xargs","package":"findutils"},{"name":"clang","path":"/usr/lib/llvm-18/bin/clang","package":"clang-18"},{"name":"ar","path":"/usr/bin/x86_64-linux-gnu-ar","package":"binutils-x86-64-linux-gnu"},{"name":"as","path":"/usr/bin/x86_64-linux-gnu-as","package":"binutils-x86-64-linux-gnu"},{"name":"ld","path":"/usr/bin/x86_64-linux-gnu-ld.bfd","package":"binutils-x86-64-linux-gnu"},{"name":"nm","path":"/usr/bin/x86_64-linux-gnu-nm","package":"binutils-x86-64-linux-gnu"},{"name":"ranlib","path":"/usr/bin/x86_64-linux-gnu-ranlib","package":"binutils-x86-64-linux-gnu"},{"name":"strip","path":"/usr/bin/x86_64-linux-gnu-strip","package":"binutils-x86-64-linux-gnu"},{"name":"dpkg-deb","path":"/usr/bin/dpkg-deb","package":"dpkg"},{"name":"mktemp","path":"/usr/bin/mktemp","package":"coreutils"},{"name":"whoami","path":"/usr/bin/whoami","package":"coreutils"},{"name":"id","path":"/usr/bin/id","package":"coreutils"},{"name":"seq","path":"/usr/bin/seq","package":"coreutils"},{"name":"comm","path":"/usr/bin/comm","package":"coreutils"},{"name":"nproc","path":"/usr/bin/nproc","package":"coreutils"},{"name":"truncate","path":"/usr/bin/truncate","package":"coreutils"},{"name":"sha256sum","path":"/usr/bin/sha256sum","package":"coreutils"},{"name":"objcopy","path":"/usr/bin/x86_64-linux-gnu-objcopy","package":"binutils-x86-64-linux-gnu"},{"name":"objdump","path":"/usr/bin/x86_64-linux-gnu-objdump","package":"binutils-x86-64-linux-gnu"},{"name":"readelf","path":"/usr/bin/x86_64-linux-gnu-readelf","package":"binutils-x86-64-linux-gnu"},{"name":"file","path":"/usr/bin/file","package":"file"},{"name":"flock","path":"/usr/bin/flock","package":"util-linux"}],"packages":[{"name":"dpkg","version":"1.22.6ubuntu6.6","source":"https://packages.ubuntu.com/noble/dpkg"},{"name":"bash","version":"5.2.21-2ubuntu4","source":"https://packages.ubuntu.com/noble/bash"},{"name":"grep","version":"3.11-4build1","source":"https://packages.ubuntu.com/noble/grep"},{"name":"sed","version":"4.9-2ubuntu0.24.04.1","source":"https://packages.ubuntu.com/noble/sed"},{"name":"coreutils","version":"9.4-3ubuntu6.3","source":"https://packages.ubuntu.com/noble/coreutils"},{"name":"make","version":"4.3-4.1build2","source":"https://packages.ubuntu.com/noble/make"},{"name":"patch","version":"2.7.6-7build3","source":"https://packages.ubuntu.com/noble/patch"},{"name":"mawk","version":"1.3.4.20240123-1build1","source":"https://packages.ubuntu.com/noble/mawk"},{"name":"diffutils","version":"1:3.10-1ubuntu0.1","source":"https://packages.ubuntu.com/noble/diffutils"},{"name":"findutils","version":"4.9.0-5build1","source":"https://packages.ubuntu.com/noble/findutils"},{"name":"tar","version":"1.35+dfsg-3ubuntu0.4","source":"https://packages.ubuntu.com/noble/tar"},{"name":"gzip","version":"1.12-1ubuntu3.2","source":"https://packages.ubuntu.com/noble/gzip"},{"name":"xz-utils","version":"5.6.1+really5.4.5-1ubuntu0.3","source":"https://packages.ubuntu.com/noble/xz-utils"},{"name":"clang-18","version":"1:18.1.3-1ubuntu1","source":"https://packages.ubuntu.com/noble/clang-18"},{"name":"binutils-x86-64-linux-gnu","version":"2.42-4ubuntu2.10","source":"https://packages.ubuntu.com/noble/binutils-x86-64-linux-gnu"},{"name":"libexpat1-dev","version":"2.6.1-2ubuntu0.6","source":"https://packages.ubuntu.com/noble/libexpat1-dev"},{"name":"zlib1g-dev","version":"1:1.3.dfsg-3.1ubuntu2.2","source":"https://packages.ubuntu.com/noble/zlib1g-dev"},{"name":"libc6","version":"2.39-0ubuntu8.9","source":"https://packages.ubuntu.com/noble/libc6"},{"name":"libc6-dev","version":"2.39-0ubuntu8.9","source":"https://packages.ubuntu.com/noble/libc6-dev"},{"name":"libc-dev-bin","version":"2.39-0ubuntu8.9","source":"https://packages.ubuntu.com/noble/libc-dev-bin"},{"name":"libgcc-13-dev","version":"13.3.0-6ubuntu2~24.04.1","source":"https://packages.ubuntu.com/noble/libgcc-13-dev"},{"name":"libstdc++-13-dev","version":"13.3.0-6ubuntu2~24.04.1","source":"https://packages.ubuntu.com/noble/libstdc++-13-dev"},{"name":"file","version":"1:5.45-3build1","source":"https://packages.ubuntu.com/noble/amd64/file"},{"name":"util-linux","version":"2.39.3-9ubuntu6.6","source":"https://packages.ubuntu.com/noble-updates/amd64/util-linux"},{"name":"libclang1-18","version":"1:18.1.3-1ubuntu1","source":"https://packages.ubuntu.com/noble-updates/amd64/libclang1-18"},{"name":"libclang-18-dev","version":"1:18.1.3-1ubuntu1","source":"https://packages.ubuntu.com/noble-updates/amd64/libclang-18-dev"}],"artifacts":[{"name":"libcurl4-openssl-dev","version":"8.5.0-2ubuntu10.15","architecture":"amd64","url":"https://archive.ubuntu.com/ubuntu/pool/main/c/curl/libcurl4-openssl-dev_8.5.0-2ubuntu10.15_amd64.deb","sha256":"c63393dd39d8bc49580e3e23be3eda63ce62ae4823d95f692c7547b25ade8a31","size":446114,"depends":"libcurl4t64 (= 8.5.0-2ubuntu10.15)"},{"name":"libcurl4t64","version":"8.5.0-2ubuntu10.15","architecture":"amd64","url":"https://archive.ubuntu.com/ubuntu/pool/main/c/curl/libcurl4t64_8.5.0-2ubuntu10.15_amd64.deb","sha256":"02f8f39727a43d5a7057cba35cda866be00d929b91ea67ed02dd9d6402fa551c","size":343472,"depends":"libbrotli1 (>= 0.6.0), libc6 (>= 2.34), libgssapi-krb5-2 (>= 1.17), libidn2-0 (>= 2.0.0), libldap2 (>= 2.6.2), libnghttp2-14 (>= 1.50.0), libpsl5t64 (>= 0.16.0), librtmp1 (>= 2.3), libssh-4 (>= 0.9.0), libssl3t64 (>= 3.0.0), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4)"}]};
-const gateActionlintSource={"version":"1.7.12","url":"https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz","sha256":"8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8","root":".","executable":"actionlint","upstream_patches":[]};
-const gateHostArchives={"rust":{"version":"1.97.1","url":"https://static.rust-lang.org/dist/2026-07-16/rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz","sha256":"88f28fa9af20594179f85d6df67078dfd6fa93e2f6da5e1e9b0ac4997988ca4f","root":"rust-1.97.1-x86_64-unknown-linux-gnu","components":[{"target":"wasm32-unknown-unknown","url":"https://static.rust-lang.org/dist/2026-07-16/rust-std-1.97.1-wasm32-unknown-unknown.tar.xz","sha256":"fa0edb6e9f34faae5735554d62d50875eded839dc707d0f1c01467a918d8453b","root":"rust-std-1.97.1-wasm32-unknown-unknown","component":"rust-std-wasm32-unknown-unknown"},{"component":"rust-src","url":"https://static.rust-lang.org/dist/2026-07-16/rust-src-1.97.1.tar.xz","sha256":"e9a1e616d04c6845895c827a178b9227f7c7199f3f4a80af81ab3aff7b80156b","root":"rust-src-1.97.1"}]},"flutter":{"version":"3.47.2","url":"https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.2-stable.tar.xz","sha256":"447878859d01ca9bfdb99a85f245af07ed8a15fedcd9d189c4749e8e92d1f185","root":"flutter","ref":"d3b14c876900e553bc736ca19295fc09e3853e8e","dart_version":"3.13.2"}};
-const gateResourceTools=(await (async()=>{
-const {execFileSync} = await import('node:child_process');
-const {createHash} = await import('node:crypto');
-const {appendFileSync,chmodSync,lstatSync,mkdirSync,readFileSync,readdirSync,realpathSync,readlinkSync,rmSync,symlinkSync,writeFileSync} = await import('node:fs');
-const {dirname,isAbsolute,join,resolve} = await import('node:path');
-const fields={git:'PRODUCT_GIT_BIN',bash:'PRODUCT_BASH_BIN',grep:'PRODUCT_GREP_BIN',sed:'PRODUCT_SED_BIN'};
-const fail=reason=>{throw Error('产品门禁资源：'+reason);};
-const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
-const keys=(value,expected)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('\0')===[...expected].sort().join('\0');
-// 入口与祖先均须是真实普通文件；正常门禁没有PATH查找或系统工具回退。
-function exactExecutable(path){if(typeof path!=='string'||!isAbsolute(path)||resolve(path)!==path||/[\x00-\x1f]/u.test(path))fail('缺少规范绝对入口');const s=lstatSync(path);if(!s.isFile()||s.isSymbolicLink()||!s.size||!(s.mode&0o111)||realpathSync(path)!==path)fail('须为真实普通可执行文件');return path;}
-function directory(path){if(!isAbsolute(path)||resolve(path)!==path||realpathSync(path)!==path||!lstatSync(path).isDirectory())fail('工作根无效');}
-function toolEnvironment(input=process.env,execute=execFileSync){
- const paths=Object.fromEntries(Object.values(fields).map(field=>[field,exactExecutable(input[field])]));
- const env={...paths,HOME:input.HOME,LANG:'C',LC_ALL:'C',PATH:[...new Set([dirname(process.execPath),...Object.values(paths).map(dirname)])].join(':'),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0'};
- const expected={git:/^git version 2\.54\.0$/u,bash:/^GNU bash, version 5\.3\.20\([1-9][0-9]*\)-release(?:\s|$)/u,grep:/^grep \(GNU grep\) 3\.12$/u,sed:/^sed \(GNU sed\) 4\.10$/u};
- for(const [id,field]of Object.entries(fields)){let first=String(execute(paths[field],['--version'],{env,encoding:'utf8',timeout:20000,maxBuffer:1024**2,stdio:['ignore','pipe','pipe']})).split(/\r?\n/u)[0];if(id==='sed'&&first.startsWith(paths[field]+' (GNU sed)'))first='sed'+first.slice(paths[field].length);if(!expected[id].test(first))fail(id+'版本漂移');}return Object.freeze(env);
-}
-// 来源闭集来自本仓声明；每项准确官方坐标、版本、补丁次序及完整摘要一起检查。
-function validateToolSources(plan){
- const versions={git:'2.54.0',bash:'5.3.20',grep:'3.12',sed:'4.10',actionlint:'1.7.12'};
- if(!keys(plan,['sources','bootstrap'])||!keys(plan.sources,Object.keys(versions)))fail('来源闭集无效');
- for(const [id,version]of Object.entries(versions)){const r=plan.sources[id],base=id==='bash'?'5.3':version;sourceMirrors(r);
- const coordinates=id==='git'?['https://www.kernel.org/pub/software/scm/git/git-'+version+'.tar.xz','git-'+version]:id==='actionlint'?['https://github.com/rhysd/actionlint/releases/download/v'+version+'/actionlint_'+version+'_linux_amd64.tar.gz','.']:['https://ftp.gnu.org/gnu/'+id+'/'+id+'-'+base+(id==='bash'?'.tar.gz':'.tar.xz'),id+'-'+base];
- if(!keys(r,['version','url','sha256','root','executable','upstream_patches',...(['bash','grep','sed'].includes(id)?['mirrors']:[])])||r.version!==version||JSON.stringify([r.url,r.root])!==JSON.stringify(coordinates)||r.executable!==(id==='actionlint'?'actionlint':'bin/'+id)||!/^[a-f0-9]{64}$/u.test(r.sha256)||!Array.isArray(r.upstream_patches)||r.upstream_patches.length!==(id==='bash'?20:0))fail('官方来源不符：'+id);
- for(const [i,p]of r.upstream_patches.entries())if(!keys(p,['url','sha256','mirrors'])||p.url!=='https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-'+String(i+1).padStart(3,'0')||!/^[a-f0-9]{64}$/u.test(p.sha256))fail('补丁闭包无效');
- for(const p of r.upstream_patches)sourceMirrors(p);}
- const b=plan.bootstrap;if(!keys(b,['platform','architecture','os','commands','packages','artifacts'])||b.platform!=='linux'||b.architecture!=='x64'||b.os!=='24.04'||!Array.isArray(b.commands)||!b.commands.length||!Array.isArray(b.packages)||!b.packages.length||new Set(b.commands.map(r=>r.name)).size!==b.commands.length||new Set(b.packages.map(r=>r.name)).size!==b.packages.length)fail('Bootstrap闭集无效');
- for(const r of b.packages)if(!keys(r,['name','version','source'])||!r.version||!['https://packages.ubuntu.com/noble/'+r.name.split(':')[0],'https://packages.ubuntu.com/noble/amd64/'+r.name.split(':')[0],'https://packages.ubuntu.com/noble-updates/amd64/'+r.name.split(':')[0]].includes(r.source))fail('包来源不符');
- for(const r of b.commands)if(!keys(r,['name','path','package'])||!/^\/usr\/(?:bin|lib\/llvm-18\/bin)\/[a-z0-9_+.-]+$/u.test(r.path)||!b.packages.some(p=>p.name===r.package))fail('命令归属不符');
- if(!Array.isArray(b.artifacts)||b.artifacts.length!==2)fail('curl原件闭包无效');
- for(const [i,r]of b.artifacts.entries())if(!keys(r,['name','version','architecture','url','sha256','size','depends'])||r.name!==['libcurl4-openssl-dev','libcurl4t64'][i]||r.version!=='8.5.0-2ubuntu10.15'||r.architecture!=='amd64'||r.size!==[446114,343472][i]||r.sha256!==['c63393dd39d8bc49580e3e23be3eda63ce62ae4823d95f692c7547b25ade8a31','02f8f39727a43d5a7057cba35cda866be00d929b91ea67ed02dd9d6402fa551c'][i]||r.depends!==["libcurl4t64 (= 8.5.0-2ubuntu10.15)","libbrotli1 (>= 0.6.0), libc6 (>= 2.34), libgssapi-krb5-2 (>= 1.17), libidn2-0 (>= 2.0.0), libldap2 (>= 2.6.2), libnghttp2-14 (>= 1.50.0), libpsl5t64 (>= 0.16.0), librtmp1 (>= 2.3), libssh-4 (>= 0.9.0), libssl3t64 (>= 3.0.0), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4)"][i]||r.url!=='https://archive.ubuntu.com/ubuntu/pool/main/c/curl/'+r.name+'_'+r.version+'_amd64.deb')fail('curl坐标不符');
- return plan;
-}
-// Depends及Pre-Depends闭合；独立解包的原件不得伪报系统安装状态。
-function packageClosure(rows,roots,compare,staged=[]){
- const map=new Map(rows.map(r=>[r.name,{...r,origin:'installed'}]));if(map.size!==rows.length||new Set(staged.map(r=>r.name)).size!==staged.length)fail('包身份重复');
- for(const r of staged){if(r.origin!=='staged'||Object.hasOwn(r,'status'))fail('原件状态伪造');map.set(r.name,r);}
- const available=r=>r&&(r.origin==='staged'||r.status==='install ok installed');
- // 官方Provides的同名不同版本分别保留；仅名称与版本完全相同的声明拒绝重复。
- const providers=new Map();
- for(const record of [...map.values()].filter(available).sort((a,b)=>a.name.localeCompare(b.name))){
-  const seen=new Set();
-  for(const item of (record.provides||'').split(',').map(value=>value.trim()).filter(Boolean)){
-   const match=/^([a-z0-9+.-]+)(?:\s*\(=\s*([^()\s]+)\))?$/u.exec(item);
-   if(!match)fail('Ubuntu虚拟包声明无效');
-   const identity=JSON.stringify([match[1],match[2]??null]);
-   if(seen.has(identity))fail('Ubuntu虚拟包声明无效');seen.add(identity);
-   const list=providers.get(match[1])||[];list.push({record,version:match[2]});providers.set(match[1],list);
-  }
- }
- for(const root of roots){const r=map.get(root.name);if(!available(r)||r.version!==root.version)fail('根包不符：'+root.name);}
- const queue=roots.map(r=>r.name),selected=new Map();while(queue.length){const name=queue.shift();if(selected.has(name))continue;const r=map.get(name);if(!available(r))fail('缺失依赖：'+name);selected.set(name,r);
- for(const clause of [r.depends,r.preDepends].filter(Boolean).join(',').split(',').map(s=>s.trim()).filter(Boolean)){
- let candidate;for(const item of clause.split('|')){const m=/^([a-z0-9+.-]+)(?::(?:amd64|native|any))?(?:\s*\((<<|<=|=|>=|>>)\s*([^()\s]+)\))?$/u.exec(item.trim());if(!m)fail('依赖语法无效');const v=map.get(m[1]);if(available(v)&&(!m[2]||compare(v.version,m[2],m[3]))){candidate=v.name;break;}const provider=(providers.get(m[1])||[]).find(p=>!m[2]||(p.version&&compare(p.version,m[2],m[3])));if(provider){candidate=provider.record.name;break;}}if(!candidate)fail('依赖闭包缺失：'+clause);queue.push(candidate);
- }}return [...selected.values()].sort((a,b)=>a.name.localeCompare(b.name));
-}
-function snapshot(bootstrap,staged=[]){
- const query=exactExecutable('/usr/bin/dpkg-query'),dpkg=exactExecutable('/usr/bin/dpkg'),env={PATH:'',LANG:'C',LC_ALL:'C'};
- const run=(cmd,args)=>String(execFileSync(cmd,args,{env,encoding:'utf8',timeout:20000,maxBuffer:8*1024**2})).trim();
- const format=['Package','Architecture','Status','Version','Depends','Pre-Depends','Provides'].map(field=>'$'+'{'+field+'}').join('\t')+'\n';
- const rows=run(query,['-W','-f='+format]).split('\n').map(s=>s.split('\t')).filter(r=>['all','amd64'].includes(r[1])).map(([name,architecture,status,version,depends,preDepends,provides])=>({name,architecture,status,version,depends,preDepends,provides}));
- const compare=(a,op,b)=>{try{run(dpkg,['--compare-versions',a,op,b]);return true;}catch(e){if(e.status===1)return false;throw e;}};
- const packages=packageClosure(rows,[...bootstrap.packages,...staged],compare,staged);
- for(const r of packages)if(r.origin==='installed'&&run(dpkg,['--verify',r.name]))fail('包字节漂移：'+r.name);
- const commands=bootstrap.commands.map(r=>{const path=exactExecutable(r.path),owners=run(query,['-S',path]).split('\n');if(!owners.some(v=>v===r.package+': '+path||v===r.package+':amd64: '+path))fail('命令包归属不符：'+r.name);return {...r,sha256:digest(readFileSync(path))};});
- const clang=commands.find(r=>r.name==='clang');if(!/^Ubuntu clang version 18\.1\.3(?:\s|$)/u.test(run(clang.path,['--version'])))fail('编译器版本不符');
- return {commands,packages};
-}
-async function fetchOriginal(record, destination, request = fetch) {
-  let response;
-  if (sourceMirrors(record).length === 3) {
-    ({response} = await requestGNUOriginal(record, request));
-  } else {
-    const origin = new URL(record.url), allowed = new Set([origin.hostname]);
-    if (origin.protocol !== 'https:' || origin.username || origin.password || origin.port) fail('官方原件来源必须是规范HTTPS');
-    if (origin.hostname === 'github.com') for (const name of ['release-assets.githubusercontent.com','objects.githubusercontent.com']) allowed.add(name);
-    if (origin.hostname === 'www.kernel.org') allowed.add('cdn.kernel.org');
-    let url = origin;
-    for (let i = 0; i < 4; i++) {
-      response = await request(url.href, {redirect:'manual', credentials:'omit', signal:AbortSignal.timeout(120000)});
-      if ([301,302,303,307,308].includes(response.status)) {
-        const location = response.headers.get('location');
-        await response.body?.cancel();
-        if (!location) fail('官方原件重定向缺少目标');
-        const target = new URL(location, url);
-        if (target.protocol !== 'https:' || target.username || target.password || target.port || !allowed.has(target.hostname)) fail('官方原件重定向越界');
-        url = target; response = null; continue;
-      }
-      if (!response.ok || response.url && response.url !== url.href) fail('官方原件读取失败');
-      break;
-    }
-    if (!response) fail('官方原件重定向次数超限');
-  }
-  const chunks = []; let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length; if (size > 128 * 1024 ** 2) fail('官方原件超限'); chunks.push(Buffer.from(chunk));
-  }
-  const bytes = Buffer.concat(chunks);
-  if (!size || record.size && size !== record.size || digest(bytes) !== record.sha256) fail('官方原件摘要或大小不符');
-  writeFileSync(destination, bytes, {flag:'wx', mode:0o444});
-}
-
-
-function inventory(root,at=root){const files=[];for(const name of readdirSync(at).sort()){const path=join(at,name),s=lstatSync(path),key=path.slice(root.length+1);if(s.isDirectory()&&!s.isSymbolicLink())files.push(...inventory(root,path));else if(s.isFile()&&!s.isSymbolicLink())files.push({path:key,sha256:digest(readFileSync(path)),mode:s.mode&0o777});else if(s.isSymbolicLink()){if(!realpathSync(path).startsWith(root+'/'))fail('对象链接越界');files.push({path:key,target:readlinkSync(path)});}else fail('对象特殊文件');}return files;}
-// 数据段在解包前检查真实tar头、重复条目、特殊类型及链接越界。
-function validateTar(bytes){
- if(!Buffer.isBuffer(bytes)||bytes.length<1024||bytes.length%512)fail('tar长度无效');let offset=0;const names=new Set();
- while(offset<bytes.length){const h=bytes.subarray(offset,offset+512);if(h.every(v=>v===0)){if(!bytes.subarray(offset).every(v=>v===0))fail('tar尾部无效');return;}
- const str=(a,b)=>h.subarray(a,b).toString('utf8').split('\0')[0],num=(a,b)=>{const v=str(a,b).trim();if(!/^[0-7]+$/u.test(v))fail('tar数字无效');return parseInt(v,8);};
- if([...h].reduce((n,v,i)=>n+(i>=148&&i<156?32:v),0)!==num(148,156))fail('tar头校验不符');
- const type=str(156,157)||'0',raw=(str(257,263)==='ustar'&&str(345,500)?str(345,500)+'/':'')+str(0,100),name=raw==='./'&&type==='5'?'.':raw.replace(/^\.\//u,'').replace(/\/$/u,'');
- if(!['0','1','2','5'].includes(type)||isAbsolute(name)||/[\x00-\x1f]/u.test(name)||name!=='.'&&name.split('/').some(p=>!p||p==='.'||p==='..')||name==='.'&&type!=='5')fail('tar路径或类型无效');
- if(type!=='5'&&names.has(name))fail('tar条目重复');names.add(name);
- if(['1','2'].includes(type)){const link=str(157,257),target=resolve('/payload',type==='2'?dirname(name):'.',link);if(!link||isAbsolute(link)||!target.startsWith('/payload/'))fail('tar链接越界');}
- offset+=512+Math.ceil(num(124,136)/512)*512;if(offset>bytes.length)fail('tar正文缺失');}fail('tar未终结');
-}
-function protect(root){for(const name of readdirSync(root)){const path=join(root,name),s=lstatSync(path);if(s.isDirectory()&&!s.isSymbolicLink())protect(path);else if(!s.isSymbolicLink())chmodSync(path,s.mode&0o111?0o555:0o444);}chmodSync(root,0o555);}
-
-// 本仓显式工具准备独立于远端Workflow；仅使用声明的Ubuntu宿主和依赖。
-async function prepareRunnerTools(work,{bootstrap=false,environment=process.env,request=fetch,signal}={}){
- if(!bootstrap||process.platform!=='linux'||process.arch!=='x64')fail('首次准备身份无效');
- const os=readFileSync('/etc/os-release','utf8');if(!/^ID=ubuntu$/mu.test(os)||!/^VERSION_ID="24\.04"$/mu.test(os))fail('宿主不是Ubuntu24.04');
- directory(work);if(!work.startsWith(root+'/target/')||readdirSync(work).length)fail('准备根须为Runner固定独占空目录');
- const plan=validateToolSources(gateResourcePlan()),inputs=plan.bootstrap,sources=plan.sources;
- const before=snapshot(inputs),paths=Object.fromEntries(before.commands.map(r=>[r.name,r.path]));
- mkdirSync(join(work,'objects'));const bin=join(work,'bootstrap-bin');mkdirSync(bin);
- for(const r of before.commands)symlinkSync(r.path,join(bin,r.name));symlinkSync(paths.bash,join(bin,'sh'));
- const env={HOME:work,TMPDIR:work,PATH:bin,LANG:'C',LC_ALL:'C',SHELL:paths.bash,CONFIG_SHELL:paths.bash,CC:paths.clang+' --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13',CXX:paths.clang+' --driver-mode=g++ --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13',AR:paths.ar,AS:paths.as,LD:paths.ld,NM:paths.nm,RANLIB:paths.ranlib,STRIP:paths.strip,MAKE:paths.make,CFLAGS:'-O2',CXXFLAGS:'-O2',CONFIG_SITE:'',PKG_CONFIG:'false',PKG_CONFIG_LIBDIR:'',MAKEINFO:'true',HELP2MAN:'true'};
- const run=async(cmd,args,cwd=work,extra={})=>(await runResourceProcess(cmd,args,{cwd,env:{...env,PRODUCT_WORK_DIR:work},signal,quietOutput:extra.encoding===null,encoding:extra.encoding===null?'buffer':'utf8',timeout:3600000,maxBuffer:extra.maxBuffer||16*1024**2})).stdout;
- const curl=join(work,'objects','curl'),payload=join(curl,'payload');mkdirSync(curl);mkdirSync(payload);const staged=[];
- for(const r of inputs.artifacts){
- const file=join(curl,r.name+'.deb');await fetchOriginal(r,file,request);
- const format=['Package','Version','Architecture','Depends','Pre-Depends'].map(field=>'$'+'{'+field+'}').join('\t')+'\n';
- const control=String(await run(paths['dpkg-deb'],['--show','--showformat='+format,file])).replace(/\r?\n$/u,'');if(control!==[r.name,r.version,r.architecture,r.depends,''].join('\t'))fail('curl控制字段不符');
- validateTar(await run(paths['dpkg-deb'],['--fsys-tarfile',file],work,{encoding:null,maxBuffer:32*1024**2}));
- await run(paths['dpkg-deb'],['--extract',file,payload]);staged.push({name:r.name,version:r.version,depends:r.depends,preDepends:'',origin:'staged'});}
- const curlFiles=inventory(payload),verified=snapshot(inputs,staged);
- for(const file of [join(payload,'usr/include/x86_64-linux-gnu/curl/curl.h'),join(payload,'usr/lib/x86_64-linux-gnu/libcurl.so.4.8.0')])if(!lstatSync(file).isFile()||realpathSync(file)!==file)fail('curl开发输入缺失');
- const flags=['CURL_CFLAGS=-I'+join(payload,'usr/include/x86_64-linux-gnu'),'CURL_LDFLAGS=-L'+join(payload,'usr/lib/x86_64-linux-gnu')+' -Wl,-rpath,'+join(payload,'usr/lib/x86_64-linux-gnu')+' -lcurl','CURL_CONFIG='+paths.false];
- const delivered={},objects=[];
- for(const id of ['bash','grep','sed','git','actionlint']){
- const source=sources[id],object=join(work,'objects',id);mkdirSync(object);objects.push([object,source]);const archive=join(object,'source.archive');await fetchOriginal(source,archive,request);
- const listing=String(await run(paths.tar,['-tf',archive])).trim().split('\n');if(listing.some(name=>isAbsolute(name)||name.split('/').includes('..')))fail('发行归档路径越界');
- if(id==='actionlint'){if(listing.filter(name=>name==='actionlint').length!==1)fail('检查器归档入口不唯一');await run(paths.tar,['-xkf',archive,'--no-same-owner','--no-same-permissions','-C',object,'actionlint']);
- delivered.TATAGATE_ACTIONLINT=exactExecutable(join(object,'actionlint'));if(String(await run(delivered.TATAGATE_ACTIONLINT,['-version'])).split(/\r?\n/u)[0]!=='1.7.12')fail('检查器版本不符');continue;}
- if(!listing.length||listing.some(name=>name!==source.root&&!name.startsWith(source.root+'/')))fail('发行源码根不符');
- const unpack=join(object,'unpack');mkdirSync(unpack);await run(paths.tar,['-xkf',archive,'--no-same-owner','--no-same-permissions','-C',unpack]);const src=join(unpack,source.root);directory(src);inventory(src);
- for(const [i,p]of source.upstream_patches.entries()){const file=join(object,'bash53-'+String(i+1).padStart(3,'0'));await fetchOriginal(p,file,request);await run(paths.patch,['--batch','--forward','--fuzz=0','-p0','-i',file],src);}
- const target=join(object,'payload');
- if(id==='git')await run(paths.make,['-j2','CC='+env.CC,'AR='+paths.ar,'NO_GETTEXT=YesPlease','NO_TCLTK=YesPlease','NO_PERL=YesPlease','NO_PYTHON=YesPlease','NO_INSTALL_HARDLINKS=YesPlease','SHELL_PATH='+delivered.PRODUCT_BASH_BIN,'SHELL='+delivered.PRODUCT_BASH_BIN,...flags,'prefix='+target,'install'],src);
- else{const args=['--prefix='+target,'--disable-nls'];if(id==='bash')args.push('--without-bash-malloc');if(id==='grep')args.push('--disable-perl-regexp');await run(env.CONFIG_SHELL,[join(src,'configure'),...args],src);await run(paths.make,['-j2','SHELL='+env.CONFIG_SHELL],src);await run(paths.make,['install','SHELL='+env.CONFIG_SHELL],src);}
- delivered[fields[id]]=exactExecutable(join(target,source.executable));
- if(id==='bash'){env.SHELL=delivered.PRODUCT_BASH_BIN;env.CONFIG_SHELL=delivered.PRODUCT_BASH_BIN;env.PATH=dirname(delivered.PRODUCT_BASH_BIN)+':'+bin;}
- if(id==='grep')for(const name of ['egrep','fgrep']){const path=join(target,'bin',name),s=lstatSync(path,{throwIfNoEntry:false});if(s){if(!s.isFile()||s.isSymbolicLink())fail('grep别名无效');rmSync(path);}}
- }
- if(JSON.stringify(snapshot(inputs,staged))!==JSON.stringify(verified)||JSON.stringify(inventory(payload))!==JSON.stringify(curlFiles))fail('构建输入发生变化');
- // 先保护，再记录最终模式和全部字节；回读期间不接受源码、补丁或产物变化。
- for(const [object,source]of [...objects,[curl,{artifacts:inputs.artifacts}]]){
- protect(object);chmodSync(object,0o755);const files=inventory(object),receipt=JSON.stringify({source,bootstrap:verified,files},null,2)+'\n';
- writeFileSync(join(object,'receipt.json'),receipt,{flag:'wx',mode:0o444});chmodSync(object,0o555);
- if(readFileSync(join(object,'receipt.json'),'utf8')!==receipt||JSON.stringify(inventory(object).filter(r=>r.path!=='receipt.json'))!==JSON.stringify(files))fail('对象完整回执不符');
- }
- const result=toolEnvironment({...environment,...delivered});rmSync(bin,{recursive:true});return {...result,TATAGATE_ACTIONLINT:delivered.TATAGATE_ACTIONLINT};
-}
-// GNU原件仅使用规范来源与两份固定镜像；相同文件路径、顺序和摘要不得漂移。
-function sourceMirrors(record) {
-  const selected = /^https:\/\/ftp\.gnu\.org\/gnu\/(?:bash\/bash-5\.3\.tar\.gz|grep\/grep-3\.12\.tar\.xz|sed\/sed-4\.10\.tar\.xz|bash\/bash-5\.3-patches\/bash53-(?:00[1-9]|01[0-9]|020))$/u.test(record?.url);
-  if (!selected) {
-    if (Object.hasOwn(record ?? {}, 'mirrors')) fail('未登记原件不能增加镜像');
-    return [record.url];
-  }
-  const suffix = record.url.slice('https://ftp.gnu.org/gnu/'.length);
-  const expected = ['https://mirrors.ocf.berkeley.edu/gnu/', 'https://mirror.csclub.uwaterloo.ca/gnu/'].map(base => base + suffix);
-  if (!Array.isArray(record.mirrors) || JSON.stringify(record.mirrors) !== JSON.stringify(expected)
-    || !/^[a-f0-9]{64}$/u.test(record.sha256)) fail('GNU镜像坐标、顺序或摘要无效');
-  return [record.url, ...record.mirrors];
-}
-
-// 只在连接暂时失败或明确可重试的HTTP状态时换站；证书、越界和摘要失败仍立即终止。
-async function requestGNUOriginal(record, request = fetch, {signal, headers} = {}) {
-  const addresses = sourceMirrors(record), allowed = new Set(addresses);
-  if (addresses.length !== 3) fail('GNU获取缺少固定镜像闭集');
-  const retryCodes = new Set(['UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_SOCKET',
-    'ETIMEDOUT','ECONNRESET','ECONNREFUSED','ENOTFOUND','EAI_AGAIN']);
-  for (const [index, address] of addresses.entries()) {
-    let url = address;
-    for (let count = 0; count < 4; count++) {
-      signal?.throwIfAborted();
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(new DOMException('GNU响应头等待超时', 'TimeoutError')), 12000);
-      const combined = AbortSignal.any([controller.signal, AbortSignal.timeout(120000), ...(signal ? [signal] : [])]);
-      let response;
-      try {
-        response = await request(url, {redirect:'manual', credentials:'omit', signal:combined, ...(headers ? {headers} : {})});
-      } catch (error) {
-        signal?.throwIfAborted();
-        if (index < addresses.length - 1 && (controller.signal.aborted || retryCodes.has(error?.cause?.code ?? error?.code))) break;
-        throw error;
-      } finally { clearTimeout(timer); }
-      if (response.url && response.url !== url) fail('GNU响应来源漂移');
-      if ([301,302,303,307,308].includes(response.status)) {
-        const location = response.headers.get('location');
-        await response.body?.cancel();
-        if (!location) fail('GNU跳转缺少目标');
-        const target = new URL(location, url).href;
-        if (!allowed.has(target)) fail('GNU跳转越出登记坐标');
-        if (count === 3) fail('GNU跳转次数超限');
-        url = target; continue;
-      }
-      if ([404,408,429].includes(response.status) || response.status >= 500 && response.status <= 599) {
-        await response.body?.cancel();
-        if (index < addresses.length - 1) break;
-        fail('GNU所有固定入口均不可用');
-      }
-      if (!response.ok || !response.body) { await response.body?.cancel(); fail('GNU原件响应失败'); }
-      return {response, url};
-    }
-  }
-  fail('GNU原件获取失败');
-}
-
-return Object.freeze({exactExecutable,toolEnvironment,validateToolSources,packageClosure,fetchOriginal,validateTar,prepareRunnerTools,sourceMirrors,requestGNUOriginal,inventory,snapshot,protect});
-})());
-const gatePrepareTools=(work,options)=>gateResourceTools.prepareRunnerTools(work,options);
-
-// 门禁资源只有本产品这一处真源；源码坐标直接消费现有工具声明，不再存门禁副本。
-function gateResourcePlan() {
- const sources={};
- const mirrors=url=>['https://mirrors.ocf.berkeley.edu/gnu/','https://mirror.csclub.uwaterloo.ca/gnu/'].map(base=>base+url.slice('https://ftp.gnu.org/gnu/'.length));
- for(const id of ['git','bash','grep','sed']){
-  const tool=toolDefinitions.find(tool=>tool.id===id),archive=tool?.archive;
-  if(!tool||archive?.kind!=='native-source')fail('门禁缺少本产品官方工具来源');
-  sources[id]={version:tool.version,url:archive.url,sha256:archive.sha256,root:archive.root,executable:archive.executable,
-   upstream_patches:(tool.upstream_patches||[]).map(patch=>({...patch,mirrors:mirrors(patch.url)})),
-   ...(id==='git'?{}:{mirrors:mirrors(archive.url)})};
- }
- sources.actionlint=structuredClone(gateActionlintSource);
- return gateResourceTools.validateToolSources({sources,bootstrap:structuredClone(gateBootstrapInputs)});
-}
-
-// 对象来源与本产品声明逐项闭合，合法JSON或自造摘要不构成工具来源证明。
-function verifyGateObjectSource(id, source) {
- const plan=gateResourcePlan(),node=toolDefinitions.find(tool=>tool.id==='node');
- const definition=toolDefinitions.find(tool=>tool.id===id);
- const expected=id==='node'?{...node.archives['linux-amd'],version:node.version}
-  :['cmake','protoc'].includes(id)?{...definition.archives['linux-amd'],version:definition.version}
-  :['perl','openssl','python'].includes(id)?{...definition.archive,version:definition.version,dependencies:definition.dependencies||[]}
-  :id==='foundation'?gateBootstrapInputs:id==='curl'?{artifacts:gateBootstrapInputs.artifacts}
-  :['rust','flutter'].includes(id)?gateHostArchives[id]:plan.sources[id];
- if(!expected||JSON.stringify(source)!==JSON.stringify(expected))fail('门禁完整来源与本产品固定登记不符');
- return true;
-}
-
-// 完整对象回执逐字回读；版本输出只作附加确认，不能替代原件、来源和全部文件的验真。
-async function verifyGateResourceDelivery(receipt) {
- if(receipt?.schema===2)return verifyMacGateDelivery(receipt);
- if(receipt?.schema!==1||receipt.product_id!==gateProductID||receipt.work!==resolve(receipt.work)
-  ||!receipt.work.startsWith(root+'/target/')||!Array.isArray(receipt.objects)||!receipt.objects.length)fail('门禁资源回执身份无效');
- await directory(receipt.work);
- if(receipt.originalRoot!==join(homedir(),'.local/share/product-resources/tools/archives'))fail('门禁原件库身份无效');await directory(receipt.originalRoot);
- const owner=await import('./build.mjs'),locks=Object.values(owner.contract.platforms).flatMap(platform=>platform.locks);
- const functional=gateFunctionalHostPlan(JSON.parse(await readFile(join(root,'.github/tatagate/tatagate.json'),'utf8')).functions);
- const pub=locks.some(lock=>lock.ecosystem==='pub')||functional.pub,cargo=locks.some(lock=>lock.ecosystem==='cargo')||functional.cargo,python=functional.python;
- const expected=['git','bash','grep','sed','actionlint','curl','foundation','node',...(pub||cargo?['rust',...['cmake','protoc'].filter(id=>toolDefinitions.some(tool=>tool.id===id))]:[]),...(pub?['flutter']:[]),...(python?['perl','openssl','python']:[])].sort();
- const delivered=receipt.objects.map(object=>object.path.split('/').at(-1)).sort();if(JSON.stringify(expected)!==JSON.stringify(delivered))fail('门禁所需工具对象不闭合');
- const staged=gateBootstrapInputs.artifacts.map(record=>({name:record.name,version:record.version,depends:record.depends,preDepends:'',origin:'staged'}));
- const actual=gateResourceTools.verifyBootstrap?gateResourceTools.verifyBootstrap(gateBootstrapInputs,process.env,undefined,staged):gateResourceTools.snapshot(gateBootstrapInputs,staged);
- if(JSON.stringify(actual)!==JSON.stringify(receipt.bootstrap))fail('门禁宿主闭包字节或版本漂移');
- const seen=new Set();
- for(const object of receipt.objects){
-  if(!object.path.startsWith(receipt.work+'/')||seen.has(object.path))fail('门禁对象归属或重复无效');seen.add(object.path);
-  await directory(object.path);await regular(join(object.path,'receipt.json'));
-  const text=await readFile(join(object.path,'receipt.json'),'utf8');
-  if(hash(text)!==object.receipt_sha256)fail('门禁对象回执被篡改');
-  const proof=JSON.parse(text),id=object.path.split('/').at(-1);
-  verifyGateObjectSource(id,proof.source||(proof.artifacts?{artifacts:proof.artifacts}:undefined));
-  if(!['bootstrap','foundation','node','rust','flutter','cmake','protoc','perl','openssl','python'].includes(object.kind))fail('门禁工具对象类型无效');
-  const curl=object.kind==='bootstrap'&&proof.artifacts&&!proof.bootstrap;
-  const files=object.kind==='bootstrap'
-   ?gateResourceTools.inventory(curl?join(object.path,'payload'):object.path).filter(file=>file.path!=='receipt.json')
-   :(await inventory(object.path)).filter(file=>file.path!=='receipt.json');
-  if(JSON.stringify(files)!==JSON.stringify(proof.files))fail('门禁完整对象字节或模式发生变化');
-  const archive=object.kind==='bootstrap'&&!['curl'].includes(id)?join(object.path,'source.archive'):object.original;
-  if(id==='curl'){for(const original of gateBootstrapInputs.artifacts){const file=join(object.path,original.name+'.deb');await regular(file);if(hash(await readFile(file))!==original.sha256)fail('curl官方原件完整摘要不符');}}
-  if(archive){if(!archive.startsWith(receipt.work+'/')&&!archive.startsWith(receipt.originalRoot+'/'))fail('门禁原件归属无效');await regular(archive);if(hash(await readFile(archive))!==proof.source.sha256)fail('门禁原件完整摘要不符');}
-  else if(!['foundation','curl'].includes(id))fail('门禁对象缺少完整官方原件');
-  if(id==='rust')for(const component of proof.source.components||[]){const original=join(receipt.originalRoot,hash(JSON.stringify([component.url,component.sha256]))+'.blob');await regular(original);if(hash(await readFile(original))!==component.sha256)fail('Rust同版组件原件摘要不符');}
- }
- const executableNames=['git','bash','grep','sed','actionlint','node',...(pub||cargo?['rust',...['cmake','protoc'].filter(id=>toolDefinitions.some(tool=>tool.id===id))]:[]),...(pub?['flutter']:[]),...(python?['perl','openssl','python']:[])].sort();
- if(JSON.stringify(Object.keys(receipt.executables).sort())!==JSON.stringify(executableNames))fail('门禁所需入口不闭合');
- for(const [name,path]of Object.entries(receipt.executables)){
-  if(!((await regular(path)).mode&0o111))fail('门禁入口不可执行');
-  if(!receipt.objects.some(object=>path.startsWith(object.path+'/')))fail('门禁入口不属于已验真交付：'+name);
- }
- validateGateEnvironment(receipt);
- const env=receipt.environment;if(env.PRODUCT_GIT_BIN!==receipt.executables.git||env.PRODUCT_BASH_BIN!==receipt.executables.bash||env.PRODUCT_GREP_BIN!==receipt.executables.grep||env.PRODUCT_SED_BIN!==receipt.executables.sed||env.PRODUCT_NODE_BIN!==receipt.executables.node||env.TATAGATE_ACTIONLINT!==receipt.executables.actionlint)fail('门禁环境入口与对象不一致');
- if(cargo||pub){if(env.RUSTC!==receipt.executables.rust||env.CARGO!==join(dirname(receipt.executables.rust),'cargo'))fail('门禁Cargo和Rustc须来自同一对象');}
- const fields=new Set(['HOME','LANG','LC_ALL','PATH','GIT_CONFIG_NOSYSTEM','GIT_CONFIG_GLOBAL','GIT_TERMINAL_PROMPT','PRODUCT_GIT_BIN','PRODUCT_BASH_BIN','PRODUCT_GREP_BIN','PRODUCT_SED_BIN','PRODUCT_NODE_BIN','PRODUCT_SHELL_BIN','PRODUCT_POSIX_BIN','TATAGATE_ACTIONLINT','NODE','TMPDIR','PRODUCT_WORK_DIR','GIT_SSL_CAINFO','SSL_CERT_FILE','CC','CXX','AR','NM','RANLIB','LD','AS','STRIP','MAKE','CONFIG_SHELL','SHELL','LIBCLANG_PATH','CMAKE','PROTOC','RUSTC','CARGO','PRODUCT_PYTHON_BIN','FLUTTER','FLUTTER_BIN','DART_EXECUTABLE','npm_config_cache','PUB_CACHE','CARGO_HOME','CARGO_TARGET_DIR','CARGO_NET_OFFLINE','npm_config_offline','npm_config_script_shell']);
- if(Object.keys(env).some(name=>!fields.has(name)))fail('门禁资源环境含未登记字段');
- for(const directory of env.PATH.split(':')){if(!directory.startsWith(receipt.work+'/'))fail('门禁PATH越过验真交付');await directoryCheck(directory);}
- const native=Object.fromEntries(actual.commands.map(record=>[record.name,record.path]));
- if(env.CC!==native.clang+' --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13'||env.CXX!==native.clang+' --driver-mode=g++ --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13')fail('门禁编译器不属于同一验真宿主');
- await gateVerifyInputs(receipt,owner,env);
- return Object.freeze({...env});
-}
-
-// 本轮可写SDK缓存保留官方执行入口模式，原件对象始终只读。
-async function gateWritableCopy(path){const info=await lstat(path);if(info.isSymbolicLink())return;if(info.isDirectory()){await chmod(path,0o700);for(const name of await readdir(path))await gateWritableCopy(join(path,name));}else await chmod(path,info.mode&0o111?0o700:0o600);}
-
-// Linux只新增门禁宿主；现有macOS生产资源和任何编译/签名/安装步骤不经过这个分支。
-async function prepareGateResources(work,{environment=process.env,signal,fetcher=fetch}={}) {
- if(process.platform==='darwin')return prepareMacGateResources(work,{environment,signal,fetcher});
- const owner=await import('./build.mjs');owner.checkWork(work);await directory(work);
- if(process.platform!=='linux'||process.arch!=='x64'||environment.GITHUB_ACTIONS!=='true')fail('Linux门禁资源须由本仓准确Ubuntu推送作业准备');
- const lock=await open(join(work,'.gate-resources.lock'),'wx',0o600);
- try{
-  if((await readdir(work)).some(name=>!['.gate-resources.lock','.active.json'].includes(name)))fail('门禁资源工作目录须独占且为空');
-  const bootstrap=join(work,'tool-bootstrap');await mkdir(bootstrap);
-  const request=async(url,options={})=>{signal?.throwIfAborted();return fetcher(url,{...options,signal:AbortSignal.any([...(options.signal?[options.signal]:[]),...(signal?[signal]:[])])});};
-  const base=await gatePrepareTools(bootstrap,{bootstrap:true,environment,request,signal});
-  const objects=[];
-  const visit=async directory=>{for(const entry of await readdir(directory,{withFileTypes:true}))if(entry.isDirectory()){
-   const path=join(directory,entry.name);if(await stat(join(path,'receipt.json'))){await regular(join(path,'receipt.json'));objects.push({path,kind:'bootstrap',receipt_sha256:hash(await readFile(join(path,'receipt.json')))});}else await visit(path);
-  }};await visit(bootstrap);
-  let firstProof;for(const object of objects){const proof=JSON.parse(await readFile(join(object.path,'receipt.json'),'utf8'));if(proof.bootstrap){firstProof=proof;break;}}if(!firstProof)fail('门禁Bootstrap完整交付缺失');
-  const foundation=join(work,'foundation'),bin=join(foundation,'bin');await mkdir(bin,{recursive:true});
-  // 正常执行使用本轮已验真包字节的只读投影，不把系统目录加入PATH。
-  for(const record of firstProof.bootstrap.commands){
-   if(['bash','grep','sed'].includes(record.name))continue;
-   await regular(record.path,true);if(hash(await readFile(record.path))!==record.sha256)fail('Bootstrap交付字节改变');
-   await copyFile(record.path,join(bin,record.name),constants.COPYFILE_EXCL);await chmod(join(bin,record.name),0o555);
-  }
-  await copyFile(base.PRODUCT_BASH_BIN,join(bin,'sh'),constants.COPYFILE_EXCL);await chmod(join(bin,'sh'),0o555);
-  const tools=Object.fromEntries((await readdir(bin)).map(name=>[name,join(bin,name)]));
-  const env={...base,PATH:[dirname(process.execPath),dirname(base.PRODUCT_GIT_BIN),dirname(base.PRODUCT_BASH_BIN),dirname(base.PRODUCT_GREP_BIN),dirname(base.PRODUCT_SED_BIN),bin].join(':'),
-   PRODUCT_SHELL_BIN:base.PRODUCT_BASH_BIN,PRODUCT_POSIX_BIN:bin,HOME:join(work,'home'),TMPDIR:join(work,'tmp'),PRODUCT_WORK_DIR:work};
-  await directory(env.HOME,true);await directory(env.TMPDIR,true);
-  const library={root:join(work,'objects'),work,tools:toolDefinitions,installed:new Map(),gateLinuxFoundation:{tools,bin,path:env.PATH}};await directory(library.root,true);
-  const store=join(homedir(),'.local/share/product-resources');await directory(store,true);if(inside(root,store)||inside(store,root)||inside(work,store)||inside(store,work))fail('门禁原件库交叉');
-  const originalRoot=join(store,'tools/archives');await directory(originalRoot,true);
-  const options={library,environment:env,fetcher:request,signal,offline:false,dependencyRoot:join(store,'rely'),sources:owner.lockedSources()};
-  const {rootCertificates}=await import('node:tls');const ca=join(foundation,'ca.pem');await writeFile(ca,rootCertificates.join('\n')+'\n',{flag:'wx'});env.GIT_SSL_CAINFO=ca;env.SSL_CERT_FILE=ca;
-  const native=Object.fromEntries(firstProof.bootstrap.commands.map(record=>[record.name,record.path]));
-  Object.assign(env,{CC:native.clang+' --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13',CXX:native.clang+' --driver-mode=g++ --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13',AR:native.ar,NM:native.nm,RANLIB:native.ranlib,LD:native.ld,AS:native.as,STRIP:native.strip,MAKE:tools.make,CONFIG_SHELL:base.PRODUCT_BASH_BIN,SHELL:base.PRODUCT_BASH_BIN,LIBCLANG_PATH:'/usr/lib/llvm-18/lib'});
-  const executables={git:base.PRODUCT_GIT_BIN,bash:base.PRODUCT_BASH_BIN,grep:base.PRODUCT_GREP_BIN,sed:base.PRODUCT_SED_BIN,actionlint:base.TATAGATE_ACTIONLINT};
-  const unpack=async(archive,target,prefix)=>{
-   if(new Uint8Array(await readFile(archive)).slice(0,2).toString()==='253,55'){
-    const tar=archive+'.decoded.tar';
-    await runResourceProcess(base.PRODUCT_BASH_BIN,['-c','ulimit -f 4194304; set -C; exec "$1" --decompress --stdout -- "$2" > "$3"','gate-xz',tools.xz,archive,tar],{cwd:work,env,signal});
-    try{await extractArchive(tar,target,{prefix,signal});}finally{await rm(tar,{force:true});}
-   }else await extractArchive(archive,target,{prefix,signal});
-  };
-  const install=async(id,coordinate)=>{
-   const object=join(library.root,id);await mkdir(object);
-   const archive=await acquireArchive(coordinate,{store:originalRoot,work,fetcher:request,signal});
-   const input=join(object,'input');await unpack(archive,input,coordinate.root==='.'?'':coordinate.root);
-   let payload=join(object,'payload');
-   if(['perl','openssl','python'].includes(id)){
-    await mkdir(payload);
-    const run=(command,args,cwd=input,extra={})=>runResourceProcess(command,args,{cwd,env:{...env,...extra},signal});
-    if(id==='perl'){await run(base.PRODUCT_BASH_BIN,[join(input,'Configure'),'-des','-Dprefix='+payload,'-Dcc='+env.CC,'-Dld='+env.CC,'-Dar='+env.AR,'-Duseshrplib','-Dinstallusrbinperl=n','-Dman1dir=none','-Dman3dir=none']);}
-    if(id==='openssl'){const perl=executables.perl;await run(perl,[join(input,'Configure'),'linux-x86_64','--prefix='+payload,'--openssldir='+join(payload,'ssl'),'--libdir=lib','no-shared']);}
-    if(id==='python'){
-     const dependency=coordinate.dependencies.find(entry=>entry.name==='xz');if(!dependency)fail('Python缺少本产品已登记liblzma');
-     const file=await acquireArchive(dependency,{store:originalRoot,work,fetcher:request,signal}),source=join(object,'xz-source'),prefix=join(object,'liblzma');await unpack(file,source,dependency.root);
-     await run(base.PRODUCT_BASH_BIN,[join(source,'configure'),'--prefix='+prefix,'--disable-shared','--enable-static','--with-pic','--disable-xz','--disable-xzdec','--disable-lzmadec','--disable-lzmainfo','--disable-scripts','--disable-doc','--disable-nls'],source);
-     await run(tools.make,['-j2','SHELL='+base.PRODUCT_BASH_BIN],source);await run(tools.make,['install','SHELL='+base.PRODUCT_BASH_BIN],source);
-     const openssl=dirname(dirname(executables.openssl));
-     await run(base.PRODUCT_BASH_BIN,[join(input,'configure'),'--prefix='+payload,'--with-openssl='+openssl,'--with-openssl-rpath=auto'],input,{LIBLZMA_CFLAGS:'-I'+join(prefix,'include'),LIBLZMA_LIBS:join(prefix,'lib/liblzma.a')});
-    }
-    await run(tools.make,['-j2','SHELL='+base.PRODUCT_BASH_BIN]);await run(tools.make,[id==='openssl'?'install_sw':'install','SHELL='+base.PRODUCT_BASH_BIN]);
-    if(id==='python'){const python=join(payload,'bin/python3');if((await lstat(python)).isSymbolicLink()){const original=await realpath(python);if(!original.startsWith(payload+'/'))fail('Python入口越界');await rm(python);await copyFile(original,python,constants.COPYFILE_EXCL);await chmod(python,0o555);}}
-   }else if(id==='rust'){
-    await runResourceProcess(base.PRODUCT_BASH_BIN,[join(input,'install.sh'),'--prefix='+payload,'--disable-ldconfig','--components=rustc,cargo,rust-std-x86_64-unknown-linux-gnu,rustfmt-preview,clippy-preview'],{cwd:input,env,signal});
-    for(const component of coordinate.components||[]){const archive=await acquireArchive(component,{store:originalRoot,work,fetcher:request,signal}),path=join(object,component.component+'-input');await unpack(archive,path,component.root);await runResourceProcess(base.PRODUCT_BASH_BIN,[join(path,'install.sh'),'--prefix='+payload,'--disable-ldconfig','--components='+component.component],{cwd:path,env,signal});}
-
-   }else {await rename(input,payload);}
-   if(id==='flutter'){
-    const declared=toolDefinitions.find(tool=>tool.id==='flutter');
-    if(hash(Buffer.from(flutterPatch))!==declared.patch.sha256||declared.patch.source!=='https://github.com/flutter/flutter/commit/'+coordinate.ref)fail('Flutter完整补丁来源不符');
-    const patch=join(object,'flutter.patch');await writeFile(patch,flutterPatch,{flag:'wx'});
-    await preparePub([join(payload,'packages/flutter_tools/pubspec.lock')],join(payload,'bin/cache/pub'),options);
-    await flutterRecipe.prepareFlutter(payload,{tool:declared,files:flutterRecipe.parsePatch(flutterPatch),env,signal,run:runResourceProcess});
-   }
-   const proof={source:coordinate,files:await inventory(object)};
-   await permissions(object,false);proof.files=await inventory(object);
-   await chmod(object,0o755);await writeFile(join(object,'receipt.json'),JSON.stringify(proof),{flag:'wx',mode:0o444});await chmod(object,0o555);
-   objects.push({path:object,kind:id,original:archive,receipt_sha256:hash(await readFile(join(object,'receipt.json')))});
-   const path=join(payload,'bin',id==='rust'?'rustc':id==='python'?'python3':id);await regular(path,true);
-   library.installed.set(id,{path,version:toolDefinitions.find(tool=>tool.id===id)?.version||coordinate.version});executables[id]=path;
-   return payload;
-  };
-  const node=toolDefinitions.find(tool=>tool.id==='node');
-  const nodePayload=await install('node',{...node.archives['linux-amd'],version:node.version});
-  if(hash(await readFile(process.execPath))!==hash(await readFile(join(nodePayload,'bin/node'))))fail('启动Node与本产品官方Linux原件字节不符');
-  env.PRODUCT_NODE_BIN=executables.node;env.NODE=executables.node;env.PATH=[join(nodePayload,'bin'),...env.PATH.split(':').filter(path=>path!==dirname(process.execPath))].join(':');
-  for(const id of ['git','bash','grep','sed'])library.installed.set(id,{path:executables[id],version:toolDefinitions.find(tool=>tool.id===id)?.version||coordinate.version});
-  const ownLocks=Object.values(owner.contract.platforms).flatMap(platform=>platform.locks).filter(lock=>!lock.source_package);
-  const functional=gateFunctionalHostPlan(JSON.parse(await readFile(join(root,'.github/tatagate/tatagate.json'),'utf8')).functions);
-  const hasPub=ownLocks.some(lock=>lock.ecosystem==='pub')||functional.pub,hasCargo=ownLocks.some(lock=>lock.ecosystem==='cargo')||functional.cargo;
-  for(const id of (hasPub||hasCargo?['cmake','protoc'].filter(id=>toolDefinitions.some(tool=>tool.id===id)):[])){const declared=toolDefinitions.find(tool=>tool.id===id);const payload=await install(id,{...declared.archives['linux-amd'],version:declared.version});env[id==='cmake'?'CMAKE':'PROTOC']=executables[id];env.PATH=join(payload,'bin')+':'+env.PATH;}
-  if(hasPub||hasCargo){
-   const rust=await install('rust',gateHostArchives.rust);env.RUSTC=executables.rust;env.CARGO=join(rust,'bin/cargo');env.PATH=join(rust,'bin')+':'+env.PATH;
-  }
-  if(functional.python){
-   for(const id of ['perl','openssl','python']){const declared=toolDefinitions.find(tool=>tool.id===id);const payload=await install(id,{...declared.archive,version:declared.version,dependencies:declared.dependencies||[]});env.PATH=join(payload,'bin')+':'+env.PATH;}
-   env.PRODUCT_PYTHON_BIN=executables.python;
-  }
-  if(hasPub){
-   const flutter=await install('flutter',gateHostArchives.flutter);
-   // Flutter自写缓存只进入可写本轮SDK视图，完整原件对象保持只读。
-   const sdk=join(work,'flutter-view');const {cp}=await import('node:fs/promises');await cp(flutter,sdk,{recursive:true,verbatimSymlinks:true});await gateWritableCopy(sdk);
-   env.FLUTTER=join(sdk,'bin/flutter');env.FLUTTER_BIN=env.FLUTTER;env.DART_EXECUTABLE=join(sdk,'bin/cache/dart-sdk/bin/dart');env.PATH=join(sdk,'bin')+':'+env.PATH;
-  }
-  const inputs=await gatePrepareDependencies(work,owner,options,env),dependencies=inputs.dependencies;
-  if(dependencies.npmCache)env.npm_config_cache=dependencies.npmCache;
-  if(dependencies.pubCache)env.PUB_CACHE=dependencies.pubCache;
-  if(dependencies.cargoHome)env.CARGO_HOME=dependencies.cargoHome;
-  env.CARGO_TARGET_DIR=join(work,'cargo-target');env.CARGO_NET_OFFLINE='true';env.npm_config_offline='true';env.npm_config_script_shell=base.PRODUCT_BASH_BIN;
-  await permissions(foundation,false);const proof={source:gateBootstrapInputs,files:await inventory(foundation)};await chmod(foundation,0o755);await writeFile(join(foundation,'receipt.json'),JSON.stringify(proof),{flag:'wx',mode:0o444});await chmod(foundation,0o555);
-  objects.push({path:foundation,kind:'foundation',receipt_sha256:hash(await readFile(join(foundation,'receipt.json')))});
-  const receipt={schema:1,product_id:gateProductID,work,originalRoot,objects,executables,dependencies,inputs,bootstrap:firstProof.bootstrap,environment:env};
-  await verifyGateResourceDelivery(receipt);await writeFile(join(work,'gate-receipt.json'),JSON.stringify(receipt),{flag:'wx',mode:0o444});return receipt;
- }finally{await lock.close();if(!retainedResourcePath(work))await rm(join(work,'.gate-resources.lock'));}
-}
-
-const gateMacActionlint={version:'1.7.12',url:'https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz',sha256:'aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f',root:'.',executable:'actionlint'};
-
-// 本机门禁复用本产品原有生产者；仅门禁检查器另按同版官方原件准备。
-async function prepareMacGateResources(work,{environment=process.env,signal,fetcher=fetch}={}){
- const owner=await import('./build.mjs');owner.checkWork(work);await directory(work);
- if(process.platform!=='darwin'||process.arch!=='arm64'||process.version!=='v25.2.1'||(await readdir(work)).filter(name=>name!=='.active.json').length)fail('本机门禁资源宿主或独占工作根无效');
- const allowed=['HOME','USER','LOGNAME','LANG','LC_ALL','DEVELOPER_DIR'];
- const input=Object.fromEntries(allowed.filter(name=>typeof environment[name]==='string').map(name=>[name,environment[name]]));
- const platform=Object.keys(owner.contract.platforms)[0],raw=await resources(platform,work,{}, {environment:input,signal,fetcher});
- const store=join(homedir(),'.local/share/product-resources'),object=join(work,'actionlint');await mkdir(object);
- const archive=await acquireArchive(gateMacActionlint,{store:join(store,'tools/archives'),work,signal,fetcher});
- await extractArchive(archive,join(object,'payload'),{signal});await permissions(object,false);
- const proof={source:gateMacActionlint,files:await inventory(object)};await chmod(object,0o755);await writeFile(join(object,'receipt.json'),JSON.stringify(proof),{flag:'wx',mode:0o444});await chmod(object,0o555);
- const library={root:join(store,'tools'),work,tools:toolDefinitions,installed:new Map(Object.entries(raw.tools))};
- const gateInputs=await gatePrepareDependencies(work,owner,{library,environment:{...raw.environment,NODE:raw.tools.node.path},dependencyRoot:join(store,'rely'),sources:owner.lockedSources(),offline:false,fetcher,signal},raw.environment);
- const receipt={schema:2,product_id:gateProductID,work,store,platform,raw,inputs:gateInputs,actionlint:{path:object,archive,receipt_sha256:hash(await readFile(join(object,'receipt.json')))}};
- const checked=await verifyMacGateDelivery(receipt);await writeFile(join(work,'gate-receipt.json'),JSON.stringify(receipt),{flag:'wx',mode:0o444});return {...receipt,environment:checked};
-}
-
-// 从现有原件验真函数回读所有已交付工具及Apple签名边界；不重新安装或下载。
-async function verifyMacGateDelivery(receipt){
- const owner=await import('./build.mjs');
- if(process.platform!=='darwin'||process.arch!=='arm64'||receipt.schema!==2||receipt.product_id!==gateProductID||receipt.store!==join(homedir(),'.local/share/product-resources'))fail('本机门禁资源身份无效');
- owner.checkWork(receipt.work);await directory(receipt.work);await directory(receipt.store);
- if(receipt.raw?.work!==receipt.work||receipt.raw.product_id!==gateProductID||receipt.raw.platform!==receipt.platform)fail('本机门禁生产者回执不符');
- const library={root:join(receipt.store,'tools'),work:receipt.work,tools:toolDefinitions,installed:new Map()};
- for(const [id,delivered]of Object.entries(receipt.raw.tools)){
-  const declared=toolDefinitions.find(tool=>tool.id===id);if(!declared||delivered.version!==declared.version)fail('本机门禁工具版本或归属漂移');
-  if(id==='xcode'){const apple=await verifyAppleTools(library,{environment:receipt.raw.environment});if(delivered.path!==apple.tools.xcodebuild)fail('Apple入口身份漂移');}
-  else{const archive=toolArchive(declared),object=join(library.root,'shared',archive.sha256+'-'+objectRecipe(declared));const value=await verifyToolObject(object,declared,{produced:true});if(!value||value.path!==delivered.path)fail('本机门禁工具完整对象不符');}
- }
- const checker=receipt.actionlint;
- if(checker.path!==join(receipt.work,'actionlint')||!checker.archive.startsWith(join(receipt.store,'tools/archives')+'/'))fail('本机门禁检查器越界');
- await regular(checker.archive);if(hash(await readFile(checker.archive))!==gateMacActionlint.sha256)fail('本机门禁检查器官方原件摘要不符');
- const text=await readFile(join(checker.path,'receipt.json'),'utf8'),proof=JSON.parse(text);
- if(hash(text)!==checker.receipt_sha256||JSON.stringify(proof.source)!==JSON.stringify(gateMacActionlint)||JSON.stringify((await inventory(checker.path)).filter(file=>file.path!=='receipt.json'))!==JSON.stringify(proof.files))fail('本机门禁检查器完整交付改变');
- const result=owner.resourceEnvironment(receipt.platform,receipt.work,receipt.raw,{}),tools=receipt.raw.tools;
- for(const [id,name]of Object.entries({node:'PRODUCT_NODE_BIN',git:'PRODUCT_GIT_BIN',bash:'PRODUCT_BASH_BIN',grep:'PRODUCT_GREP_BIN',sed:'PRODUCT_SED_BIN'})){if(!tools[id])fail('本机门禁工具闭包缺失');result[name]=tools[id].path;}
- if(tools.python)result.PRODUCT_PYTHON_BIN=tools.python.path;if(result.FLUTTER)result.FLUTTER_BIN=result.FLUTTER;
- result.PRODUCT_SHELL_BIN=result.PRODUCT_BASH_BIN;result.TATAGATE_ACTIONLINT=join(checker.path,'payload/actionlint');result.PRODUCT_WORK_DIR=receipt.work;
- if(tools.rust){result.RUSTC=tools.rust.path;result.CARGO=join(dirname(tools.rust.path),'cargo');}
- const dependencies=receipt.inputs.dependencies;if(dependencies.npmCache)result.npm_config_cache=dependencies.npmCache;if(dependencies.cargoHome)result.CARGO_HOME=dependencies.cargoHome;if(dependencies.pubCache)result.PUB_CACHE=dependencies.pubCache;
- result.CARGO_NET_OFFLINE='true';result.npm_config_offline='true';result.npm_config_script_shell=result.PRODUCT_BASH_BIN;
- await gateVerifyInputs(receipt,owner,result);
- return Object.freeze(result);
-}
-
-function gateCleanupAllowed(receipt,work){return !retainedResourcePath(receipt.work)&&!retainedResourcePath(work); }
-const gateToolInterfaces=gateResourceTools;
-
-// 门禁只取得本仓声明的固定Git输入与原始锁，不读取邻仓工作树或滚动分支。
-async function gatePrepareDependencies(work,owner,options,environment){
- const sources=owner.lockedSources();
- for(const source of sources)await gitCheckout(source,join(work,'git-sources',source.name),options);
- const records=[],sourceRoots=new Map([['own',root],...sources.map(source=>[source.name,join(work,'git-sources',source.name)])]);
- for(const [name,sourceRoot]of sourceRoots){
-  if(name==='own'){for(const platform of Object.values(owner.contract.platforms))for(const lock of platform.locks)if(['npm','pub','cargo'].includes(lock.ecosystem))records.push({...lock,path:join(root,lock.path)});}
-  else{for(const path of ['pubspec.lock','Cargo.lock','native/Cargo.lock'])if(await stat(join(sourceRoot,path)))records.push({ecosystem:path.endsWith('pubspec.lock')?'pub':'cargo',path:join(sourceRoot,path)});}
- }
- // 已有业务测试的Node输入与流程锁仍保持原字节，只在资源需求里补齐本仓测试锁。
- const functional=gateFunctionalHostPlan(JSON.parse(await readFile(join(root,'.github/tatagate/tatagate.json'),'utf8')).functions);
- for(const lock of functional.locks){await regular(join(root,lock.path));records.push({...lock,path:join(root,lock.path)});}
- const compiler=options.library.installed.get('rust');if(compiler){const standardLock=join(dirname(dirname(compiler.path)),'lib/rustlib/src/rust/library/Cargo.lock');if(await stat(standardLock))records.push({ecosystem:'cargo',path:standardLock});}
- const dependencies={};
- for(const ecosystem of ['npm','pub','cargo']){
-  const locks=[...new Set(records.filter(record=>record.ecosystem===ecosystem).map(record=>record.path))];if(!locks.length)continue;
-  const target=join(work,'dependencies',ecosystem);await directory(target,true);
-  if(ecosystem==='npm')Object.assign(dependencies,await prepareNpm(locks,target,options));
-  if(ecosystem==='pub')Object.assign(dependencies,await preparePub(locks,target,options));
-  if(ecosystem==='cargo')Object.assign(dependencies,await prepareCargo(locks,target,options));
- }
- const archives=[];
- const dependencyFiles=await inventory(join(work,'dependencies'));
- return {dependencies,sources,archives,dependencyFiles};
-}
-
-// 环境是产品交付的固定路径投影；允许字段名不等于允许任意调用方值。
-function validateGateEnvironment(receipt){
- const env=receipt.environment,work=receipt.work,e=receipt.executables;
- const fixed={HOME:join(work,'home'),TMPDIR:join(work,'tmp'),PRODUCT_WORK_DIR:work,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',CARGO_NET_OFFLINE:'true',npm_config_offline:'true',npm_config_script_shell:e.bash,PRODUCT_SHELL_BIN:e.bash,PRODUCT_POSIX_BIN:join(work,'foundation/bin'),NODE:e.node};
- for(const [name,value]of Object.entries(fixed))if(env[name]!==value)fail('门禁环境值不属于准确交付：'+name);
- for(const [key,name]of [['npmCache','npm_config_cache'],['pubCache','PUB_CACHE'],['cargoHome','CARGO_HOME']]){
-  const path=receipt.dependencies[key];if(path!==undefined&&(typeof path!=='string'||!path.startsWith(work+'/dependencies/')))fail('门禁依赖缓存路径越界');
-  if(env[name]!==path)fail('门禁依赖环境与本轮交付不符');
- }
- if(env.CARGO_TARGET_DIR!==join(work,'cargo-target')||env.GIT_SSL_CAINFO!==join(work,'foundation/ca.pem')||env.SSL_CERT_FILE!==env.GIT_SSL_CAINFO)fail('门禁编译输出或CA越界');
- if(e.flutter&&(env.FLUTTER!==join(work,'flutter-view/bin/flutter')||env.FLUTTER_BIN!==env.FLUTTER||env.DART_EXECUTABLE!==join(work,'flutter-view/bin/cache/dart-sdk/bin/dart')))fail('门禁可写Flutter视图入口不符');
- return true;
-}
-
-// 测试使用本产品现有工程视图接口，Git包只投影本轮已验真的固定输入。
-async function gateLanguageView(destination,receipt,{signal}={}){
- const environment=await verifyGateResourceDelivery(receipt);
- if(destination!==join(receipt.work,'language-source'))fail('语言工程视图须归本产品本轮target');
- const archiveView=async(source,path)=>{const archive=path+'.tar';await runResourceProcess(environment.PRODUCT_GIT_BIN,['-C',source,'archive','--format=tar','--output='+archive,'HEAD'],{cwd:receipt.work,env:environment,signal,quietOutput:true});try{return await extractArchive(archive,path,{signal});}finally{await rm(archive);}};
- const view=await archiveView(root,destination);
- const project=view;
- return {view,project};
-}
-
-// 固定输入按本仓声明重新建立闭集，不信任调用方回执自行声明的来源名单。
-async function gateVerifyInputs(receipt,owner,environment){
- const expected=owner.lockedSources();
- if(!receipt.inputs||JSON.stringify(receipt.inputs.sources)!==JSON.stringify(expected)||JSON.stringify(await inventory(join(receipt.work,'dependencies')))!==JSON.stringify(receipt.inputs.dependencyFiles))fail('门禁来源或完整依赖目录漂移');
- for(const source of expected){const path=join(receipt.work,'git-sources',source.name);await directory(path);await directory(join(path,'.git'));const run=args=>runResourceProcess(environment.PRODUCT_GIT_BIN,['-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-c','credential.helper=','-C',path,...args],{cwd:receipt.work,env:environment,quietOutput:true});
-  if((await run(['rev-parse','HEAD'])).stdout.trim()!==source.ref||(await run(['remote','get-url','--all','origin'])).stdout.trim()!==source.url||(await run(['status','--porcelain=v1','--untracked-files=all'])).stdout.trim()||(await run(['rev-parse','--absolute-git-dir'])).stdout.trim()!==join(path,'.git')||(await run(['rev-parse','--git-common-dir'])).stdout.trim()!=='.git')fail('门禁固定Git输入身份漂移');
- }
- if(!Array.isArray(receipt.inputs.archives)||receipt.inputs.archives.length)fail('钱包门禁不接受其它产品原生输入');
-}
-
-// 门禁宿主需求从本仓实际用例推导；不修改生产平台工具集合，也不读取邻仓资源。
-function gateFunctionalHostPlan(functions,host={platform:process.platform,architecture:process.arch}){
- if(!Array.isArray(functions)||!functions.length||!['darwin','linux'].includes(host.platform)
-   ||host.platform==='darwin'&&host.architecture!=='arm64'||host.platform==='linux'&&host.architecture!=='x64')fail('门禁功能宿主或清单无效');
- const seen=new Set(),locks=[];
- for(const item of functions){if(!item||typeof item.path!=='string'||!safePath(item.path)||seen.has(item.path)||!['node','flutter','cargo'].includes(item.runner))fail('门禁功能路径重复、越界或类型无效');seen.add(item.path);
-  if(item.runner==='cargo'){if(!safePath(item.target)||!item.target.endsWith('Cargo.toml'))fail('门禁Rust功能清单越界');locks.push({ecosystem:'cargo',path:item.target.slice(0,-'Cargo.toml'.length)+'Cargo.lock'});}
- }
- const pub=functions.some(item=>item.runner==='flutter'),cargo=functions.some(item=>item.runner==='cargo');
- return {pub,cargo,python:pub,locks:[...new Map(locks.map(item=>[item.ecosystem+':'+item.path,item])).values()]};
-}
-
-// 准备真实原生宿主后再运行完整Flutter用例，缺库必须失败，不生成业务替身或跳过条件。
-async function prepareGateFunctionalHost(receipt,languageView,{signal,native=true}={}){
- signal?.throwIfAborted();const owner=await import('./build.mjs');owner.checkWork(receipt.work);await directory(receipt.work);
- if(receipt.product_id!==gateProductID||languageView?.view!==join(receipt.work,'language-source'))fail('门禁功能工程归属不符');await directory(languageView.view);
- const functions=JSON.parse(await readFile(join(root,'.github/tatagate/tatagate.json'),'utf8')).functions,plan=gateFunctionalHostPlan(functions);
- const env={...receipt.environment},result={};
- // 资源阶段已经取得、验真原件，执行阶段只消费本轮缓存；不再次联网或改变锁。
- if(!native||!plan.pub)return result;
- const host=join(receipt.work,'functional-native');await directory(host,true);
- const run=(command,args,cwd,extra={})=>runResourceProcess(command,args,{cwd,env:{...env,...result,...extra},signal,maxBuffer:64*1024**2});
- // 原生入口把CC作为单一可执行文件调用；将已验真编译器及固定参数投影为本轮入口。
- if(process.platform==='linux')for(const name of ['CC','CXX']){
-  const match=env[name]?.match(/^(\/[^\s]+)( --driver-mode=g\+\+)? --gcc-install-dir=\/usr\/lib\/gcc\/x86_64-linux-gnu\/13$/u);
-  if(!match)fail('门禁原生编译器参数不是已验真宿主');await regular(match[1],true);
-  const wrapper=join(host,name.toLowerCase());const quote=value=>"'"+value.replaceAll("'","'\\''")+"'";
-  await writeFile(wrapper,'#!'+env.PRODUCT_BASH_BIN+'\nexec '+quote(match[1])+(match[2]||'')+' --gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \"$@\"\n',{flag:'wx',mode:0o500});result[name]=wrapper;
- }
-
- const extension=process.platform==='darwin'?'dylib':'so',libraries=[];
- const prove=async(file,symbols)=>{await regular(file);if(!file.startsWith(receipt.work+'/')||await realpath(file)!==file)fail('门禁原生运行件越界');
-  if(!env.PRODUCT_PYTHON_BIN)fail('门禁原生验真缺少Python');
-  await run(env.PRODUCT_PYTHON_BIN,['-c','import ctypes,sys; library=ctypes.CDLL(sys.argv[1]); [getattr(library,name) for name in sys.argv[2:]]',file,...symbols],host);libraries.push(file);return file;};
- // 本钱包Flutter测试从同一原锁源码编译宿主FFI，Dart按CARGO_TARGET_DIR读取。
- const manifest=join(languageView.project,'rust/Cargo.toml');await regular(manifest);
- await run(env.CARGO,['build','--manifest-path',manifest,'--locked','--offline','--release'],languageView.project,{CARGO_TARGET_DIR:env.CARGO_TARGET_DIR});
- await prove(join(env.CARGO_TARGET_DIR,'release/libcitizenwallet_signer.'+extension),
-  ['citizen_sr25519_derive_hard','citizen_sr25519_public_key','citizen_sr25519_sign','citizen_sr25519_verify']);
- const locks=[join(languageView.project,'pubspec.lock')];
- for(const lock of locks){const text=await readFile(lock,'utf8'),block=text.match(/^  isar_community_flutter_libs:\n([\s\S]*?)(?=^  \S|^sdks:|$)/mu)?.[1];if(!block&&!text.trimStart().startsWith('{'))continue;if(text.trimStart().startsWith('{')&&!JSON.parse(text).packages?.isar_community_flutter_libs)continue;
-  const version=text.trimStart().startsWith('{')?JSON.parse(text).packages?.isar_community_flutter_libs?.version:block.match(/^    version: "([^"]+)"$/mu)?.[1];if(!version)fail('门禁Isar版本不是本仓原锁');
-  const file=join(env.PUB_CACHE,'hosted/pub.dev','isar_community_flutter_libs-'+version,process.platform==='darwin'?'macos/libisar.dylib':'linux/libisar.so');
-  await regular(file);if(await realpath(file)!==file||!file.startsWith(receipt.work+'/'))fail('门禁Isar运行件越界');result.ISAR_CORE_LIB_PATH=file;
- }
- if(libraries.length){const paths=[...new Set(libraries.map(dirname))].join(':');result[process.platform==='darwin'?'DYLD_LIBRARY_PATH':'LD_LIBRARY_PATH']=paths;}
- signal?.throwIfAborted();return result;
-}
-
 // 本产品Android配方已有的准确官方仓库来源；仅用于同版本发布文件回验。
 const mavenSources=Object.freeze(['https://dl.google.com/dl/android/maven2/','https://repo.maven.apache.org/maven2/','https://storage.googleapis.com/download.flutter.io/','https://plugins.gradle.org/m2/']);
 
@@ -2506,7 +1951,7 @@ const {contract} = await import('./build.mjs');
 const hash=b=>createHash('sha256').update(b).digest('hex');
 async function sandbox(t){const root=await realpath(await mkdtemp(join(tmpdir(),contract.product_id+'-resources-')));t.after(()=>rm(root,{recursive:true,force:true}));return root;}
 // 需要公开工作根的回归使用固定build现场，资源内部临时夹具仍使用sandbox。
-async function fixedSandbox(t){const {fixedWork,checkFixedWork,finishFixedWork,clearFixedWork}=await Promise.resolve(targetInternals);const work=checkFixedWork(fixedWork('build'),{create:true});finishFixedWork(work);t.after(()=>clearFixedWork(work));return work;}
+async function fixedSandbox(t){const {fixedWork,checkFixedWork,finishFixedWork,clearFixedWork}=await Promise.resolve(targetInternals);const work=fixedWork('build/ios');if(existsSync(work))finishFixedWork(work);checkFixedWork(work,{create:true});t.after(()=>{if(existsSync(work))clearFixedWork(work);});return work;}
 const archive=(body,url='https://example.invalid/locked.tgz')=>({url,sha256:hash(body)});
 function tar(entries){const records=[];for(const {name,body='',type='0',target=''}of entries){const b=Buffer.from(body),h=Buffer.alloc(512);h.write(name,0,100);h.write('0000644\0',100);h.write('0000000\0',108);h.write('0000000\0',116);h.write(b.length.toString(8).padStart(11,'0')+'\0',124);h.write('00000000000\0',136);h.fill(32,148,156);h.write(type,156);h.write(target,157,100);h.write('ustar\0',257);h.write('00',263);h.write([...h].reduce((a,b)=>a+b,0).toString(8).padStart(6,'0')+'\0 ',148);records.push(h,b,Buffer.alloc((512-b.length%512)%512));}return gzipSync(Buffer.concat([...records,Buffer.alloc(1024)]));}
 test('首次按锁取得；再次复用不联网，损坏原件不覆盖',async t=>{
@@ -2753,43 +2198,6 @@ test('资源下载候选只属于当前产品target现场，永久库不接收�
 // 全文复制本仓模块，合成回执逐次重算文件清单；只在测试副本暴露已有私有入口，不执行工具。
 
 
-// Linux来源与对象回执使用产品自己的真实验真函数，整项完成后统一执行。
-test('本产品门禁资源来源同版闭合且不维护第二份Git坐标',async()=>{
- const {gateResourcePlan,resourceDeclarations,verifyGateResourceDelivery,verifyGateObjectSource}=await Promise.resolve(resourceInternals);
- const declared=resourceDeclarations(),plan=gateResourcePlan();
- for(const id of ['git','bash','grep','sed']){
-  const source=declared.tools.find(tool=>tool.id===id);
-  assert.equal(plan.sources[id].version,source.version);assert.equal(plan.sources[id].sha256,source.archive.sha256);
-  assert.equal(verifyGateObjectSource(id,plan.sources[id]),true);
-  for(const invalid of [{...plan.sources[id],url:'https://fake.invalid/archive'},{...plan.sources[id],sha256:'a'.repeat(64)},{...plan.sources[id],version:'0.0.0'}])assert.throws(()=>verifyGateObjectSource(id,invalid));
- }
- await assert.rejects(verifyGateResourceDelivery({schema:1,product_id:'foreign',work:'/memory/target/test',objects:[],executables:{}}));
-});
-
-test('门禁环境拒绝其它工作根、在线开关及伪造缓存值',async()=>{
- const {validateGateEnvironment}=await Promise.resolve(resourceInternals);
- const work='/synthetic/target/test/owned',executables={bash:work+'/tools/bash',node:work+'/tools/node'};
- const environment={HOME:work+'/home',TMPDIR:work+'/tmp',PRODUCT_WORK_DIR:work,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',CARGO_NET_OFFLINE:'true',npm_config_offline:'true',npm_config_script_shell:executables.bash,PRODUCT_SHELL_BIN:executables.bash,PRODUCT_POSIX_BIN:work+'/foundation/bin',NODE:executables.node,CARGO_TARGET_DIR:work+'/cargo-target',GIT_SSL_CAINFO:work+'/foundation/ca.pem',SSL_CERT_FILE:work+'/foundation/ca.pem'};
- const receipt={work,executables,dependencies:{},environment};assert.equal(validateGateEnvironment(receipt),true);
- for(const change of [{HOME:'/foreign/home'},{PRODUCT_WORK_DIR:'/foreign/work'},{CARGO_NET_OFFLINE:'false'},{npm_config_offline:'false'},{npm_config_cache:'/foreign/cache'},{CARGO_TARGET_DIR:'/foreign/target'},{SSL_CERT_FILE:'/foreign/ca.pem'}])assert.throws(()=>validateGateEnvironment({...receipt,environment:{...environment,...change}}));
-});
-
-// 资源需求由本仓功能入口推导，协议测试不下载、安装或替代真实原生库。
-test('钱包门禁宿主按Flutter与Cargo原锁闭合，拒绝重复来源及越界',async()=>{
- const {gateFunctionalHostPlan}=await Promise.resolve(resourceInternals);
- const list=[{path:'test/account_test.dart',runner:'flutter',target:'flutter'},{path:'rust/source/sr25519.rs',runner:'cargo',target:'rust/Cargo.toml'},{path:'scripts/build.mjs',runner:'node',target:'node'}];
- const plan=gateFunctionalHostPlan(list,{platform:'linux',architecture:'x64'});assert.equal(plan.pub,true);assert.equal(plan.cargo,true);assert.equal(plan.python,true);assert.deepEqual(plan.locks,[{ecosystem:'cargo',path:'rust/Cargo.lock'}]);
- for(const invalid of [[],[...list,list[0]],[{...list[0],path:'../outside'}],[{...list[1],target:'/outside/Cargo.toml'}],[{...list[2],runner:'python'}]])assert.throws(()=>gateFunctionalHostPlan(invalid,{platform:'linux',architecture:'x64'}));
- for(const host of [{platform:'linux',architecture:'arm64'},{platform:'win32',architecture:'x64'},{platform:'darwin',architecture:'x64'}])assert.throws(()=>gateFunctionalHostPlan(list,host));
- assert.equal(gateFunctionalHostPlan([{path:'test/local.test.mjs',runner:'node',target:'node'}],{platform:'darwin',architecture:'arm64'}).python,false);
-});
-test('门禁取消及外仓工程在任何原生编译前失败',async()=>{
- const {prepareGateFunctionalHost}=await Promise.resolve(resourceInternals);const controller=new AbortController();controller.abort(Error('synthetic cancel'));
- await assert.rejects(prepareGateFunctionalHost({},null,{signal:controller.signal}),/synthetic cancel/u);
- await assert.rejects(prepareGateFunctionalHost({product_id:'foreign',work:'/foreign/source'}, {view:'/foreign/source/language-source'}));
-});
-
-
 test('资源下载声明identity，自动解码正文按锁摘要校验而不误用传输长度',async t=>{
  const root=await sandbox(t),body=Buffer.from('decoded-original'),entry=archive(body);let headers;
  const path=await acquireArchive(entry,{store:root,fetcher:async(_,options)=>{headers=options.headers;return new Response(body,{headers:{'content-encoding':'gzip','content-length':'7'}});}});
@@ -2969,10 +2377,11 @@ if(process.env.NODE_TEST_CONTEXT&&process.argv.length===2&&process.argv[1]===imp
  }));
 }
 
-return {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,prepareToolSupply,gateResourcePlan,verifyGateObjectSource,verifyGateResourceDelivery,prepareGateResources,gateCleanupAllowed,gateToolInterfaces,validateGateEnvironment,gateLanguageView,gateFunctionalHostPlan,prepareGateFunctionalHost,mavenSources,preparePlatformSupply};
+return {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,prepareToolSupply,mavenSources,preparePlatformSupply,copyFlutterArtifact:flutterRecipe.copyFlutterArtifact};
 })();
 resolveResourceReady(resourceInternals);
-export const {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,prepareToolSupply,gateResourcePlan,verifyGateObjectSource,verifyGateResourceDelivery,prepareGateResources,gateCleanupAllowed,gateToolInterfaces,validateGateEnvironment,gateLanguageView,gateFunctionalHostPlan,prepareGateFunctionalHost,mavenSources,preparePlatformSupply}=resourceInternals;
+export const {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,prepareToolSupply,mavenSources,preparePlatformSupply}=resourceInternals;
+const {copyFlutterArtifact}=resourceInternals;
 const product=contract.product_id, prefix=product.toUpperCase();
 const inside=(base,path)=>{const r=relative(base,path);return r===''||!isAbsolute(r)&&r!=='..'&&!r.startsWith('..'+sep);};
 const fail=message=>{throw Error(product+' Build：'+message);};
@@ -2985,7 +2394,7 @@ export function productTarget(platform) {
 }
 export function temporaryRoot(platform=Object.keys(contract.platforms)[0],scope='test',suppliedInput) {
  if(!['test','tmp','build','ci','release','publish'].includes(scope))fail('临时目录职责无效');
- platformContract(platform);const expected=fixedWork(scope==='test'?'test':'build');
+ platformContract(platform);const expected=fixedWork(scope==='test'?'test':'build/'+platform);
  if(suppliedInput!=null&&suppliedInput!==expected)fail('临时工作根必须是本产品固定目录');
  return checkFixedWork(expected,{create:true});
 }
@@ -3119,16 +2528,19 @@ export function prepareAndroidProjectInputs(work,env) {
  else writeFileSync(file,content,{flag:'wx',mode:0o600});return file;
 }
 export const ANALYSIS_OPTIONS_SOURCE="# 本产品独立维护的 Flutter 分析规则。\ninclude: package:flutter_lints/flutter.yaml\n\nanalyzer:\n  exclude:\n    - \"**/*.g.dart\"\n\nlinter:\n  rules:\n    use_build_context_synchronously: true\n";
-export const BUILD_SHELL_SOURCES=Object.freeze({"wallet":"#!/usr/bin/env bash\n# 在本产品target内准确任务工程生成本机优化安装包；本脚本不启动、不安装产品。\n#\n# 用法：node scripts/build.mjs wallet <ios|android>\n#\n# 目标平台是必填参数，不做任何自动探测：探测总要在失败时选一个回落，\n# 而回落的那一端会被当成用户想编的那一端。每个调用方必须明确传入目标平台。\n#\n# 调用方交付本产品target内任务工程；独立准备同样使用本产品target。\nset -euo pipefail\nCITIZENWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nPLATFORM=\"${1:?缺少目标平台，用法：$0 <ios|android>}\"\nPREPARE_ONLY=false\nif [[ \"$PLATFORM\" == prepare-ios || \"$PLATFORM\" == prepare-android ]]; then\n  PREPARE_ONLY=true\n  PLATFORM=\"${PLATFORM#prepare-}\"\nfi\n[[ \"$PLATFORM\" == ios || \"$PLATFORM\" == android ]] \\\n  || { echo \"本机目标平台只接受 ios 或 android：$PLATFORM\" >&2; exit 1; }\n\n# 所有独立入口的工具临时状态归本产品target；宿主已交付的产品工作根继续归当前任务。\nPRODUCT_TEMP_SOURCE=\"$CITIZENWALLET_DIR\"\nPRODUCT_TARGET_TEMP_ROOT=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$PRODUCT_TEMP_SOURCE/scripts/build.mjs\" temporary-root \"${PLATFORM:-${platform:-}}\" 'ios')\" || exit 1\nif [[ -z \"${PRODUCT_WORK_DIR:-}\" && \"${TMPDIR:-}\" != \"$PRODUCT_TEMP_SOURCE/target/\"* ]]; then\n  export TMPDIR=\"$PRODUCT_TARGET_TEMP_ROOT/\"\nfi\nCITIZENWALLET_WORK_DIR=\"${CITIZENWALLET_WORK_DIR:-$PRODUCT_TARGET_TEMP_ROOT}\"\n# 源码根只读；两个端的Flutter、Pods和Gradle状态分别写入当前产品工作目录。\n# 中文注释：检出目录名称由调用方选择；产品身份只取普通 pubspec 文件中的唯一包名。\npython3 - \"$CITIZENWALLET_DIR\" <<'CHECK_SOURCE'\nfrom pathlib import Path\nimport re\nimport sys\nsource = Path(sys.argv[1])\nmanifest = source / 'pubspec.yaml'\nif manifest.is_symlink() or not manifest.is_file():\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nnames = re.findall(r'^name:[ \\t]*([^\\r\\n]+?)[ \\t]*$', manifest.read_text(), re.MULTILINE)\nif names != ['citizenwallet']:\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nCHECK_SOURCE\n# 写入前先绑定本产品、真实平台、当前工作根和准确工程；拒绝链接或其它任务路径。\nCREATE_PROJECT=false\nif [[ \"$PREPARE_ONLY\" == true && -z \"${CITIZENWALLET_PROJECT_ROOT:-}\" ]]; then\n  CREATE_PROJECT=true\n  export CITIZENWALLET_PROJECT_ROOT=\"$CITIZENWALLET_WORK_DIR/source-view\"\nfi\npython3 - \"$CITIZENWALLET_DIR\" \"$PLATFORM\" \"$CITIZENWALLET_WORK_DIR\" \"${CITIZENWALLET_PROJECT_ROOT:-}\" \"$PREPARE_ONLY\" <<'CHECK_PROJECT'\nfrom pathlib import Path\nimport sys\nsource, platform, work, project, preparing = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5]\nif not work.is_absolute() or work.resolve() != work:\n    raise SystemExit('产品工作目录必须为无链接规范绝对路径')\ntry:\n    parts = work.relative_to(source / 'target').parts\nexcept ValueError:\n    parts = ()\nif not parts or parts[0] not in {'build', 'test'}:\n    raise SystemExit('产品工作目录只允许本产品target/build或target/test')\nexpected = work / 'source-view' / str(source).lstrip('/')\nif not project.is_absolute() or project.resolve() != project or not (project == expected or preparing == 'true' and project == work / 'source-view'):\n    raise SystemExit('平台工程不属于当前任务')\nCHECK_PROJECT\n# 准备入口使用同一target边界；没有交付工程时只创建当前任务的准确空副本。\nif [[ \"$CREATE_PROJECT\" == true ]]; then\n  python3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" <<'CREATE_VIEW'\nfrom pathlib import Path\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\ntarget = Path(sys.argv[2])\nif target.exists() or target.is_symlink():\n    raise SystemExit('CitizenWallet本轮新工程必须为空目标')\nexcluded = {'.git', '.dart_tool', '.gradle', '.symlinks', 'Pods', 'build', 'target', 'node_modules', 'ephemeral', '.DS_Store', 'swiftpm'}\ngenerated = {'local.properties', 'Generated.xcconfig', 'flutter_export_environment.sh', '.flutter-plugins-dependencies', 'GeneratedPluginRegistrant.java', 'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m', 'GeneratedPluginRegistrant.swift'}\ndef visit(src, dst):\n    dst.mkdir(parents=True)\n    for child in sorted(src.iterdir()):\n        if child.name in excluded or child.name in generated:\n            continue\n        output = dst / child.name\n        if child.is_dir() and not child.is_symlink():\n            visit(child, output)\n        else:\n            resolved = child.resolve(strict=True)\n            if not resolved.is_relative_to(source) or not resolved.is_file():\n                raise SystemExit('源码文件链接越界或不是普通文件')\n            shutil.copy2(resolved, output)\nvisit(source, target)\nCREATE_VIEW\nfi\nexport CITIZENWALLET_PROJECT_ROOT=\"${CITIZENWALLET_PROJECT_ROOT:?必须提供本轮CitizenWallet Flutter工程根}\"\n[[ -d \"$CITIZENWALLET_PROJECT_ROOT\" && -f \"$CITIZENWALLET_PROJECT_ROOT/pubspec.yaml\" ]] \\\n  || { echo 'CitizenWallet Flutter 产品目录无效' >&2; exit 1; }\nBUILD_WORK_DIR=\"${CITIZENWALLET_BUILD_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work}\"\nDEPENDENCY_WORK_DIR=\"${CITIZENWALLET_DEPENDENCY_DIR:-$CITIZENWALLET_WORK_DIR/dependencies}\"\nBUILD_DIR=\"${CITIZENWALLET_BUILD_DIR:-$BUILD_WORK_DIR/flutter}\"\nARTIFACT_ROOT=\"${CITIZENWALLET_ARTIFACT_DIR:-$CITIZENWALLET_WORK_DIR}\"\n# Pub始终向工程根写.dart_tool；build-dir不能改变这个位置。先解析真实路径，\n# 拒绝工程根、.dart_tool及Kotlin持久目录链接把生成状态导回产品源码，再允许任何写入。\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$CITIZENWALLET_PROJECT_ROOT/.dart_tool\" \"$CITIZENWALLET_WORK_DIR\" \"$BUILD_WORK_DIR\" \"$BUILD_WORK_DIR/kotlin-project\" \"$DEPENDENCY_WORK_DIR\" \"$BUILD_DIR\" \"$ARTIFACT_ROOT\" <<'CHECK_OUTPUTS'\nfrom pathlib import Path\nimport sys\nwork = Path(sys.argv[1]).resolve()\nfor value in sys.argv[2:]:\n    raw = Path(value)\n    target = raw.resolve()\n    if not raw.is_absolute() or raw != target or not (target == work or work in target.parents):\n        raise SystemExit(f'CitizenWallet可写目录必须属于当前任务且不得经过链接：{value}')\nCHECK_OUTPUTS\n# 固定平台布局只装配到本轮工程；逐层拒绝目录链接，禁止生成物回写源目录。\npython3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\" \"$PREPARE_ONLY\" <<'PREPARE_PLATFORM'\nfrom pathlib import Path\nimport os\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject = Path(sys.argv[2])\nif project.resolve() != project or not any(project.is_relative_to(source / 'target' / scope) for scope in ('build', 'test')):\n    raise SystemExit('平台工程必须属于本产品build或test且不得经过链接')\npairs = [('ios/tests/RunnerTests.swift', 'ios/RunnerTests.swift'), ('ios/project/Runner.xcscheme', 'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme'), ('ios/project/Runner.xcworkspacedata', 'ios/Runner.xcworkspace/contents.xcworkspacedata'), ('ios/native/placeholder.m', 'ios/signer/placeholder.m'), ('ios/native/citizenwallet_signer.podspec', 'ios/signer/citizenwallet_signer.podspec'), ('ios/tests/RunnerUITests.xctestplan', 'ios/RunnerUITests/RunnerUITests.xctestplan'), ('ios/tests/ImportWalletUITests.swift', 'ios/RunnerUITests/ImportWalletUITests.swift'), ('ios/tests/CreateWalletUITests.swift', 'ios/RunnerUITests/CreateWalletUITests.swift'), ('ios/source/Runner-Bridging-Header.h', 'ios/Runner/Runner-Bridging-Header.h'), ('ios/source/HardwareSecretvaultPlugin.swift', 'ios/Runner/HardwareSecretvaultPlugin.swift'), ('ios/resources/InfoPlist.xcstrings', 'ios/Runner/InfoPlist.xcstrings'), ('ios/source/AppDelegate.swift', 'ios/Runner/AppDelegate.swift'), ('ios/source/Info.plist', 'ios/Runner/Info.plist'), ('ios/source/SceneDelegate.swift', 'ios/Runner/SceneDelegate.swift'), ('ios/project/Runner.pbxproj', 'ios/Runner.xcodeproj/project.pbxproj'), ('ios/config/Debug.xcconfig', 'ios/Flutter/Debug.xcconfig'), ('ios/config/Release.xcconfig', 'ios/Flutter/Release.xcconfig'), ('ios/config/AppFrameworkInfo.plist', 'ios/Flutter/AppFrameworkInfo.plist'), ('ios/resources/AppIcon.json', 'ios/IconAssets/AppIcon.appiconset/Contents.json'), ('ios/resources/CitizenLaunchLogo.json', 'ios/IconAssets/CitizenLaunchLogo.imageset/Contents.json'), ('ios/project/project.xcworkspacedata', 'ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata'), ('ios/project/ProjectWorkspaceChecks.plist', 'ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist'), ('ios/project/ProjectWorkspaceSettings.xcsettings', 'ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings'), ('ios/resources/CitizenLaunchScreen.storyboard', 'ios/Runner/Base.lproj/CitizenLaunchScreen.storyboard'), ('ios/resources/Main.storyboard', 'ios/Runner/Base.lproj/Main.storyboard'), ('ios/project/RunnerWorkspaceChecks.plist', 'ios/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist'), ('ios/project/RunnerWorkspaceSettings.xcsettings', 'ios/Runner.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings')] if sys.argv[3] == 'ios' else [\n    ('android/gradle-wrapper.properties', 'android/gradle/wrapper/gradle-wrapper.properties'),\n    ('android/settings.gradle.kts', 'android/settings.gradle.kts')]\nif sys.argv[3] == 'android':\n    import re\n    resources = source / 'android/resources'\n    if not resources.is_dir() or resources.is_symlink():\n        raise SystemExit('缺少普通Android资源原件目录')\n    for resource in sorted(resources.iterdir()):\n        match = re.fullmatch(r'(drawable(?:-v21)?|mipmap-anydpi-v26|values(?:-en|-night)?)_([a-z][a-z0-9_]*\\.xml)', resource.name)\n        if not match:\n            raise SystemExit('Android资源原件名称无效：' + resource.name)\n        pairs.append(('android/resources/' + resource.name, 'android/app/res/' + match[1] + '/' + match[2]))\n# 先完成所有输入验真，避免缺少工具时留下半套平台入口。\n# 本轮Xcode工程和Android settings已由准备阶段改写；装配继续核验本轮普通文件。\ninputs = [(project / origin if origin in ('ios/project/Runner.pbxproj', 'android/settings.gradle.kts') and (project / origin).is_file() else source / origin, destination) for origin, destination in pairs]\nfor relative in ('android/gradlew', 'android/gradlew.bat', 'android/gradle'):\n    if (source / relative).exists() or (source / relative).is_symlink():\n        raise SystemExit('产品源码残留Wrapper副本：' + relative)\nif sys.argv[3] == 'android' and sys.argv[4] == 'true':\n    # 远端直接运行Wrapper；原件来自该流程已安装的Flutter，不从产品取得或下载。\n    raw = os.environ.get('FLUTTER_ROOT', '')\n    flutter = Path(raw)\n    if not raw or not flutter.is_absolute() or not flutter.is_dir() or flutter.resolve() != flutter:\n        raise SystemExit('必须提供无链接的Flutter工具根')\n    for name in ('gradlew', 'gradlew.bat', 'gradle/wrapper/gradle-wrapper.jar'):\n        src = flutter / 'bin/cache/artifacts/gradle_wrapper' / name\n        if src.resolve() != src or not src.is_file() or src.stat().st_size == 0:\n            raise SystemExit('Flutter Wrapper原件缺失或为链接：' + name)\n        inputs.append((src, 'android/' + name))\nfor src, destination in inputs:\n    dst = project / destination\n    origin = str(src)\n    if not src.is_file() or src.is_symlink() or src.resolve() != src:\n        raise SystemExit('缺少普通平台输入：' + origin)\n    parent = dst.parent\n    while parent != project:\n        if parent.is_symlink():\n            raise SystemExit('平台目标祖先不得为链接：' + destination)\n        parent = parent.parent\n    if dst.is_symlink():\n        if dst.resolve(strict=True) != src:\n            raise SystemExit('平台入口来源不符：' + destination)\n        dst.unlink()\n    elif dst.exists():\n        if not dst.is_file() or dst.read_bytes() != src.read_bytes():\n            raise SystemExit('平台入口重复或内容漂移：' + destination)\n        continue\n    dst.parent.mkdir(parents=True, exist_ok=True)\n    shutil.copy2(src, dst)\n    if destination == 'android/gradlew':\n        dst.chmod(0o755)\nPREPARE_PLATFORM\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" icons \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\"\nif [[ \"$PREPARE_ONLY\" == true ]]; then\n  printf '%s\\n' \"$CITIZENWALLET_PROJECT_ROOT\"\n  exit 0\nfi\n# CocoaPods 会改写工程锁文件；先确认工程与工作目录均在当前任务target内，再把\n# 指向源码的锁文件链接原子替换为工程普通文件，禁止本机 Build 回写源码。\nif [[ \"$PLATFORM\" == ios ]]; then\n  python3 - \"$CITIZENWALLET_DIR/ios/Podfile.lock\" \"$CITIZENWALLET_PROJECT_ROOT/ios/Podfile.lock\" <<'DETACH_IOS_LOCK'\nfrom pathlib import Path\nimport os\nimport tempfile\nimport sys\n\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject_lock = Path(sys.argv[2])\nif project_lock.is_symlink():\n    if project_lock.resolve(strict=True) != source:\n        raise SystemExit('CitizenWallet iOS工程锁文件链接目标不是本产品源码')\n    fd, temporary = tempfile.mkstemp(prefix='Podfile.lock.', dir=project_lock.parent)\n    try:\n        with os.fdopen(fd, 'wb') as output:\n            output.write(source.read_bytes())\n        os.replace(temporary, project_lock)\n    finally:\n        if os.path.exists(temporary):\n            os.unlink(temporary)\nDETACH_IOS_LOCK\nfi\ncd \"$CITIZENWALLET_PROJECT_ROOT\"\nexport CITIZENWALLET_BUILD_DIR=\"$BUILD_DIR\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$BUILD_WORK_DIR/native/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$BUILD_WORK_DIR/native/ios}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$BUILD_WORK_DIR/cargo}\"\nexport XDG_CONFIG_HOME=\"${XDG_CONFIG_HOME:-$DEPENDENCY_WORK_DIR/flutter-config}\"\nexport PUB_CACHE=\"${PUB_CACHE:-$DEPENDENCY_WORK_DIR/pub}\"\nexport GRADLE_USER_HOME=\"$DEPENDENCY_WORK_DIR/gradle\"\nexport CP_HOME_DIR=\"$DEPENDENCY_WORK_DIR/cocoapods\"\nexport TMPDIR=\"$CITIZENWALLET_WORK_DIR/tmp/\"\nexport FLUTTER_SUPPRESS_ANALYTICS=true COCOAPODS_DISABLE_STATS=true\nexport CITIZENWALLET_GRADLE_INIT_SCRIPT=\"${CITIZENWALLET_GRADLE_INIT_SCRIPT:-$CITIZENWALLET_WORK_DIR/gradle.init.gradle}\"\nexport CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR=\"${CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR:-$BUILD_WORK_DIR/flutter-gradle-plugin}\"\nmkdir -p \"$XDG_CONFIG_HOME\" \"$TMPDIR\" \"$CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\"\n# Flutter Gradle 插件原件只读；其 Kotlin 会话与编译状态必须写入本轮工作目录。\nprintf '%s\\n' \\\n  'gradle.beforeProject { project ->' \\\n  '    def source = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_ROOT\")' \\\n  '    def output = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\")' \\\n  '    if (source && output && project.rootDir.canonicalPath == new File(source).canonicalPath) {' \\\n  '        def suffix = project.path == \":\" ? \"root\" : project.path.substring(1).replace(\":\", \"/\")' \\\n  '        project.layout.buildDirectory.set(new File(output, suffix))' \\\n  '        project.extensions.extraProperties.set(\"kotlin.project.persistent.dir\", new File(output, suffix + \"/kotlin-project\").path)' \\\n  '    }' \\\n  '}' >\"$CITIZENWALLET_GRADLE_INIT_SCRIPT\"\n# Flutter只接受相对产品根的build-dir配置；把本轮绝对目录换算为相对路径，\n# 不能写死为产品源码下的cache/build，也不能在产品根生成build。\nFLUTTER_BUILD_RELATIVE=\"$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' \"$BUILD_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\")\"\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n\nPUB_GET_ARGS=(--enforce-lockfile)\nGRADLE_ARGS=(--no-daemon)\ncase \"${CITIZENWALLET_PUB_OFFLINE:-false}\" in\n  true|false) ;;\n  *) echo 'CITIZENWALLET_PUB_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\nPUB_OFFLINE=\"${CITIZENWALLET_PUB_OFFLINE:-false}\"\ncase \"${CITIZENWALLET_OFFLINE:-false}\" in\n  true) PUB_OFFLINE=true; GRADLE_ARGS+=(--offline); export CARGO_NET_OFFLINE=true ;;\n  false) ;;\n  *) echo 'CITIZENWALLET_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\n# 任务级Pub预装只约束Pub；原整体离线开关仍同时约束Pub、Gradle和Cargo。\nif [[ \"$PUB_OFFLINE\" == true ]]; then PUB_GET_ARGS+=(--offline); fi\n\n# Flutter 版本及依赖配置由产品工程自行决定。\n\n# Flutter在缓存工程生成配置和插件清单；Gradle只从公民钱包真实android根启动，\n# 项目缓存、依赖缓存、编译物和临时文件继续使用当前Android任务缓存。\n# Kotlin持久状态不受--project-cache-dir控制，必须另传官方工程属性避免源码生成.kotlin。\nbuild_android_release() {\n  local properties flutter_command flutter_sdk android_sdk gradle_bin\n  local flutter_version dart_defines link_target java_home expected_gradle_version actual_gradle_version\n  gradle_bin=\"${CITIZENWALLET_GRADLE_BIN:?Android Build必须提供绝对Gradle工具路径}\"\n  [[ \"$gradle_bin\" == /* && -f \"$gradle_bin\" && -x \"$gradle_bin\" ]] \\\n    || { echo \"Android Gradle工具无效：$gradle_bin\" >&2; return 1; }\n  properties=\"$CITIZENWALLET_PROJECT_ROOT/android/local.properties\"\n  flutter_command=\"$(command -v flutter)\"\n  while [[ -L \"$flutter_command\" ]]; do\n    link_target=\"$(readlink \"$flutter_command\")\"\n    [[ \"$link_target\" == /* ]] || link_target=\"$(cd \"$(dirname \"$flutter_command\")\" && pwd -P)/$link_target\"\n    flutter_command=\"$link_target\"\n  done\n  flutter_sdk=\"$(cd \"$(dirname \"$flutter_command\")/..\" && pwd -P)\"\n  android_sdk=\"${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}\"\n  # JDK选择属于CitizenWallet产品流程：保留调用方选择；本机未传入时使用\n  # Android Studio随包JBR。Gradle自行报告工具错误，不增加外部前置门禁。\n  java_home=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"\n  # Wrapper属性仍是产品的Gradle版本真源；调用方给出的工具必须与它完全一致。\n  expected_gradle_version=\"$(sed -nE 's@^distributionUrl=.*gradle-([0-9][0-9.]*)-bin\\.zip$@\\1@p' \\\n    \"$CITIZENWALLET_DIR/android/gradle-wrapper.properties\")\"\n  [[ -n \"$expected_gradle_version\" ]] || { echo 'Android Gradle版本声明无效' >&2; return 1; }\n  actual_gradle_version=\"$(JAVA_HOME=\"$java_home\" \"$gradle_bin\" --version | sed -n 's/^Gradle //p' | head -n 1)\"\n  [[ \"$actual_gradle_version\" == \"$expected_gradle_version\" ]] \\\n    || { echo 'Android Gradle工具版本与钱包锁定版本不一致' >&2; return 1; }\n  # 完整prepare已写入验真SDK与原始版本，资源解析和编译消费同一普通配置。\n  [[ -f \"$properties\" && ! -L \"$properties\" ]] \\\n    || { echo 'Android工程缺少完整prepare交付的local.properties' >&2; return 1; }\n  flutter_version=\"$(flutter --version --machine)\"\n  dart_defines=\"$(printf '%s' \"$flutter_version\" | python3 -c '\nimport base64, json, sys\nvalue = json.load(sys.stdin)\nfields = (\n    (\"FLUTTER_VERSION\", \"frameworkVersion\"),\n    (\"FLUTTER_CHANNEL\", \"channel\"),\n    (\"FLUTTER_GIT_URL\", \"repositoryUrl\"),\n    (\"FLUTTER_FRAMEWORK_REVISION\", \"frameworkRevision\"),\n    (\"FLUTTER_ENGINE_REVISION\", \"engineRevision\"),\n    (\"FLUTTER_DART_VERSION\", \"dartSdkVersion\"),\n)\nprint(\",\".join(base64.b64encode(f\"{name}={value[key]}\".encode()).decode() for name, key in fields))\n')\"\n  (\n    cd \"$CITIZENWALLET_PROJECT_ROOT/android\"\n    # 调用方提供同一已验真 Gradle 工具，任务目录只承载依赖和编译状态，不再下载工具分发包。\n    ANDROID_HOME=\"$android_sdk\" ANDROID_SDK_ROOT=\"$android_sdk\" JAVA_HOME=\"$java_home\" PATH=\"$java_home/bin:$PATH\" \\\n    CITIZENWALLET_FLUTTER_GRADLE_ROOT=\"$flutter_sdk/packages/flutter_tools/gradle\" \\\n    FLUTTER_ROOT=\"$flutter_sdk\" \"$gradle_bin\" \"${GRADLE_ARGS[@]}\" --stacktrace --no-problems-report \\\n      --init-script \"$CITIZENWALLET_GRADLE_INIT_SCRIPT\" \\\n      --project-cache-dir \"$BUILD_WORK_DIR/gradle-project\" \\\n      -Pkotlin.project.persistent.dir=\"$BUILD_WORK_DIR/kotlin-project\" \\\n      -Ptarget-platform=android-arm64 \\\n      -Ptarget=lib/main.dart \\\n      -Pbase-application-name=android.app.Application \\\n      -Pdart-defines=\"$dart_defines\" \\\n      -Pdart-obfuscation=false \\\n      -Ptrack-widget-creation=true \\\n      -Ptree-shake-icons=true \\\n      assembleRelease\n  )\n}\n\n# 仅清理当前工作目录中的候选包，不触碰源码或另一端。\nclean_platform_build_outputs() {\n  case \"$PLATFORM\" in\n    ios) rm -rf \"$BUILD_DIR/ios/iphoneos/Runner.app\" ;;\n    android) rm -f \"$BUILD_DIR/app/outputs/flutter-apk/\"*.apk ;;\n  esac\n  mkdir -p \"$BUILD_DIR\"\n}\n\n# 仅选择 Xcode 报告的一台可用 iOS 真机；不在无设备或多设备时回落模拟器。\nrun_ios_ui_tests() {\n  local xcodebuild_bin destinations device_id\n  xcodebuild_bin=\"${CITIZENWALLET_XCODEBUILD_BIN:?iOS Build必须提供绝对Xcode工具路径}\"\n  [[ \"$xcodebuild_bin\" == /* && -f \"$xcodebuild_bin\" && -x \"$xcodebuild_bin\" ]] \\\n    || { echo 'iOS Xcode工具无效' >&2; return 1; }\n  destinations=\"$(\"$xcodebuild_bin\" -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release -showdestinations)\"\n  device_id=\"$(printf '%s\\n' \"$destinations\" | python3 -c '\nimport re, sys\navailable = sys.stdin.read().split(\"Ineligible destinations\", 1)[0]\nids = re.findall(r\"\\{\\s*platform:iOS,\\s*arch:arm64,\\s*id:([0-9A-Fa-f-]+),\", available)\nif len(ids) != 1 or not re.fullmatch(r\"[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{16,}\", ids[0]):\n    raise SystemExit(\"iOS UI测试需要唯一可用真机\")\nprint(ids[0])\n')\"\n  # 测试计划关闭自动屏幕采集，避免触发钱包既有录屏保护；Release 测试应用与编译物均留在调用方工作根。\n  \"$xcodebuild_bin\" test \\\n    -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release \\\n    -destination \"platform=iOS,id=$device_id\" \\\n    -only-testing:RunnerUITests -parallel-testing-enabled NO \\\n    -collect-test-diagnostics never \\\n    -derivedDataPath \"$BUILD_WORK_DIR/xcode-ui\" \\\n    -resultBundlePath \"$BUILD_WORK_DIR/ios-ui-tests.xcresult\"\n}\n\n\n# 已跟踪的 pallet_registry.dart 是构建输入；本机编译不得回写共享源码索引。\n\necho \"==> 清理 ${PLATFORM} 平台构建产物...\"\nclean_platform_build_outputs\necho \"==> 获取依赖...\"\nflutter pub get \"${PUB_GET_ARGS[@]}\"\n# 本机钱包 Build 与 CI 使用同一套单元和组件测试。先在本轮target Cargo 目录\n# 编译宿主 FFI 动态库，再运行 Flutter 测试；测试失败立即阻止后续平台编译与安装。\necho \"==> 编译宿主签名库并运行钱包测试...\"\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native host\n# 测试缓存留在当前任务工程视图，避免相对路径重复拼接越界。\nflutter config --build-dir=test-build >/dev/null\nflutter test --no-pub\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n# Isar 与 QR 生成文件已经纳入仓库。本机四端编译只消费同一份源码，禁止两个平台在\n# 构建过程中同时运行 build_runner 改写源文件。\n\n# sr25519 原生签名库(schnorrkel)。签名、派生、验签全走它，缺库会在运行时才炸，\n# 所以必须先于 flutter build 产出；实现来自 citizenwallet/rust/source/sr25519.rs，\n# 由公民钱包独立维护。\necho \"==> 编译原生签名库（${PLATFORM}）...\"\n# 使用所属产品构建入口的绝对路径，工作目录切换后仍定位同一实现。\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native \"$PLATFORM\"\n\n# 本脚本编译并运行既有测试；完整Build由产品入口继续签名验真、安装和回读。\n# `--release`只是本机优化配置，不表示或触发正式Release流程。\necho \"==> 编译本机优化安装包...\"\nif [[ \"$PLATFORM\" == ios ]]; then\n  flutter build ios --release\n  echo \"==> 在唯一真机运行 Release UI 测试...\"\n  run_ios_ui_tests\n  IOS_APP=\"$BUILD_DIR/ios/iphoneos/Runner.app\"\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-ios-package \"$IOS_APP\"\n  echo \"\"\n  echo \"==> iOS Release编译和真机测试完成，继续签名验真、安装及回读。\"\nelif [[ \"$PLATFORM\" == android ]]; then\n  build_android_release\n  ANDROID_APK=\"$BUILD_DIR/app/outputs/flutter-apk/app-release.apk\"\n  [[ -f \"$ANDROID_APK\" ]] || {\n    echo \"Android 本机无私钥 APK 不存在\" >&2\n    exit 1\n  }\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-android-package \"$ANDROID_APK\"\n  # 未签名APK仅留在本轮工作根；产品完整入口随后使用已有身份签名、安装和回读。\n  mkdir -p \"$ARTIFACT_ROOT\"\n  cp \"$ANDROID_APK\" \"$ARTIFACT_ROOT/android.apk\"\n  echo \"==> Android未签名APK编译完成，继续使用已有身份签名、安装及回读。\"\nfi\n","native":"#!/usr/bin/env bash\n# 编译 CitizenWallet 冷钱包原生密码学库，放到 Flutter 能自动打包的位置。\n#\n# sr25519签名实现只属于citizenwallet/rust/source/sr25519.rs。\n# 本库是冷端FFI外壳，永久离线且不需要链。\n#\n# 前置条件：当前Rust编译器已具备目标平台标准库；本脚本只读检查，不自动安装。\n#\n# 用法：\n#   node scripts/build.mjs native            # 编译所有平台\n#   node scripts/build.mjs native android    # 仅 Android\n#   node scripts/build.mjs native ios        # 仅 iOS\n#   node scripts/build.mjs native macos      # 仅 macOS（flutter test 用）\nset -euo pipefail\n\nWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nRUST_DIR=\"$WALLET_DIR/rust\"\nLIB_NAME=\"libcitizenwallet_signer\"\nTARGET=\"${1:-all}\"\n\n# 宿主与平台库同属本轮产品工作根；独立调用也使用本产品声明的平台target。\n# 复用公开工作根校验，禁止旧“整棵源码外”规则误拒绝已验真的target任务。\nCITIZENWALLET_WORK_DIR=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" --input-type=module - \"$WALLET_DIR/scripts/build.mjs\" \"${CITIZENWALLET_WORK_DIR:-${PRODUCT_WORK_DIR:-}}\" \"$TARGET\" \"${PLATFORM:-${platform:-}}\" <<'CHECK_WORK'\nimport {pathToFileURL} from 'node:url';\nimport {dirname,join,relative,sep} from 'node:path';\nconst [entry,provided,target,explicit]=process.argv.slice(2);\nconst {checkWork,productTarget,temporaryRoot}=await import(pathToFileURL(entry));\nconst requested=target==='android'||target==='verify-android-package'?'android':target==='ios'||target==='verify-ios-package'?'ios':undefined;\nconst platform=explicit||requested||'ios';\nif(requested&&requested!==platform)throw Error('原生目标与当前任务平台不符');\nconst work=provided?checkWork(provided):temporaryRoot(platform,'tmp');\nif(!work.startsWith(productTarget(platform)+sep))throw Error('原生工作根与当前任务平台不符');\nprocess.stdout.write(work+'\\n');\nCHECK_WORK\n)\" || exit 1\nCITIZENWALLET_NATIVE_WORK_DIR=\"${CITIZENWALLET_NATIVE_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work/native}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/cargo-target}\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/ios}\"\n# 全部原生产物与临时状态在编译前一次验真，不允许源码、其它任务或链接写入。\nexport TMPDIR=\"${TMPDIR:-$CITIZENWALLET_WORK_DIR/tmp/}\"\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_NATIVE_WORK_DIR\" \"$CARGO_TARGET_DIR\" \"$CITIZENWALLET_NATIVE_ANDROID_DIR\" \"$CITIZENWALLET_NATIVE_IOS_DIR\" \"$TMPDIR\" <<'CHECK_TARGET'\nfrom pathlib import Path\nimport sys\nwork = Path(sys.argv[1])\nfor value in sys.argv[2:]:\n    target = Path(value)\n    if not target.is_absolute() or target.resolve() != target or not target.is_relative_to(work) or target == work:\n        raise SystemExit('原生产物与临时目录必须属于当前任务且不得经过链接：' + value)\nCHECK_TARGET\nmkdir -p \"$TMPDIR\"\n\nensure_target() {\n  local target=\"$1\" target_lib\n  # 只检查当前Rust编译器已有的目标库；缺失即停止，构建不得自动安装工具。\n  target_lib=\"$(rustc --print target-libdir --target \"$target\")\" || return 1\n  [[ \"$target_lib\" == /* && -d \"$target_lib\" ]] \\\n    || { echo \"错误: Rust目标库目录无效：$target\" >&2; return 1; }\n  local core_libraries=(\"$target_lib\"/libcore-*.rlib)\n  local std_libraries=(\"$target_lib\"/libstd-*.rlib)\n  [[ -f \"${core_libraries[0]}\" && -f \"${std_libraries[0]}\" ]] \\\n    || { echo \"错误: 当前Rust缺少已安装目标库：${target}；构建停止\" >&2; return 1; }\n}\n\n# 4个sr25519 C符号必须齐全，禁止交付额外用途钥符号，否则 Dart 侧 lookupFunction 会在运行时才失败。\n# 注意平台差异：ELF 用 -D，Mach-O 用 -g，用错标志会误判为 0。\nverify_symbols() {\n  local lib=\"$1\"\n  local nm_flag=\"$2\"\n  local nm_bin\n  nm_bin=\"$(command -v llvm-nm || true)\"\n  if [ -z \"$nm_bin\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    nm_bin=\"$(ls \"$sdk_home\"/ndk/*/toolchains/llvm/prebuilt/*/bin/llvm-nm 2>/dev/null | tail -1 || true)\"\n  fi\n  if [ -z \"$nm_bin\" ]; then\n    echo \"错误: 未找到 llvm-nm，不能验证原生库导出符号。\"\n    return 1\n  fi\n  local signer_count removed_export_count\n  signer_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'citizen_sr25519' || true)\"\n  removed_export_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'account_crypto_' || true)\"\n  if [ \"$signer_count\" != \"4\" ] || [ \"$removed_export_count\" != \"0\" ]; then\n    echo \"错误: $lib 符号不完整（citizen_sr25519_*=$signer_count/4, 禁用导出=$removed_export_count/0）\"\n    return 1\n  fi\n  echo \"    符号检查通过：citizen_sr25519_*=4, 禁用导出=0\"\n}\n\nverify_android_package() {\n  local package=\"$1\" expected=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a/$LIB_NAME.so\" entry temporary packaged\n  [[ -f \"$package\" ]] || { echo \"错误: Android 包不存在：$package\"; return 1; }\n  [[ -f \"$expected\" ]] || { echo \"错误: Android 原生库不存在：$expected\"; return 1; }\n  case \"$package\" in\n    *.apk) entry=\"lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *.aab) entry=\"base/lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *) echo \"错误: 只支持校验 APK/AAB：$package\"; return 1 ;;\n  esac\n  # 中文注释：Android 打包会剥离调试段，不能按原文件字节比对；从最终包提取后验证\n  # ELF 架构和真实导出符号，缺失、错 ABI 或错误库都会在上传前失败。\n  temporary=\"$(mktemp -d)\"\n  packaged=\"$temporary/$LIB_NAME.so\"\n  unzip -p \"$package\" \"$entry\" > \"$packaged\" || { rm -rf \"$temporary\"; return 1; }\n  [[ -s \"$packaged\" ]] || { rm -rf \"$temporary\"; echo \"错误: Android 包内原生库为空：$entry\"; return 1; }\n  file \"$packaged\" | grep -Eq 'ARM aarch64|ARM64' || {\n    rm -rf \"$temporary\"; echo \"错误: Android 包内原生库不是 arm64：$entry\"; return 1;\n  }\n  verify_symbols \"$packaged\" -D || { rm -rf \"$temporary\"; return 1; }\n  rm -rf \"$temporary\"\n  if unzip -Z1 \"$package\" | grep -E \"(^|/)lib/(armeabi-v7a|x86|x86_64)/$LIB_NAME\\\\.so$\"; then\n    echo \"错误: Android 包含未支持 ABI 的原生库。\"; return 1\n  fi\n  echo \"Android 包原生库门禁通过：$entry\"\n}\n\nverify_ios_package() {\n  local app_bundle=\"$1\" executable nm_bin symbols\n  executable=\"$app_bundle/Runner\"\n  [[ -f \"$executable\" ]] || { echo \"错误: iOS Runner 不存在：$executable\"; return 1; }\n  [[ \"$(lipo -archs \"$executable\")\" = \"arm64\" ]] || {\n    echo \"错误: iOS 真机包必须且只能包含 arm64：$(lipo -archs \"$executable\")\"; return 1;\n  }\n  nm_bin=\"$(xcrun --find llvm-nm)\"\n  symbols=\"$(\"$nm_bin\" -gU \"$executable\" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' || true)\"\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^citizen_sr25519_' || true)\" = \"4\" ]] || {\n    echo \"错误: iOS Runner 的 citizen_sr25519_* 符号不完整。\"; return 1;\n  }\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^account_crypto_' || true)\" = \"0\" ]] || {\n    echo \"错误: iOS Runner包含禁用的用途钥导出。\"; return 1;\n  }\n  echo \"iOS 包原生库门禁通过：arm64与4个sr25519 FFI符号完整，禁用导出为零\"\n}\n\nbuild_android() {\n  echo \"\"\n  echo \"=== 编译 Android (arm64-v8a) ===\"\n  ensure_target aarch64-linux-android\n\n  local ndk_home=\"${ANDROID_NDK_HOME:-}\"\n  if [ -z \"$ndk_home\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    ndk_home=\"$(ls -d \"$sdk_home/ndk/\"* 2>/dev/null | sort -V | tail -1 || true)\"\n  fi\n  if [ -z \"$ndk_home\" ] || [ ! -d \"$ndk_home\" ]; then\n    echo \"错误: 未找到 Android NDK。请设置 ANDROID_NDK_HOME 或通过 Android Studio 安装 NDK。\"\n    return 1\n  fi\n  echo \"使用 NDK: $ndk_home\"\n\n  local toolchain=\"\"\n  case \"$(uname -s)\" in\n    Darwin)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-x86_64\"\n      if [ ! -d \"$toolchain\" ]; then\n        toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-aarch64\"\n      fi\n      ;;\n    Linux)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/linux-x86_64\"\n      ;;\n    *)\n      echo \"错误: 当前系统不支持自动定位 Android NDK toolchain: $(uname -s)\"\n      return 1\n      ;;\n  esac\n  if [ ! -d \"$toolchain\" ]; then\n    echo \"错误: 未找到 Android NDK toolchain: $toolchain\"\n    return 1\n  fi\n\n  export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export CC_aarch64_linux_android=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export AR_aarch64_linux_android=\"$toolchain/bin/llvm-ar\"\n\n  cd \"$RUST_DIR\"\n  cargo build --release --target aarch64-linux-android\n\n  # CitizenWallet Android 唯一支持 arm64-v8a；禁止重新生成任何 32 位或 x86 ABI。\n  local arm64_dest=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a\"\n  mkdir -p \"$arm64_dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-linux-android/release/$LIB_NAME.so\" \"$arm64_dest/\"\n  echo \"Android arm64-v8a: $arm64_dest/$LIB_NAME.so ($(wc -c < \"$arm64_dest/$LIB_NAME.so\" | tr -d ' ') bytes)\"\n  verify_symbols \"$arm64_dest/$LIB_NAME.so\" -D\n}\n\nbuild_ios() {\n  echo \"\"\n  echo \"=== 编译 iOS (arm64 真机) ===\"\n  ensure_target aarch64-apple-ios\n\n  # 宿主测试继承macOS SDK；真机目标必须切到同一已供给Xcode的iphoneos SDK。\n  # xcrun只读定位已安装SDK，不下载，不改变全流程或宿主的SDKROOT。\n  local ios_sdk\n  ios_sdk=\"$(\"${XCRUN:-xcrun}\" --sdk iphoneos --show-sdk-path)\" || return 1\n  [[ \"$ios_sdk\" == /* && -d \"$ios_sdk\" ]] \\\n    || { echo \"错误: 已供给Xcode缺少iOS SDK\" >&2; return 1; }\n  cd \"$RUST_DIR\"\n  # 真机Cargo明确消费资源回执的Clang，不从PATH寻找cc或其它版本。\n  local ios_clang=\"${CC:?缺少已验真Xcode的Clang入口}\"\n  [[ \"$ios_clang\" == /* && -f \"$ios_clang\" && -x \"$ios_clang\" && ! -L \"$ios_clang\" ]] \\\n    || { echo \"错误: 缺少已供给Clang规范绝对入口\" >&2; return 1; }\n  SDKROOT=\"$ios_sdk\" CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=\"$ios_clang\" \\\n    CC_aarch64_apple_ios=\"$ios_clang\" cargo build --release --target aarch64-apple-ios\n\n  # iOS 用**静态库**而非 dylib：裸 .dylib 需嵌入 + 单独签名，且 App Store 要求\n  # 动态库必须包在 .framework 里；静态库直接链进 App 二进制，无这些坑。\n  # 符号经 podspec 的 -force_load 保留，Dart 侧用 DynamicLibrary.process() 取。\n  local dest=\"${CITIZENWALLET_NATIVE_IOS_DIR:?缺少CitizenWallet iOS原生库目录}\"\n  mkdir -p \"$dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-apple-ios/release/$LIB_NAME.a\" \"$dest/\"\n  echo \"iOS arm64: $dest/$LIB_NAME.a ($(wc -c < \"$dest/$LIB_NAME.a\" | tr -d ' ') bytes)\"\n  verify_symbols \"$dest/$LIB_NAME.a\" \"\"\n}\n\nbuild_host() {\n  echo \"\"\n  echo \"=== 编译宿主平台动态库 (flutter test 用) ===\"\n  cd \"$RUST_DIR\"\n  # host 调试库给 Dart FFI / flutter test 直接 dlopen；release profile 已设\n  # strip=false，本机 dyld 不会报 LINKEDIT 对齐错误。\n  cargo build --release\n\n  # 宿主扩展名：macOS 产 .dylib，Linux 产 .so；Dart 侧 native_sr25519.dart 按同一规则取。\n  local host_ext\n  case \"$(uname -s)\" in\n    Darwin) host_ext=dylib ;;\n    *)      host_ext=so ;;\n  esac\n  local host_lib=\"$CARGO_TARGET_DIR/release/$LIB_NAME.$host_ext\"\n  echo \"宿主库: $host_lib ($(wc -c < \"$host_lib\" | tr -d ' ') bytes)\"\n  verify_symbols \"$host_lib\" -g\n}\n\ncase \"$TARGET\" in\n  android) build_android ;;\n  ios)     build_ios ;;\n  host|macos|linux) build_host ;;\n  verify-android-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-android-package <apk|aab>\"; exit 1; }\n    verify_android_package \"$2\"\n    exit 0\n    ;;\n  verify-ios-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-ios-package <Runner.app>\"; exit 1; }\n    verify_ios_package \"$2\"\n    exit 0\n    ;;\n  all)\n    build_android\n    build_ios\n    build_host\n    ;;\n  *)\n    echo \"用法: $0 [android|ios|macos|all|verify-android-package|verify-ios-package]\"\n    exit 1\n    ;;\nesac\n\necho \"\"\necho \"=== 编译完成 ===\"\necho \"flutter build / flutter run 会自动把 native library 打包进 App。\"\n"});
+export const BUILD_SHELL_SOURCES=Object.freeze({"wallet":"#!/usr/bin/env bash\n# 在本产品target内准确任务工程生成本机优化安装包；本脚本不启动、不安装产品。\n#\n# 用法：node scripts/build.mjs wallet <ios|android>\n#\n# 目标平台是必填参数，不做任何自动探测：探测总要在失败时选一个回落，\n# 而回落的那一端会被当成用户想编的那一端。每个调用方必须明确传入目标平台。\n#\n# 调用方交付本产品target内任务工程；独立准备同样使用本产品target。\nset -euo pipefail\nCITIZENWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nPLATFORM=\"${1:?缺少目标平台，用法：$0 <ios|android>}\"\nPREPARE_ONLY=false\nif [[ \"$PLATFORM\" == prepare-ios || \"$PLATFORM\" == prepare-android ]]; then\n  PREPARE_ONLY=true\n  PLATFORM=\"${PLATFORM#prepare-}\"\nfi\n[[ \"$PLATFORM\" == ios || \"$PLATFORM\" == android ]] \\\n  || { echo \"本机目标平台只接受 ios 或 android：$PLATFORM\" >&2; exit 1; }\n\n# 所有独立入口的工具临时状态归本产品target；宿主已交付的产品工作根继续归当前任务。\nPRODUCT_TEMP_SOURCE=\"$CITIZENWALLET_DIR\"\nPRODUCT_TARGET_TEMP_ROOT=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$PRODUCT_TEMP_SOURCE/scripts/build.mjs\" temporary-root \"${PLATFORM:-${platform:-}}\" 'ios')\" || exit 1\nif [[ -z \"${PRODUCT_WORK_DIR:-}\" && \"${TMPDIR:-}\" != \"$PRODUCT_TEMP_SOURCE/target/\"* ]]; then\n  export TMPDIR=\"$PRODUCT_TARGET_TEMP_ROOT/\"\nfi\nCITIZENWALLET_WORK_DIR=\"${CITIZENWALLET_WORK_DIR:-$PRODUCT_TARGET_TEMP_ROOT}\"\n# 源码根只读；两个端的Flutter、Pods和Gradle状态分别写入当前产品工作目录。\n# 中文注释：检出目录名称由调用方选择；产品身份只取普通 pubspec 文件中的唯一包名。\npython3 - \"$CITIZENWALLET_DIR\" <<'CHECK_SOURCE'\nfrom pathlib import Path\nimport re\nimport sys\nsource = Path(sys.argv[1])\nmanifest = source / 'pubspec.yaml'\nif manifest.is_symlink() or not manifest.is_file():\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nnames = re.findall(r'^name:[ \\t]*([^\\r\\n]+?)[ \\t]*$', manifest.read_text(), re.MULTILINE)\nif names != ['citizenwallet']:\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nCHECK_SOURCE\n# 写入前先绑定本产品、真实平台、当前工作根和准确工程；拒绝链接或其它任务路径。\nCREATE_PROJECT=false\nif [[ \"$PREPARE_ONLY\" == true && -z \"${CITIZENWALLET_PROJECT_ROOT:-}\" ]]; then\n  CREATE_PROJECT=true\n  export CITIZENWALLET_PROJECT_ROOT=\"$CITIZENWALLET_WORK_DIR/source-view\"\nfi\npython3 - \"$CITIZENWALLET_DIR\" \"$PLATFORM\" \"$CITIZENWALLET_WORK_DIR\" \"${CITIZENWALLET_PROJECT_ROOT:-}\" \"$PREPARE_ONLY\" <<'CHECK_PROJECT'\nfrom pathlib import Path\nimport sys\nsource, platform, work, project, preparing = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5]\nif not work.is_absolute() or work.resolve() != work:\n    raise SystemExit('产品工作目录必须为无链接规范绝对路径')\ntry:\n    parts = work.relative_to(source / 'target').parts\nexcept ValueError:\n    parts = ()\nif parts != ('test',) and parts not in {('build', 'ios'), ('build', 'android')}:\n    raise SystemExit('产品工作目录只允许本产品target/build/<平台>或target/test')\nexpected = work / 'source-view' / str(source).lstrip('/')\nif not project.is_absolute() or project.resolve() != project or not (project == expected or preparing == 'true' and project == work / 'source-view'):\n    raise SystemExit('平台工程不属于当前任务')\nCHECK_PROJECT\n# 准备入口使用同一target边界；没有交付工程时只创建当前任务的准确空副本。\nif [[ \"$CREATE_PROJECT\" == true ]]; then\n  python3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" <<'CREATE_VIEW'\nfrom pathlib import Path\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\ntarget = Path(sys.argv[2])\nif target.exists() or target.is_symlink():\n    raise SystemExit('CitizenWallet本轮新工程必须为空目标')\nexcluded = {'.git', '.dart_tool', '.gradle', '.symlinks', 'Pods', 'build', 'target', 'node_modules', 'ephemeral', '.DS_Store', 'swiftpm'}\ngenerated = {'local.properties', 'Generated.xcconfig', 'flutter_export_environment.sh', '.flutter-plugins-dependencies', 'GeneratedPluginRegistrant.java', 'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m', 'GeneratedPluginRegistrant.swift'}\ndef visit(src, dst):\n    dst.mkdir(parents=True)\n    for child in sorted(src.iterdir()):\n        if child.name in excluded or child.name in generated:\n            continue\n        output = dst / child.name\n        if child.is_dir() and not child.is_symlink():\n            visit(child, output)\n        else:\n            resolved = child.resolve(strict=True)\n            if not resolved.is_relative_to(source) or not resolved.is_file():\n                raise SystemExit('源码文件链接越界或不是普通文件')\n            shutil.copy2(resolved, output)\nvisit(source, target)\nCREATE_VIEW\nfi\nexport CITIZENWALLET_PROJECT_ROOT=\"${CITIZENWALLET_PROJECT_ROOT:?必须提供本轮CitizenWallet Flutter工程根}\"\n[[ -d \"$CITIZENWALLET_PROJECT_ROOT\" && -f \"$CITIZENWALLET_PROJECT_ROOT/pubspec.yaml\" ]] \\\n  || { echo 'CitizenWallet Flutter 产品目录无效' >&2; exit 1; }\nBUILD_WORK_DIR=\"${CITIZENWALLET_BUILD_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work}\"\nDEPENDENCY_WORK_DIR=\"${CITIZENWALLET_DEPENDENCY_DIR:-$CITIZENWALLET_WORK_DIR/dependencies}\"\nBUILD_DIR=\"${CITIZENWALLET_BUILD_DIR:-$BUILD_WORK_DIR/flutter}\"\nARTIFACT_ROOT=\"${CITIZENWALLET_ARTIFACT_DIR:-$CITIZENWALLET_WORK_DIR}\"\n# Pub始终向工程根写.dart_tool；build-dir不能改变这个位置。先解析真实路径，\n# 拒绝工程根、.dart_tool及Kotlin持久目录链接把生成状态导回产品源码，再允许任何写入。\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$CITIZENWALLET_PROJECT_ROOT/.dart_tool\" \"$CITIZENWALLET_WORK_DIR\" \"$BUILD_WORK_DIR\" \"$BUILD_WORK_DIR/kotlin-project\" \"$DEPENDENCY_WORK_DIR\" \"$BUILD_DIR\" \"$ARTIFACT_ROOT\" <<'CHECK_OUTPUTS'\nfrom pathlib import Path\nimport sys\nwork = Path(sys.argv[1]).resolve()\nfor value in sys.argv[2:]:\n    raw = Path(value)\n    target = raw.resolve()\n    if not raw.is_absolute() or raw != target or not (target == work or work in target.parents):\n        raise SystemExit(f'CitizenWallet可写目录必须属于当前任务且不得经过链接：{value}')\nCHECK_OUTPUTS\n# 固定平台布局只装配到本轮工程；逐层拒绝目录链接，禁止生成物回写源目录。\npython3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\" \"$PREPARE_ONLY\" <<'PREPARE_PLATFORM'\nfrom pathlib import Path\nimport os\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject = Path(sys.argv[2])\nif project.resolve() != project or not any(project.is_relative_to(source / 'target' / scope) for scope in ('build', 'test')):\n    raise SystemExit('平台工程必须属于本产品build或test且不得经过链接')\npairs = [('ios/tests/RunnerTests.swift', 'ios/RunnerTests.swift'), ('ios/project/Runner.xcscheme', 'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme'), ('ios/project/Runner.xcworkspacedata', 'ios/Runner.xcworkspace/contents.xcworkspacedata'), ('ios/native/placeholder.m', 'ios/signer/placeholder.m'), ('ios/native/citizenwallet_signer.podspec', 'ios/signer/citizenwallet_signer.podspec'), ('ios/tests/RunnerUITests.xctestplan', 'ios/RunnerUITests/RunnerUITests.xctestplan'), ('ios/tests/ImportWalletUITests.swift', 'ios/RunnerUITests/ImportWalletUITests.swift'), ('ios/tests/CreateWalletUITests.swift', 'ios/RunnerUITests/CreateWalletUITests.swift'), ('ios/source/Runner-Bridging-Header.h', 'ios/Runner/Runner-Bridging-Header.h'), ('ios/source/HardwareSecretvaultPlugin.swift', 'ios/Runner/HardwareSecretvaultPlugin.swift'), ('ios/resources/InfoPlist.xcstrings', 'ios/Runner/InfoPlist.xcstrings'), ('ios/source/AppDelegate.swift', 'ios/Runner/AppDelegate.swift'), ('ios/source/Info.plist', 'ios/Runner/Info.plist'), ('ios/source/SceneDelegate.swift', 'ios/Runner/SceneDelegate.swift'), ('ios/project/Runner.pbxproj', 'ios/Runner.xcodeproj/project.pbxproj'), ('ios/config/Debug.xcconfig', 'ios/Flutter/Debug.xcconfig'), ('ios/config/Release.xcconfig', 'ios/Flutter/Release.xcconfig'), ('ios/config/AppFrameworkInfo.plist', 'ios/Flutter/AppFrameworkInfo.plist'), ('ios/resources/AppIcon.json', 'ios/IconAssets/AppIcon.appiconset/Contents.json'), ('ios/resources/CitizenLaunchLogo.json', 'ios/IconAssets/CitizenLaunchLogo.imageset/Contents.json'), ('ios/project/project.xcworkspacedata', 'ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata'), ('ios/project/ProjectWorkspaceChecks.plist', 'ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist'), ('ios/project/ProjectWorkspaceSettings.xcsettings', 'ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings'), ('ios/resources/CitizenLaunchScreen.storyboard', 'ios/Runner/Base.lproj/CitizenLaunchScreen.storyboard'), ('ios/resources/Main.storyboard', 'ios/Runner/Base.lproj/Main.storyboard'), ('ios/project/RunnerWorkspaceChecks.plist', 'ios/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist'), ('ios/project/RunnerWorkspaceSettings.xcsettings', 'ios/Runner.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings')] if sys.argv[3] == 'ios' else [\n    ('android/gradle-wrapper.properties', 'android/gradle/wrapper/gradle-wrapper.properties'),\n    ('android/settings.gradle.kts', 'android/settings.gradle.kts')]\nif sys.argv[3] == 'android':\n    import re\n    resources = source / 'android/resources'\n    if not resources.is_dir() or resources.is_symlink():\n        raise SystemExit('缺少普通Android资源原件目录')\n    for resource in sorted(resources.iterdir()):\n        match = re.fullmatch(r'(drawable(?:-v21)?|mipmap-anydpi-v26|values(?:-en|-night)?)_([a-z][a-z0-9_]*\\.xml)', resource.name)\n        if not match:\n            raise SystemExit('Android资源原件名称无效：' + resource.name)\n        pairs.append(('android/resources/' + resource.name, 'android/app/res/' + match[1] + '/' + match[2]))\n# 先完成所有输入验真，避免缺少工具时留下半套平台入口。\n# 本轮Xcode工程和Android settings已由准备阶段改写；装配继续核验本轮普通文件。\ninputs = [(project / origin if origin in ('ios/project/Runner.pbxproj', 'android/settings.gradle.kts') and (project / origin).is_file() else source / origin, destination) for origin, destination in pairs]\nfor relative in ('android/gradlew', 'android/gradlew.bat', 'android/gradle'):\n    if (source / relative).exists() or (source / relative).is_symlink():\n        raise SystemExit('产品源码残留Wrapper副本：' + relative)\nif sys.argv[3] == 'android' and sys.argv[4] == 'true':\n    # 远端直接运行Wrapper；原件来自该流程已安装的Flutter，不从产品取得或下载。\n    raw = os.environ.get('FLUTTER_ROOT', '')\n    flutter = Path(raw)\n    if not raw or not flutter.is_absolute() or not flutter.is_dir() or flutter.resolve() != flutter:\n        raise SystemExit('必须提供无链接的Flutter工具根')\n    for name in ('gradlew', 'gradlew.bat', 'gradle/wrapper/gradle-wrapper.jar'):\n        src = flutter / 'bin/cache/artifacts/gradle_wrapper' / name\n        if src.resolve() != src or not src.is_file() or src.stat().st_size == 0:\n            raise SystemExit('Flutter Wrapper原件缺失或为链接：' + name)\n        inputs.append((src, 'android/' + name))\nfor src, destination in inputs:\n    dst = project / destination\n    origin = str(src)\n    if not src.is_file() or src.is_symlink() or src.resolve() != src:\n        raise SystemExit('缺少普通平台输入：' + origin)\n    parent = dst.parent\n    while parent != project:\n        if parent.is_symlink():\n            raise SystemExit('平台目标祖先不得为链接：' + destination)\n        parent = parent.parent\n    if dst.is_symlink():\n        if dst.resolve(strict=True) != src:\n            raise SystemExit('平台入口来源不符：' + destination)\n        dst.unlink()\n    elif dst.exists():\n        if not dst.is_file() or dst.read_bytes() != src.read_bytes():\n            raise SystemExit('平台入口重复或内容漂移：' + destination)\n        continue\n    dst.parent.mkdir(parents=True, exist_ok=True)\n    shutil.copy2(src, dst)\n    if destination == 'android/gradlew':\n        dst.chmod(0o755)\nPREPARE_PLATFORM\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" icons \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\"\nif [[ \"$PREPARE_ONLY\" == true ]]; then\n  printf '%s\\n' \"$CITIZENWALLET_PROJECT_ROOT\"\n  exit 0\nfi\n# CocoaPods 会改写工程锁文件；先确认工程与工作目录均在当前任务target内，再把\n# 指向源码的锁文件链接原子替换为工程普通文件，禁止本机 Build 回写源码。\nif [[ \"$PLATFORM\" == ios ]]; then\n  python3 - \"$CITIZENWALLET_DIR/ios/Podfile.lock\" \"$CITIZENWALLET_PROJECT_ROOT/ios/Podfile.lock\" <<'DETACH_IOS_LOCK'\nfrom pathlib import Path\nimport os\nimport tempfile\nimport sys\n\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject_lock = Path(sys.argv[2])\nif project_lock.is_symlink():\n    if project_lock.resolve(strict=True) != source:\n        raise SystemExit('CitizenWallet iOS工程锁文件链接目标不是本产品源码')\n    fd, temporary = tempfile.mkstemp(prefix='Podfile.lock.', dir=project_lock.parent)\n    try:\n        with os.fdopen(fd, 'wb') as output:\n            output.write(source.read_bytes())\n        os.replace(temporary, project_lock)\n    finally:\n        if os.path.exists(temporary):\n            os.unlink(temporary)\nDETACH_IOS_LOCK\nfi\ncd \"$CITIZENWALLET_PROJECT_ROOT\"\nexport CITIZENWALLET_BUILD_DIR=\"$BUILD_DIR\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$BUILD_WORK_DIR/native/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$BUILD_WORK_DIR/native/ios}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$BUILD_WORK_DIR/cargo}\"\nexport XDG_CONFIG_HOME=\"${XDG_CONFIG_HOME:-$DEPENDENCY_WORK_DIR/flutter-config}\"\nexport PUB_CACHE=\"${PUB_CACHE:-$DEPENDENCY_WORK_DIR/pub}\"\nexport GRADLE_USER_HOME=\"$DEPENDENCY_WORK_DIR/gradle\"\nexport CP_HOME_DIR=\"$DEPENDENCY_WORK_DIR/cocoapods\"\nexport TMPDIR=\"$CITIZENWALLET_WORK_DIR/tmp/\"\nexport FLUTTER_SUPPRESS_ANALYTICS=true COCOAPODS_DISABLE_STATS=true\nexport CITIZENWALLET_GRADLE_INIT_SCRIPT=\"${CITIZENWALLET_GRADLE_INIT_SCRIPT:-$CITIZENWALLET_WORK_DIR/gradle.init.gradle}\"\nexport CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR=\"${CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR:-$BUILD_WORK_DIR/flutter-gradle-plugin}\"\nmkdir -p \"$XDG_CONFIG_HOME\" \"$TMPDIR\" \"$CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\"\n# Flutter Gradle 插件原件只读；其 Kotlin 会话与编译状态必须写入本轮工作目录。\nprintf '%s\\n' \\\n  'gradle.beforeProject { project ->' \\\n  '    def source = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_ROOT\")' \\\n  '    def output = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\")' \\\n  '    if (source && output && project.rootDir.canonicalPath == new File(source).canonicalPath) {' \\\n  '        def suffix = project.path == \":\" ? \"root\" : project.path.substring(1).replace(\":\", \"/\")' \\\n  '        project.layout.buildDirectory.set(new File(output, suffix))' \\\n  '        project.extensions.extraProperties.set(\"kotlin.project.persistent.dir\", new File(output, suffix + \"/kotlin-project\").path)' \\\n  '    }' \\\n  '}' >\"$CITIZENWALLET_GRADLE_INIT_SCRIPT\"\n# Flutter只接受相对产品根的build-dir配置；把本轮绝对目录换算为相对路径，\n# 不能写死为产品源码下的cache/build，也不能在产品根生成build。\nFLUTTER_BUILD_RELATIVE=\"$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' \"$BUILD_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\")\"\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n\nPUB_GET_ARGS=(--enforce-lockfile)\nGRADLE_ARGS=(--no-daemon)\ncase \"${CITIZENWALLET_PUB_OFFLINE:-false}\" in\n  true|false) ;;\n  *) echo 'CITIZENWALLET_PUB_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\nPUB_OFFLINE=\"${CITIZENWALLET_PUB_OFFLINE:-false}\"\ncase \"${CITIZENWALLET_OFFLINE:-false}\" in\n  true) PUB_OFFLINE=true; GRADLE_ARGS+=(--offline); export CARGO_NET_OFFLINE=true ;;\n  false) ;;\n  *) echo 'CITIZENWALLET_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\n# 任务级Pub预装只约束Pub；原整体离线开关仍同时约束Pub、Gradle和Cargo。\nif [[ \"$PUB_OFFLINE\" == true ]]; then PUB_GET_ARGS+=(--offline); fi\n\n# Flutter 版本及依赖配置由产品工程自行决定。\n\n# Flutter在缓存工程生成配置和插件清单；Gradle只从公民钱包真实android根启动，\n# 项目缓存、依赖缓存、编译物和临时文件继续使用当前Android任务缓存。\n# Kotlin持久状态不受--project-cache-dir控制，必须另传官方工程属性避免源码生成.kotlin。\nbuild_android_release() {\n  local properties flutter_command flutter_sdk android_sdk gradle_bin\n  local flutter_version dart_defines link_target java_home expected_gradle_version actual_gradle_version\n  gradle_bin=\"${CITIZENWALLET_GRADLE_BIN:?Android Build必须提供绝对Gradle工具路径}\"\n  [[ \"$gradle_bin\" == /* && -f \"$gradle_bin\" && -x \"$gradle_bin\" ]] \\\n    || { echo \"Android Gradle工具无效：$gradle_bin\" >&2; return 1; }\n  properties=\"$CITIZENWALLET_PROJECT_ROOT/android/local.properties\"\n  flutter_command=\"$(command -v flutter)\"\n  while [[ -L \"$flutter_command\" ]]; do\n    link_target=\"$(readlink \"$flutter_command\")\"\n    [[ \"$link_target\" == /* ]] || link_target=\"$(cd \"$(dirname \"$flutter_command\")\" && pwd -P)/$link_target\"\n    flutter_command=\"$link_target\"\n  done\n  flutter_sdk=\"$(cd \"$(dirname \"$flutter_command\")/..\" && pwd -P)\"\n  android_sdk=\"${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}\"\n  # JDK选择属于CitizenWallet产品流程：保留调用方选择；本机未传入时使用\n  # Android Studio随包JBR。Gradle自行报告工具错误，不增加外部前置门禁。\n  java_home=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"\n  # Wrapper属性仍是产品的Gradle版本真源；调用方给出的工具必须与它完全一致。\n  expected_gradle_version=\"$(sed -nE 's@^distributionUrl=.*gradle-([0-9][0-9.]*)-bin\\.zip$@\\1@p' \\\n    \"$CITIZENWALLET_DIR/android/gradle-wrapper.properties\")\"\n  [[ -n \"$expected_gradle_version\" ]] || { echo 'Android Gradle版本声明无效' >&2; return 1; }\n  actual_gradle_version=\"$(JAVA_HOME=\"$java_home\" \"$gradle_bin\" --version | sed -n 's/^Gradle //p' | head -n 1)\"\n  [[ \"$actual_gradle_version\" == \"$expected_gradle_version\" ]] \\\n    || { echo 'Android Gradle工具版本与钱包锁定版本不一致' >&2; return 1; }\n  # 完整prepare已写入验真SDK与原始版本，资源解析和编译消费同一普通配置。\n  [[ -f \"$properties\" && ! -L \"$properties\" ]] \\\n    || { echo 'Android工程缺少完整prepare交付的local.properties' >&2; return 1; }\n  flutter_version=\"$(flutter --version --machine)\"\n  dart_defines=\"$(printf '%s' \"$flutter_version\" | python3 -c '\nimport base64, json, sys\nvalue = json.load(sys.stdin)\nfields = (\n    (\"FLUTTER_VERSION\", \"frameworkVersion\"),\n    (\"FLUTTER_CHANNEL\", \"channel\"),\n    (\"FLUTTER_GIT_URL\", \"repositoryUrl\"),\n    (\"FLUTTER_FRAMEWORK_REVISION\", \"frameworkRevision\"),\n    (\"FLUTTER_ENGINE_REVISION\", \"engineRevision\"),\n    (\"FLUTTER_DART_VERSION\", \"dartSdkVersion\"),\n)\nprint(\",\".join(base64.b64encode(f\"{name}={value[key]}\".encode()).decode() for name, key in fields))\n')\"\n  (\n    cd \"$CITIZENWALLET_PROJECT_ROOT/android\"\n    # 调用方提供同一已验真 Gradle 工具，任务目录只承载依赖和编译状态，不再下载工具分发包。\n    ANDROID_HOME=\"$android_sdk\" ANDROID_SDK_ROOT=\"$android_sdk\" JAVA_HOME=\"$java_home\" PATH=\"$java_home/bin:$PATH\" \\\n    CITIZENWALLET_FLUTTER_GRADLE_ROOT=\"$flutter_sdk/packages/flutter_tools/gradle\" \\\n    FLUTTER_ROOT=\"$flutter_sdk\" \"$gradle_bin\" \"${GRADLE_ARGS[@]}\" --stacktrace --no-problems-report \\\n      --init-script \"$CITIZENWALLET_GRADLE_INIT_SCRIPT\" \\\n      --project-cache-dir \"$BUILD_WORK_DIR/gradle-project\" \\\n      -Pkotlin.project.persistent.dir=\"$BUILD_WORK_DIR/kotlin-project\" \\\n      -Ptarget-platform=android-arm64 \\\n      -Ptarget=lib/main.dart \\\n      -Pbase-application-name=android.app.Application \\\n      -Pdart-defines=\"$dart_defines\" \\\n      -Pdart-obfuscation=false \\\n      -Ptrack-widget-creation=true \\\n      -Ptree-shake-icons=true \\\n      assembleRelease\n  )\n}\n\n# 仅清理当前工作目录中的候选包，不触碰源码或另一端。\nclean_platform_build_outputs() {\n  case \"$PLATFORM\" in\n    ios) rm -rf \"$BUILD_DIR/ios/iphoneos/Runner.app\" ;;\n    android) rm -f \"$BUILD_DIR/app/outputs/flutter-apk/\"*.apk ;;\n  esac\n  mkdir -p \"$BUILD_DIR\"\n}\n\n# 仅选择 Xcode 报告的一台可用 iOS 真机；不在无设备或多设备时回落模拟器。\nrun_ios_ui_tests() {\n  local xcodebuild_bin destinations device_id\n  xcodebuild_bin=\"${CITIZENWALLET_XCODEBUILD_BIN:?iOS Build必须提供绝对Xcode工具路径}\"\n  [[ \"$xcodebuild_bin\" == /* && -f \"$xcodebuild_bin\" && -x \"$xcodebuild_bin\" ]] \\\n    || { echo 'iOS Xcode工具无效' >&2; return 1; }\n  destinations=\"$(\"$xcodebuild_bin\" -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release -showdestinations)\"\n  device_id=\"$(printf '%s\\n' \"$destinations\" | python3 -c '\nimport re, sys\navailable = sys.stdin.read().split(\"Ineligible destinations\", 1)[0]\nids = re.findall(r\"\\{\\s*platform:iOS,\\s*arch:arm64,\\s*id:([0-9A-Fa-f-]+),\", available)\nif len(ids) != 1 or not re.fullmatch(r\"[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{16,}\", ids[0]):\n    raise SystemExit(\"iOS UI测试需要唯一可用真机\")\nprint(ids[0])\n')\"\n  # 测试计划关闭自动屏幕采集，避免触发钱包既有录屏保护；Release 测试应用与编译物均留在调用方工作根。\n  \"$xcodebuild_bin\" test \\\n    -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release \\\n    -destination \"platform=iOS,id=$device_id\" \\\n    -only-testing:RunnerUITests -parallel-testing-enabled NO \\\n    -collect-test-diagnostics never \\\n    -derivedDataPath \"$BUILD_WORK_DIR/xcode-ui\" \\\n    -resultBundlePath \"$BUILD_WORK_DIR/ios-ui-tests.xcresult\"\n}\n\n\n# 已跟踪的 pallet_registry.dart 是构建输入；本机编译不得回写共享源码索引。\n\necho \"==> 清理 ${PLATFORM} 平台构建产物...\"\nclean_platform_build_outputs\necho \"==> 获取依赖...\"\nflutter pub get \"${PUB_GET_ARGS[@]}\"\n# 本机钱包 Build 与 CI 使用同一套单元和组件测试。先在本轮target Cargo 目录\n# 编译宿主 FFI 动态库，再运行 Flutter 测试；测试失败立即阻止后续平台编译与安装。\necho \"==> 编译宿主签名库并运行钱包测试...\"\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native host\n# 测试缓存留在当前任务工程视图，避免相对路径重复拼接越界。\nflutter config --build-dir=test-build >/dev/null\nflutter test --no-pub\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n# Isar 与 QR 生成文件已经纳入仓库。本机四端编译只消费同一份源码，禁止两个平台在\n# 构建过程中同时运行 build_runner 改写源文件。\n\n# sr25519 原生签名库(schnorrkel)。签名、派生、验签全走它，缺库会在运行时才炸，\n# 所以必须先于 flutter build 产出；实现来自 citizenwallet/rust/source/sr25519.rs，\n# 由公民钱包独立维护。\necho \"==> 编译原生签名库（${PLATFORM}）...\"\n# 使用所属产品构建入口的绝对路径，工作目录切换后仍定位同一实现。\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native \"$PLATFORM\"\n\n# 本脚本编译并运行既有测试；完整Build由产品入口继续签名验真、安装和回读。\n# `--release`只是本机优化配置，不表示或触发正式Release流程。\necho \"==> 编译本机优化安装包...\"\nif [[ \"$PLATFORM\" == ios ]]; then\n  flutter build ios --release\n  echo \"==> 在唯一真机运行 Release UI 测试...\"\n  run_ios_ui_tests\n  IOS_APP=\"$BUILD_DIR/ios/iphoneos/Runner.app\"\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-ios-package \"$IOS_APP\"\n  echo \"\"\n  echo \"==> iOS Release编译和真机测试完成，继续签名验真、安装及回读。\"\nelif [[ \"$PLATFORM\" == android ]]; then\n  build_android_release\n  ANDROID_APK=\"$BUILD_DIR/app/outputs/flutter-apk/app-release.apk\"\n  [[ -f \"$ANDROID_APK\" ]] || {\n    echo \"Android 本机无私钥 APK 不存在\" >&2\n    exit 1\n  }\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-android-package \"$ANDROID_APK\"\n  # 未签名APK仅留在本轮工作根；产品完整入口随后使用已有身份签名、安装和回读。\n  mkdir -p \"$ARTIFACT_ROOT\"\n  cp \"$ANDROID_APK\" \"$ARTIFACT_ROOT/android.apk\"\n  echo \"==> Android未签名APK编译完成，继续使用已有身份签名、安装及回读。\"\nfi\n","native":"#!/usr/bin/env bash\n# 编译 CitizenWallet 冷钱包原生密码学库，放到 Flutter 能自动打包的位置。\n#\n# sr25519签名实现只属于citizenwallet/rust/source/sr25519.rs。\n# 本库是冷端FFI外壳，永久离线且不需要链。\n#\n# 前置条件：当前Rust编译器已具备目标平台标准库；本脚本只读检查，不自动安装。\n#\n# 用法：\n#   node scripts/build.mjs native            # 编译所有平台\n#   node scripts/build.mjs native android    # 仅 Android\n#   node scripts/build.mjs native ios        # 仅 iOS\n#   node scripts/build.mjs native macos      # 仅 macOS（flutter test 用）\nset -euo pipefail\n\nWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nRUST_DIR=\"$WALLET_DIR/rust\"\nLIB_NAME=\"libcitizenwallet_signer\"\nTARGET=\"${1:-all}\"\n\n# 宿主与平台库同属本轮产品工作根；独立调用也使用本产品声明的平台target。\n# 复用公开工作根校验，禁止旧“整棵源码外”规则误拒绝已验真的target任务。\nCITIZENWALLET_WORK_DIR=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" --input-type=module - \"$WALLET_DIR/scripts/build.mjs\" \"${CITIZENWALLET_WORK_DIR:-${PRODUCT_WORK_DIR:-}}\" \"$TARGET\" \"${PLATFORM:-${platform:-}}\" <<'CHECK_WORK'\nimport {pathToFileURL} from 'node:url';\nimport {dirname,join,relative,sep} from 'node:path';\nconst [entry,provided,target,explicit]=process.argv.slice(2);\nconst {checkWork,productTarget,temporaryRoot}=await import(pathToFileURL(entry));\nconst requested=target==='android'||target==='verify-android-package'?'android':target==='ios'||target==='verify-ios-package'?'ios':undefined;\nconst platform=explicit||requested||'ios';\nif(requested&&requested!==platform)throw Error('原生目标与当前任务平台不符');\nconst work=provided?checkWork(provided):temporaryRoot(platform,'tmp');\nif(!work.startsWith(productTarget(platform)+sep))throw Error('原生工作根与当前任务平台不符');\nprocess.stdout.write(work+'\\n');\nCHECK_WORK\n)\" || exit 1\nCITIZENWALLET_NATIVE_WORK_DIR=\"${CITIZENWALLET_NATIVE_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work/native}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/cargo-target}\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/ios}\"\n# 全部原生产物与临时状态在编译前一次验真，不允许源码、其它任务或链接写入。\nexport TMPDIR=\"${TMPDIR:-$CITIZENWALLET_WORK_DIR/tmp/}\"\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_NATIVE_WORK_DIR\" \"$CARGO_TARGET_DIR\" \"$CITIZENWALLET_NATIVE_ANDROID_DIR\" \"$CITIZENWALLET_NATIVE_IOS_DIR\" \"$TMPDIR\" <<'CHECK_TARGET'\nfrom pathlib import Path\nimport sys\nwork = Path(sys.argv[1])\nfor value in sys.argv[2:]:\n    target = Path(value)\n    if not target.is_absolute() or target.resolve() != target or not target.is_relative_to(work) or target == work:\n        raise SystemExit('原生产物与临时目录必须属于当前任务且不得经过链接：' + value)\nCHECK_TARGET\nmkdir -p \"$TMPDIR\"\n\nensure_target() {\n  local target=\"$1\" target_lib\n  # 只检查当前Rust编译器已有的目标库；缺失即停止，构建不得自动安装工具。\n  target_lib=\"$(rustc --print target-libdir --target \"$target\")\" || return 1\n  [[ \"$target_lib\" == /* && -d \"$target_lib\" ]] \\\n    || { echo \"错误: Rust目标库目录无效：$target\" >&2; return 1; }\n  local core_libraries=(\"$target_lib\"/libcore-*.rlib)\n  local std_libraries=(\"$target_lib\"/libstd-*.rlib)\n  [[ -f \"${core_libraries[0]}\" && -f \"${std_libraries[0]}\" ]] \\\n    || { echo \"错误: 当前Rust缺少已安装目标库：${target}；构建停止\" >&2; return 1; }\n}\n\n# 4个sr25519 C符号必须齐全，禁止交付额外用途钥符号，否则 Dart 侧 lookupFunction 会在运行时才失败。\n# 注意平台差异：ELF 用 -D，Mach-O 用 -g，用错标志会误判为 0。\nverify_symbols() {\n  local lib=\"$1\"\n  local nm_flag=\"$2\"\n  local nm_bin\n  nm_bin=\"$(command -v llvm-nm || true)\"\n  if [ -z \"$nm_bin\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    nm_bin=\"$(ls \"$sdk_home\"/ndk/*/toolchains/llvm/prebuilt/*/bin/llvm-nm 2>/dev/null | tail -1 || true)\"\n  fi\n  if [ -z \"$nm_bin\" ]; then\n    echo \"错误: 未找到 llvm-nm，不能验证原生库导出符号。\"\n    return 1\n  fi\n  local signer_count removed_export_count\n  signer_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'citizen_sr25519' || true)\"\n  removed_export_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'account_crypto_' || true)\"\n  if [ \"$signer_count\" != \"4\" ] || [ \"$removed_export_count\" != \"0\" ]; then\n    echo \"错误: $lib 符号不完整（citizen_sr25519_*=$signer_count/4, 禁用导出=$removed_export_count/0）\"\n    return 1\n  fi\n  echo \"    符号检查通过：citizen_sr25519_*=4, 禁用导出=0\"\n}\n\nverify_android_package() {\n  local package=\"$1\" expected=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a/$LIB_NAME.so\" entry temporary packaged\n  [[ -f \"$package\" ]] || { echo \"错误: Android 包不存在：$package\"; return 1; }\n  [[ -f \"$expected\" ]] || { echo \"错误: Android 原生库不存在：$expected\"; return 1; }\n  case \"$package\" in\n    *.apk) entry=\"lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *.aab) entry=\"base/lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *) echo \"错误: 只支持校验 APK/AAB：$package\"; return 1 ;;\n  esac\n  # 中文注释：Android 打包会剥离调试段，不能按原文件字节比对；从最终包提取后验证\n  # ELF 架构和真实导出符号，缺失、错 ABI 或错误库都会在上传前失败。\n  temporary=\"$(mktemp -d)\"\n  packaged=\"$temporary/$LIB_NAME.so\"\n  unzip -p \"$package\" \"$entry\" > \"$packaged\" || { rm -rf \"$temporary\"; return 1; }\n  [[ -s \"$packaged\" ]] || { rm -rf \"$temporary\"; echo \"错误: Android 包内原生库为空：$entry\"; return 1; }\n  file \"$packaged\" | grep -Eq 'ARM aarch64|ARM64' || {\n    rm -rf \"$temporary\"; echo \"错误: Android 包内原生库不是 arm64：$entry\"; return 1;\n  }\n  verify_symbols \"$packaged\" -D || { rm -rf \"$temporary\"; return 1; }\n  rm -rf \"$temporary\"\n  if unzip -Z1 \"$package\" | grep -E \"(^|/)lib/(armeabi-v7a|x86|x86_64)/$LIB_NAME\\\\.so$\"; then\n    echo \"错误: Android 包含未支持 ABI 的原生库。\"; return 1\n  fi\n  echo \"Android 包原生库门禁通过：$entry\"\n}\n\nverify_ios_package() {\n  local app_bundle=\"$1\" executable nm_bin symbols\n  executable=\"$app_bundle/Runner\"\n  [[ -f \"$executable\" ]] || { echo \"错误: iOS Runner 不存在：$executable\"; return 1; }\n  [[ \"$(lipo -archs \"$executable\")\" = \"arm64\" ]] || {\n    echo \"错误: iOS 真机包必须且只能包含 arm64：$(lipo -archs \"$executable\")\"; return 1;\n  }\n  nm_bin=\"$(xcrun --find llvm-nm)\"\n  symbols=\"$(\"$nm_bin\" -gU \"$executable\" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' || true)\"\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^citizen_sr25519_' || true)\" = \"4\" ]] || {\n    echo \"错误: iOS Runner 的 citizen_sr25519_* 符号不完整。\"; return 1;\n  }\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^account_crypto_' || true)\" = \"0\" ]] || {\n    echo \"错误: iOS Runner包含禁用的用途钥导出。\"; return 1;\n  }\n  echo \"iOS 包原生库门禁通过：arm64与4个sr25519 FFI符号完整，禁用导出为零\"\n}\n\nbuild_android() {\n  echo \"\"\n  echo \"=== 编译 Android (arm64-v8a) ===\"\n  ensure_target aarch64-linux-android\n\n  local ndk_home=\"${ANDROID_NDK_HOME:-}\"\n  if [ -z \"$ndk_home\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    ndk_home=\"$(ls -d \"$sdk_home/ndk/\"* 2>/dev/null | sort -V | tail -1 || true)\"\n  fi\n  if [ -z \"$ndk_home\" ] || [ ! -d \"$ndk_home\" ]; then\n    echo \"错误: 未找到 Android NDK。请设置 ANDROID_NDK_HOME 或通过 Android Studio 安装 NDK。\"\n    return 1\n  fi\n  echo \"使用 NDK: $ndk_home\"\n\n  local toolchain=\"\"\n  case \"$(uname -s)\" in\n    Darwin)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-x86_64\"\n      if [ ! -d \"$toolchain\" ]; then\n        toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-aarch64\"\n      fi\n      ;;\n    Linux)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/linux-x86_64\"\n      ;;\n    *)\n      echo \"错误: 当前系统不支持自动定位 Android NDK toolchain: $(uname -s)\"\n      return 1\n      ;;\n  esac\n  if [ ! -d \"$toolchain\" ]; then\n    echo \"错误: 未找到 Android NDK toolchain: $toolchain\"\n    return 1\n  fi\n\n  export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export CC_aarch64_linux_android=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export AR_aarch64_linux_android=\"$toolchain/bin/llvm-ar\"\n\n  cd \"$RUST_DIR\"\n  cargo build --release --target aarch64-linux-android\n\n  # CitizenWallet Android 唯一支持 arm64-v8a；禁止重新生成任何 32 位或 x86 ABI。\n  local arm64_dest=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a\"\n  mkdir -p \"$arm64_dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-linux-android/release/$LIB_NAME.so\" \"$arm64_dest/\"\n  echo \"Android arm64-v8a: $arm64_dest/$LIB_NAME.so ($(wc -c < \"$arm64_dest/$LIB_NAME.so\" | tr -d ' ') bytes)\"\n  verify_symbols \"$arm64_dest/$LIB_NAME.so\" -D\n}\n\nbuild_ios() {\n  echo \"\"\n  echo \"=== 编译 iOS (arm64 真机) ===\"\n  ensure_target aarch64-apple-ios\n\n  # 宿主测试继承macOS SDK；真机目标必须切到同一已供给Xcode的iphoneos SDK。\n  # xcrun只读定位已安装SDK，不下载，不改变全流程或宿主的SDKROOT。\n  local ios_sdk\n  ios_sdk=\"$(\"${XCRUN:-xcrun}\" --sdk iphoneos --show-sdk-path)\" || return 1\n  [[ \"$ios_sdk\" == /* && -d \"$ios_sdk\" ]] \\\n    || { echo \"错误: 已供给Xcode缺少iOS SDK\" >&2; return 1; }\n  cd \"$RUST_DIR\"\n  # 真机Cargo明确消费资源回执的Clang，不从PATH寻找cc或其它版本。\n  local ios_clang=\"${CC:?缺少已验真Xcode的Clang入口}\"\n  [[ \"$ios_clang\" == /* && -f \"$ios_clang\" && -x \"$ios_clang\" && ! -L \"$ios_clang\" ]] \\\n    || { echo \"错误: 缺少已供给Clang规范绝对入口\" >&2; return 1; }\n  SDKROOT=\"$ios_sdk\" CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=\"$ios_clang\" \\\n    CC_aarch64_apple_ios=\"$ios_clang\" cargo build --release --target aarch64-apple-ios\n\n  # iOS 用**静态库**而非 dylib：裸 .dylib 需嵌入 + 单独签名，且 App Store 要求\n  # 动态库必须包在 .framework 里；静态库直接链进 App 二进制，无这些坑。\n  # 符号经 podspec 的 -force_load 保留，Dart 侧用 DynamicLibrary.process() 取。\n  local dest=\"${CITIZENWALLET_NATIVE_IOS_DIR:?缺少CitizenWallet iOS原生库目录}\"\n  mkdir -p \"$dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-apple-ios/release/$LIB_NAME.a\" \"$dest/\"\n  echo \"iOS arm64: $dest/$LIB_NAME.a ($(wc -c < \"$dest/$LIB_NAME.a\" | tr -d ' ') bytes)\"\n  verify_symbols \"$dest/$LIB_NAME.a\" \"\"\n}\n\nbuild_host() {\n  echo \"\"\n  echo \"=== 编译宿主平台动态库 (flutter test 用) ===\"\n  cd \"$RUST_DIR\"\n  # host 调试库给 Dart FFI / flutter test 直接 dlopen；release profile 已设\n  # strip=false，本机 dyld 不会报 LINKEDIT 对齐错误。\n  cargo build --release\n\n  # 宿主扩展名：macOS 产 .dylib，Linux 产 .so；Dart 侧 native_sr25519.dart 按同一规则取。\n  local host_ext\n  case \"$(uname -s)\" in\n    Darwin) host_ext=dylib ;;\n    *)      host_ext=so ;;\n  esac\n  local host_lib=\"$CARGO_TARGET_DIR/release/$LIB_NAME.$host_ext\"\n  echo \"宿主库: $host_lib ($(wc -c < \"$host_lib\" | tr -d ' ') bytes)\"\n  verify_symbols \"$host_lib\" -g\n}\n\ncase \"$TARGET\" in\n  android) build_android ;;\n  ios)     build_ios ;;\n  host|macos|linux) build_host ;;\n  verify-android-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-android-package <apk|aab>\"; exit 1; }\n    verify_android_package \"$2\"\n    exit 0\n    ;;\n  verify-ios-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-ios-package <Runner.app>\"; exit 1; }\n    verify_ios_package \"$2\"\n    exit 0\n    ;;\n  all)\n    build_android\n    build_ios\n    build_host\n    ;;\n  *)\n    echo \"用法: $0 [android|ios|macos|all|verify-android-package|verify-ios-package]\"\n    exit 1\n    ;;\nesac\n\necho \"\"\necho \"=== 编译完成 ===\"\necho \"flutter build / flutter run 会自动把 native library 打包进 App。\"\n"});
 
 export async function runEmbeddedBuild(command,args,environment=process.env,cwd=process.cwd(),options={}) {
- const work=environment.CITIZENWALLET_WORK_DIR||environment.PRODUCT_WORK_DIR||temporaryRoot(undefined,'build');checkWork(work);
+ if(!Object.hasOwn(BUILD_SHELL_SOURCES,command))fail('未知构建子步骤');
+ const requested=String(args[0]||'').replace(/^prepare-/, '').replace(/^verify-/, '').replace(/-package$/, '');
+ if(command==='wallet')platformContract(requested);
+ const supplied=environment.CITIZENWALLET_WORK_DIR||environment.PRODUCT_WORK_DIR;
+ if(command==='native'&&!supplied)fail('原生子步骤缺少当前平台现场');
+ const work=supplied||temporaryRoot(requested,'build');checkWork(work);
+ if(Object.hasOwn(contract.platforms,requested)&&work!==fixedWork('test')&&work!==fixedWork('build/'+requested))fail('子步骤平台与当前任务现场不符');
  return withFixedWork(taskScope(work),()=>embeddedBuildTask(command,args,{...environment,CITIZENWALLET_WORK_DIR:work},cwd,options),{environment});
 }
 async function embeddedBuildTask(command,args,environment=process.env,cwd=process.cwd(),options={}) {
- if(!Object.hasOwn(BUILD_SHELL_SOURCES,command))fail('未知构建子步骤');
- const requested=String(args[0]||'').replace(/^prepare-/, '').replace(/^verify-/, '').replace(/-package$/, '');
- const platform=Object.hasOwn(contract.platforms,requested)?requested:Object.keys(contract.platforms)[0];
  const shell=environment.PRODUCT_BASH_BIN||environment.PRODUCT_TEST_SHELL||'/bin/bash';
  const directory=join(environment.CITIZENWALLET_WORK_DIR,'embedded',command);mkdirSync(directory,{recursive:true});
  const script=join(directory,'implementation.sh');
@@ -3658,12 +3070,22 @@ export function androidCertificate(text) {
  const matches=[...text.matchAll(/Signer #\d+ certificate SHA-256 digest:\s*([a-fA-F0-9]{64})/gu)];
  if(matches.length!==1||!text.includes('Verified using v2 scheme (APK Signature Scheme v2): true'))fail('Android签名证书或v2验真失败');return matches[0][1].toLowerCase();
 }
+// Xcode的swiftc入口可以是指向swift-frontend的包内链接；消费供给回执中的规范真实目标。
+export function swiftCompilerForVerifier(env) {
+ const developer=env?.DEVELOPER_DIR,compiler=env?.SWIFT;
+ if(typeof developer!=='string'||!isAbsolute(developer)||resolve(developer)!==developer||typeof compiler!=='string')fail('安全验真器必须使用登记Xcode的Swift编译器');
+ const entry=join(developer,'Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc');let actual;
+ try{if(realpathSync(developer)!==developer||!lstatSync(developer).isDirectory())throw Error();actual=realpathSync(entry);}catch{fail('安全验真器必须使用登记Xcode的Swift编译器');}
+ const info=lstatSync(actual);if(compiler!==actual||!inside(developer,actual)||!info.isFile()||info.isSymbolicLink()||!(info.mode&0o111))fail('安全验真器必须使用登记Xcode的Swift编译器');
+ // 官方swiftc是包内入口链接；执行它才能让Swift驱动以swiftc模式解析编译参数。
+ return entry;
+}
 async function nativeVerifier(work,env) {
- if(typeof env.SWIFT!=='string'||basename(env.SWIFT)!=='swiftc')fail('安全验真器必须使用登记Xcode的Swift编译器');
+ const compiler=swiftCompilerForVerifier(env);
  const state=executions.getStore();if(state?.verifier)return state.verifier;
  const dir=join(work,'product-verifier');mkdirSync(dir,{mode:0o700});const source=join(dir,'verify.swift'),binary=join(dir,'verify');
  writeFileSync(source,IOS_VERIFIER_SOURCE,{flag:'wx',mode:0o600});
- await run(env.SWIFT,['-O','-module-cache-path',join(work,'cache/swift'),'-framework','Security','-framework','CryptoKit',source,'-o',binary],env,work);
+ await run(compiler,['-O','-module-cache-path',join(work,'cache/swift'),'-framework','Security','-framework','CryptoKit',source,'-o',binary],env,work);
  const digest=outputDigest(binary);
  const verify=async request=>{if(outputDigest(binary)!==digest)fail('产品安全验真器发生变化');return JSON.parse((await runBuildProcess(binary,[],env,work,{capture:true,input:JSON.stringify(request),timeout:300000})).stdout);};
  if(state)state.verifier=verify;return verify;
@@ -3982,7 +3404,7 @@ export function createResourceSupplyClient(stream,signal){
 
 // 本产品在独立编译与调度编译中均清理自己的生成物。
 export function cleanBuildPath(path,options={},environment=executions.getStore()?.buildEnvironment||process.env){
- const work=environment.PRODUCT_WORK_DIR||[join(root,'target/build'),join(root,'target/test')].find(work=>path?.startsWith(work+sep));if(typeof work!=='string'||typeof path!=='string'||resolve(path)!==path||!path.startsWith(work+sep))fail('编译清理路径越界');
+ const work=environment.PRODUCT_WORK_DIR||[...Object.keys(contract.platforms).map(platform=>fixedWork('build/'+platform)),fixedWork('test')].find(work=>path?.startsWith(work+sep));if(typeof work!=='string'||typeof path!=='string'||resolve(path)!==path||!path.startsWith(work+sep))fail('编译清理路径越界');
  checkFixedWork(work);let parent=dirname(path);while(!existsSync(parent))parent=dirname(parent);if(realpathSync(parent)!==parent)fail('编译清理父目录经过链接');
  rmSync(path,options);
 }
@@ -3992,7 +3414,8 @@ export function cleanShellPaths(args,environment=process.env){
 
 
 async function runCLI(){
- const [operation,,flag,work]=process.argv.slice(2);
+ const [operation,platform,flag,work]=process.argv.slice(2);
+ if(operation==='execute'&&process.env.PRODUCT_RESOURCE_FD!=='4'){if(flag!=='--work'||work!==fixedWork('build/'+platform))fail('平台编译现场不符');return withFixedWork('build/'+platform,()=>runCommand(),{environment:process.env,retain:process.env.PRODUCT_HOST_FD==='3'});}
  if(operation==='execute')return runCommand();
  if(['resources','prepare','build'].includes(operation)&&flag==='--work'){
   checkWork(work);
@@ -4003,10 +3426,11 @@ async function runCLI(){
 async function runCommand(){
  const [command,platform,option,work,...extra]=process.argv.slice(2);
  if(command==='finish'){
-  if(!['build','test'].includes(platform)||work!==undefined||extra.length)fail('固定收尾入口参数无效');
-  finishFixedWork(fixedWork(platform),{run_id:option});return;
+  if(platform!=='test'&&!Object.hasOwn(contract.platforms,platform)||work!==undefined||extra.length)fail('平台收尾入口参数无效');
+  finishFixedWork(fixedWork(platform==='test'?'test':'build/'+platform),{run_id:option});return;
  }
  if(command==='clean'){cleanShellPaths(process.argv.slice(3));return;}
+ if(command==='rsync'){const owned=process.env.PRODUCT_WORK_DIR;checkWork(owned);await withFixedWork(taskScope(owned),()=>copyFlutterArtifact(process.argv.slice(3),process.env),{environment:process.env});return;}
  if(command==='describe'){
   if(process.argv.length!==3)fail('编译声明只读入口不接受参数');
   process.stdout.write(JSON.stringify(contract)+'\n');return;
@@ -4034,7 +3458,7 @@ async function runCommand(){
  } else {
 
  if(!['requirements','resources','prepare','build','execute'].includes(command)||option!=='--work'||extra.some(x=>x!=='--offline')||extra.length>1||extra.length&&!['resources','execute'].includes(command))fail('固定入口参数无效');
- checkWork(work);
+ if(command==='execute'){platformContract(platform);if(work!==fixedWork('build/'+platform))fail('平台编译现场不符');}else checkWork(work);
  if(command==='requirements')process.stdout.write(JSON.stringify(requirements(platform,work))+'\n');
  else{
   const cancellation=new AbortController();for(const name of ['SIGTERM','SIGINT'])process.once(name,()=>cancellation.abort());
@@ -4081,8 +3505,37 @@ const {default:fs}=await import('node:fs');
 const {fixedWork,checkFixedWork,clearFixedWork,finishFixedWork}=await Promise.resolve(targetInternals);
 // 本产品测试使用固定根；资源夹具的内部目录不成为另一套工作根。
 const scripts=import.meta.dirname;
-function fixtureWork(){const work=checkFixedWork(fixedWork('build'),{create:true});finishFixedWork(work);return work;}
-function removeFixture(path,options={}){if(path===fixedWork('build')||path===fixedWork('test')){if(fs.existsSync(path))clearFixedWork(path);return;}fs.rmSync(path,options);}
+function fixtureWork(){const work=fixedWork('build/'+Object.keys(contract.platforms)[0]);if(fs.existsSync(work))finishFixedWork(work);return checkFixedWork(work,{create:true});}
+function removeFixture(path,options={}){if(path===fixedWork('build/'+Object.keys(contract.platforms)[0])||path===fixedWork('test')){if(fs.existsSync(path))clearFixedWork(path);return;}fs.rmSync(path,options);}
+test('iOS验真器接受同一Xcode的swiftc规范目标并拒绝替代入口',()=>{
+ const work=fixtureWork(),developer=join(work,'Xcode.app/Contents/Developer'),bin=join(developer,'Toolchains/XcodeDefault.xctoolchain/usr/bin');
+ try{
+  mkdirSync(bin,{recursive:true});const frontend=join(bin,'swift-frontend'),link=join(bin,'swiftc');writeFileSync(frontend,'#!/bin/sh\nexit 0\n',{mode:0o755});symlinkSync('swift-frontend',link);
+  assert.equal(swiftCompilerForVerifier({DEVELOPER_DIR:developer,SWIFT:frontend}),link);
+  assert.throws(()=>swiftCompilerForVerifier({DEVELOPER_DIR:developer,SWIFT:link}),/登记Xcode/);
+  assert.throws(()=>swiftCompilerForVerifier({DEVELOPER_DIR:developer,SWIFT:'/usr/bin/false'}),/登记Xcode/);
+ }finally{removeFixture(work,{recursive:true});}
+});
+test('Android任务允许本轮native host子步骤并拒绝跨平台子步骤',async()=>{
+ await assert.rejects(runEmbeddedBuild('native',['host'],{PATH:'/usr/bin:/bin'},process.cwd()),/原生子步骤缺少当前平台现场/);
+ await withFixedWork('build/android',async work=>{
+  const environment={PRODUCT_WORK_DIR:work,PRODUCT_BASH_BIN:'/usr/bin/false',PATH:'/usr/bin:/bin'};
+  await assert.rejects(runEmbeddedBuild('native',['host'],environment,work),/产品工具执行失败/);
+  await assert.rejects(runEmbeddedBuild('wallet',['ios'],environment,work),/子步骤平台与当前任务现场不符/);
+ });
+ assert.equal(fs.existsSync(fixedWork('build/android')),false);
+});
+test('iOS受控rsync入口只允许当前平台租约并调用本仓复制实现',async()=>{
+ await withFixedWork('build/ios',async work=>{
+  const owner=JSON.parse(fs.readFileSync(join(work,'.active.json'),'utf8'));
+  const environment={PATH:'/usr/bin:/bin',FLUTTER_ROOT:'/usr',PRODUCT_WORK_DIR:work,PRODUCT_WORK_LEASE:owner.nonce,PRODUCT_RSYNC_BIN:'/usr/bin/true',PRODUCT_BASH_BIN:'/bin/bash'};
+  const args=[join(scripts,'build.mjs'),'rsync','-a','/tmp/fixture-source','/tmp/fixture-target'];
+  const accepted=spawnSync(process.execPath,args,{env:environment,encoding:'utf8',timeout:10000});assert.equal(accepted.status,0,accepted.stderr);
+  const rejected=spawnSync(process.execPath,args,{env:{...environment,PRODUCT_WORK_LEASE:'foreign'},encoding:'utf8',timeout:10000});assert.notEqual(rejected.status,0);assert.match(rejected.stderr,/活跃|领取|守卫/);
+  assert.equal(fs.existsSync(join(work,'.active.json')),true);
+ });
+ assert.equal(fs.existsSync(fixedWork('build/ios')),false);
+});
 
 function writeFixture(path,data,options){
  fs.writeFileSync(path,data,options);

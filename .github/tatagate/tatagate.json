@@ -14,13 +14,10 @@
   ],
   "checks": [
     "repository-contracts",
-    "cross-platform-contracts"
+    "cross-platform-contracts",
+    "flow-isolation",
+    "syntax"
   ],
-  "tools": {
-    "node": "25.2.1",
-    "actionlint": "1.7.12",
-    "rust": null
-  },
   "platform_forbidden_values": [
     "macOS ARM64",
     "macos-arm64",
