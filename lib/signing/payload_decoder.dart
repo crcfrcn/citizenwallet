@@ -2223,7 +2223,7 @@ class PayloadDecoder {
   //            + body_en:Option<BoundedVec<u8>> + clauses:Compact(count)+Clause[]
   //   Clause   = number:u32_le + text:BoundedVec<u8> + text_en:Option<BoundedVec<u8>>
   //
-  // 与 citizenapp/lib/citizen/legislation/legislation_codec.dart 同源字段序。
+  // 字段序以链端 SCALE 布局为准，本端独立完成展示摘要解码。
   // propose 解码只需「章数 / 条数」摘要,不逐条展开正文(QR 已是节点端构造的全文)。
   /// 跳过一个 `BoundedVec<u8>`(Compact 前缀 + 字节),返回新 offset;失败返回 -1。
   static int _skipBoundedBytes(Uint8List bytes, int offset) {

@@ -10,6 +10,7 @@ import 'package:polkadart_keyring/polkadart_keyring.dart' show Keyring;
 
 import 'package:citizenwallet/signing/chain_constants.dart';
 import 'package:citizenwallet/protocol/generated/qr_action_registry.g.dart';
+import 'package:citizenwallet/helpers/account_id_text.dart';
 
 /// fields value 转换。
 ///
@@ -32,9 +33,8 @@ bool _isAccountIdKey(String key) =>
 
 /// 规范 32 字节账户 hex(`0x` + 64 位小写)→ SS58;不匹配返回 null 按原值展示。
 String? _accountHexToSs58OrNull(String value) {
-  final match = RegExp(r'^0x([0-9a-f]{64})$').firstMatch(value);
-  if (match == null) return null;
-  final hex = match.group(1)!;
+  if (!isAccountIdText(value)) return null;
+  final hex = value.substring(2);
   final bytes = Uint8List(32);
   for (var i = 0; i < 32; i++) {
     bytes[i] = int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16);

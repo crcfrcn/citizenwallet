@@ -1,5 +1,5 @@
 {
-  "_comment": "SCALE 编码原语金标向量 (canonical, Rust parity-scale-codec 权威源). 各端手写 SCALE 实现(Worker scaleCompact/scaleString/u64Le、citizenapp signing.dart、citizenwallet payload_decoder 解码方向)必须与本文件逐字节一致。【真源】改动取值集合后必须跑 SCALE_GOLDEN_UPDATE=1 重新生成。u64 上界钉在 2^53-1:TS 侧 Number.isSafeInteger 守卫不接受更大值。",
+  "_comment": "SCALE 编码原语金标向量的公民钱包镜像。公开真源为 citizenchain/runtime/primitives/tests/fixtures/scale_codec_vectors.json，塔塔门禁按 ChainConstants.registrySourceSha 固定提交核对 compact_u32、scale_string、u64_le 全部向量；Flutter 测试只读取本仓已验真镜像。镜像不得单方面改值。",
   "compact_u32": [
     {
       "hex": "00",

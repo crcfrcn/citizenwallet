@@ -160,5 +160,16 @@ void main() {
       expect(fieldValueText('actor_public_key', hex), hex);
       expect(fieldValueText('reason_hash', hex), hex);
     });
+
+    test('账户字段仅接受本仓唯一规范文本格式', () {
+      for (final value in [
+        '0x${List.filled(63, 'a').join()}',
+        '0x${List.filled(65, 'a').join()}',
+        '0x${List.filled(64, 'A').join()}',
+        List.filled(64, 'a').join(),
+      ]) {
+        expect(fieldValueText('account_id', value), value);
+      }
+    });
   });
 }

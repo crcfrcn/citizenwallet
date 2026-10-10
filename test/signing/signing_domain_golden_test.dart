@@ -11,7 +11,7 @@ import 'package:citizenwallet/signing/qr_signer.dart';
 
 // 冷钱包哈希域金标锁(citizenwallet ⇔ citizenchain)。
 //
-// 本文件**直接读真源**,冷钱包侧不保存镜像副本(与 Worker 侧同策略)。
+// 本测试读取本仓镜像；塔塔门禁按固定公开链提交核对签名域向量。
 //
 // 为什么必须有这个文件:qr_signer_test.dart 里三处签名域断言都是**自证**——
 // 测试自己用 Blake2bDigest 算一遍当 expected,再与实现比。那只证明了「实现调用了
@@ -62,7 +62,7 @@ void main() {
   final vectors = (canonical['vectors'] as List).cast<Map<String, dynamic>>();
   final gmbPrefix = utf8.encode(domain);
 
-  group('哈希域摘要原语与链端一致(直读 citizenchain 真源)', () {
+  group('哈希域摘要原语与已验真链端镜像一致', () {
     test('真源可读、域为 GMB 且向量非空', () {
       // 读成空数组时下面的循环一条用例都不生成而整体显示通过,这条挡住金标静默失效。
       expect(

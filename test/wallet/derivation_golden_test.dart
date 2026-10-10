@@ -1,4 +1,4 @@
-// HD 派生金标（model B，冷热共享单源，Step 2 citizenapp 必须逐字节复用）。
+// HD 派生金标（model B，本端按公开 sr25519 规则独立验真）。
 //
 // 契约：一套助记词 → 一个 mini-secret 种子 → 全部 `//index` 硬派生（含账户0 = `//0`，
 //   无 bare 根）→ 每账户一对公私钥、一个 ss58(2027)、一把自己的 child mini-secret（32B）。
@@ -81,8 +81,8 @@ Future<Uint8List> _miniSecret(String mnemonic, {String password = ''}) async {
 
 /// 复现 WalletManager 的 child mini-secret 提取（金标据此校验）。
 ///
-/// 与生产同一条原生路径（[NativeSr25519] → citizen-signer，与 CitizenApp 热端
-/// 同一份源码）——金标因此是"生产实现 vs Substrate 官方权威向量"的直接对拍。
+/// 与本端生产同一条原生路径（[NativeSr25519] → citizen-signer）；
+/// 金标将本端生产实现与 Substrate 官方权威向量直接对拍。
 List<int> _childMiniSecret(List<int> seed, int index) {
   final chainCode = WalletMiniSecret.hardJunctionChainCode(index);
   try {

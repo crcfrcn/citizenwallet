@@ -149,8 +149,8 @@ class QrSigner {
     required String signatureHex,
     required Uint8List message,
   }) {
-    // 全仓 sr25519 唯一实现：原生 schnorrkel（[NativeSr25519]，与 CitizenApp
-    // 热端同一份源码）。长度非法 / 公钥或签名格式错 / 验签不过一律 false（fail-closed）。
+    // 本端 sr25519 唯一实现是原生 schnorrkel（[NativeSr25519]）。
+    // 长度非法、公钥或签名格式错、验签不过一律 false（fail-closed）。
     try {
       return NativeSr25519.verify(
         _hexToBytes(signerPublicKeyHex),

@@ -1,5 +1,5 @@
 {
-  "_comment": "签名协议金标向量 (canonical, Rust 权威源). 完整覆盖 SIGN_OP_TAGS 中全部哈希域，即真正经 signing_message = blake2_256(GMB || op_tag || scale_payload) 的域。0x1C 为同一本机 MLS 公钥登记，0x21 为 CitizenApp 本机默认账户切换，0x23 为 CitizenApp 钱包账户签名模式确认，0x24 为产品正式发布授权；均只在本机链下验签。域 domain=GMB。所有 message_hex 任何时候不得变化。二进制前缀域 0x18/0x19 签原始可解析字节，不在此金标。scale_payload_hex 仅用于跨语言金标对齐，非真实业务数据。重生方式: SIGN_GOLDEN_UPDATE=1 cargo test -p primitives --test sign_golden。【真源】本文件是唯一权威源；镜像由 CI 逐字段校验。",
+  "_comment": "签名协议金标向量的公民钱包镜像。公开真源为 citizenchain/runtime/primitives/tests/fixtures/signing_domain_vectors.json；塔塔门禁按 ChainConstants.registrySourceSha 固定提交核对全部哈希域，Flutter 测试只读取本仓已验真镜像。被签消息为 blake2_256(GMB || op_tag || scale_payload)；二进制前缀域另见 binary_prefix_domain_vectors.json。镜像不得单方面改值。",
   "domain": "GMB",
   "vectors": [
     {

@@ -9,7 +9,7 @@ import 'package:citizenwallet/signing/payload_decoder.dart';
 
 // SCALE **解码**金标锁(citizenwallet ⇔ citizenchain)。
 //
-// 本文件**直接读真源**,不保存镜像副本(与 Worker / citizenapp 同策略)。
+// 本测试读取本仓镜像；塔塔门禁按固定公开链提交核对镜像全部向量。
 //
 // 为什么解码方向必须单独锁:编码错会签出链端不认的交易,当场失败;
 // 解码错则是**冷钱包给用户展示的交易内容与实际要签的不符**——用户在错误信息下
@@ -97,7 +97,7 @@ void main() {
   final stringVectors =
       (canonical['scale_string'] as List).cast<Map<String, dynamic>>();
 
-  group('SCALE 解码与链端编码一致(直读 citizenchain 真源)', () {
+  group('SCALE 解码与已验真链端镜像一致', () {
     test('真源向量可读且非空', () {
       // 读成空数组时下面的循环一条用例都不生成而整体显示通过,这条挡住金标静默失效。
       expect(file.existsSync(), isTrue,

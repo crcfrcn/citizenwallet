@@ -5,6 +5,10 @@
 class ChainConstants {
   const ChainConstants._();
 
+  /// 本钱包注册表核对使用的公民链公开提交；不跟随链仓 main 自动漂移。
+  static const String registrySourceSha =
+      '72690d8dc6e8fc1335c67a6dbc83bd40d6ef7b26';
+
   /// SS58 地址前缀（CitizenChain 注册编号）。
   static const int ss58Prefix = 2027;
 

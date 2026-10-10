@@ -2,21 +2,15 @@
   "schema": 1,
   "repository": "citizenwallet",
   "workflows": [
-    "citizenwallet.android.ci",
-    "citizenwallet.android.release",
-    "citizenwallet.ios.ci",
-    "citizenwallet.ios.release"
+    "release-ios.yml",
+    "release-android.yml"
   ],
   "node_tests": [
     "scripts/build.mjs",
-    "scripts/ci/android.mjs",
-    "scripts/ci/ios.mjs",
-    "scripts/flow.mjs",
-    "scripts/release/android.mjs",
-    "scripts/release/ios.mjs",
-    "scripts/resources.mjs",
-    "test/release_manifest.test.mjs",
-    "scripts/target.mjs"
+    "scripts/publish.mjs",
+    "icons/generate.mjs",
+    ".github/workflows/release-ios.mjs",
+    ".github/workflows/release-android.mjs"
   ],
   "checks": [
     "repository-contracts",
@@ -33,10 +27,6 @@
     "macos_arm64"
   ],
   "github_repository": "crcfrcn/citizenwallet",
-  "chain_source": {
-    "url": "https://github.com/crcfrcn/citizenchain.git",
-    "sha": "72690d8dc6e8fc1335c67a6dbc83bd40d6ef7b26"
-  },
   "functions": [
     {
       "function": "rust/source/sr25519",
@@ -51,44 +41,8 @@
       ]
     },
     {
-      "function": "scripts/build.test",
+      "function": "scripts/build",
       "path": "scripts/build.mjs",
-      "runner": "node",
-      "target": "node"
-    },
-    {
-      "function": "scripts/ci/android.test",
-      "path": "scripts/ci/android.mjs",
-      "runner": "node",
-      "target": "node"
-    },
-    {
-      "function": "scripts/ci/ios.test",
-      "path": "scripts/ci/ios.mjs",
-      "runner": "node",
-      "target": "node"
-    },
-    {
-      "function": "scripts/flow.test",
-      "path": "scripts/flow.mjs",
-      "runner": "node",
-      "target": "node"
-    },
-    {
-      "function": "scripts/release/android.test",
-      "path": "scripts/release/android.mjs",
-      "runner": "node",
-      "target": "node"
-    },
-    {
-      "function": "scripts/release/ios.test",
-      "path": "scripts/release/ios.mjs",
-      "runner": "node",
-      "target": "node"
-    },
-    {
-      "function": "scripts/resources.test",
-      "path": "scripts/resources.mjs",
       "runner": "node",
       "target": "node"
     },
@@ -109,12 +63,6 @@
       "path": "test/scanner/scanner_view_test.dart",
       "runner": "flutter",
       "target": "flutter"
-    },
-    {
-      "function": "test/release_manifest.test",
-      "path": "test/release_manifest.test.mjs",
-      "runner": "node",
-      "target": "node"
     },
     {
       "function": "test/security/app_lock_pbkdf2_test",
@@ -267,8 +215,26 @@
       "target": "flutter"
     },
     {
-      "function": "scripts-target",
-      "path": "scripts/target.mjs",
+      "function": ".github/workflows/release-ios",
+      "path": ".github/workflows/release-ios.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": ".github/workflows/release-android",
+      "path": ".github/workflows/release-android.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts/publish",
+      "path": "scripts/publish.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "icons/generate",
+      "path": "icons/generate.mjs",
       "runner": "node",
       "target": "node"
     }
