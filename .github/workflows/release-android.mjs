@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {generatePlatformIcons} from '../../icons/generate.mjs';
 
-export const owner = Object.freeze({"product": "citizenwallet", "platform": "android", "repository": "crcfrcn/citizenwallet", "version_source": {"kind": "pubspec", "path": "pubspec.yaml"}, "required_assets": ["citizenwallet.apk", "citizenwallet.aab", "citizenwallet-release-android.json"]});
+export const owner = Object.freeze({"product": "citizenwallet", "platform": "android", "repository": "crcfrcn/citizenwallet", "version_source": {"kind": "pubspec", "path": "pubspec.yaml"}, "required_assets": ["citizenwallet-unsigned.apk", "citizenwallet-unsigned.aab", "citizenwallet-unsigned-android.json"]});
 const commands = Object.freeze({
   "1": {
     "shell": "bash",
@@ -47,11 +47,11 @@ const commands = Object.freeze({
   },
   "10": {
     "shell": "bash",
-    "source": "cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\numask 077\nwork=\"$RUNNER_TEMP/citizenwallet-android-signing\"\npublish=\"build/release\"\nrm -rf \"$work\" \"$publish\"\nmkdir -p \"$work\" \"$publish\"\ntrap 'rm -rf \"$work\"' EXIT\npython3 - \"$work\" <<'PY'\nimport base64, os, pathlib, re, sys\nroot = pathlib.Path(sys.argv[1])\nfields = {}\nfor raw in os.environ.get(\"APP_KEY\", \"\").splitlines():\n    line = raw.strip()\n    if not line or line.startswith(\"#\"):\n        continue\n    name, sep, value = line.partition(\"=\")\n    if not sep or name.strip() in fields or not value.strip():\n        raise SystemExit(\"APP_KEY 行格式无效\")\n    fields[name.strip()] = value.strip()\nif set(fields) - {\"keystore\", \"password\", \"alias\", \"keyPassword\"}:\n    raise SystemExit(\"APP_KEY 包含未登记字段\")\nalias = fields.get(\"alias\", \"upload\")\nif not re.fullmatch(r\"[A-Za-z0-9._-]{1,128}\", alias):\n    raise SystemExit(\"APP_KEY alias 无效\")\ntry:\n    key = base64.b64decode(fields[\"keystore\"], validate=True)\n    password = fields[\"password\"]\nexcept (KeyError, ValueError) as exc:\n    raise SystemExit(\"APP_KEY 缺少有效签名材料\") from exc\nif not 1024 <= len(key) <= 32 * 1024 * 1024:\n    raise SystemExit(\"APP_KEY keystore 大小无效\")\n(root / \"release.keystore\").write_bytes(key)\n(root / \"password\").write_text(password)\n(root / \"key-password\").write_text(fields.get(\"keyPassword\", password))\n(root / \"alias\").write_text(alias)\nPY\nGMB_ANDROID_STORE_PASSWORD=\"$(cat \"$work/password\")\"\nGMB_ANDROID_KEY_PASSWORD=\"$(cat \"$work/key-password\")\"\nexport GMB_ANDROID_STORE_PASSWORD GMB_ANDROID_KEY_PASSWORD\nalias=\"$(cat \"$work/alias\")\"\napksigner=\"$ANDROID_HOME/build-tools/37.0.1/apksigner\"\ntest -x \"$apksigner\"\n\"$apksigner\" sign --ks \"$work/release.keystore\" \\\n  --ks-pass env:GMB_ANDROID_STORE_PASSWORD --key-pass env:GMB_ANDROID_KEY_PASSWORD \\\n  --v4-signing-enabled false \\\n  --ks-key-alias \"$alias\" --out \"$publish/citizenwallet.apk\" \\\n  build/app/outputs/flutter-apk/app-release.apk\ncp build/app/outputs/bundle/release/app-release.aab \"$publish/citizenwallet.aab\"\njarsigner -keystore \"$work/release.keystore\" \\\n  -storepass:env GMB_ANDROID_STORE_PASSWORD -keypass:env GMB_ANDROID_KEY_PASSWORD \\\n  \"$publish/citizenwallet.aab\" \"$alias\"\n\"$apksigner\" verify --verbose --print-certs \"$publish/citizenwallet.apk\" \\\n  | tee \"$work/apk-verification.txt\"\ngrep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' \"$work/apk-verification.txt\"\n# Android 上传证书按平台规范可以自签名；只验证包完整性，再从三处回读同一证书。\njarsigner -verify \"$publish/citizenwallet.aab\"\napk_certificate_sha256=\"$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \"$work/apk-verification.txt\")\"\nkey_certificate_sha256=\"$(keytool -exportcert -alias \"$alias\" \\\n  -keystore \"$work/release.keystore\" -storepass:env GMB_ANDROID_STORE_PASSWORD -rfc \\\n  | openssl x509 -outform DER | sha256sum | awk '{print $1}')\"\naab_certificate_sha256=\"$(keytool -printcert -jarfile \"$publish/citizenwallet.aab\" -rfc \\\n  | openssl x509 -outform DER | sha256sum | awk '{print $1}')\"\n[[ \"$apk_certificate_sha256\" =~ ^[0-9a-f]{64}$ ]]\ntest \"$apk_certificate_sha256\" = \"$key_certificate_sha256\"\ntest \"$apk_certificate_sha256\" = \"$aab_certificate_sha256\"\ntest \"$(apkanalyzer manifest application-id \"$publish/citizenwallet.apk\")\" = com.crcfrcn.citizenwallet\ntest \"$(apkanalyzer manifest version-code \"$publish/citizenwallet.apk\")\" = \"$GITHUB_RUN_NUMBER\""
+    "source": "cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\npublish=\"build/release\"\ntest ! -e \"$publish\"\nmkdir -p \"$publish\"\ncp build/app/outputs/flutter-apk/app-release.apk \"$publish/citizenwallet-unsigned.apk\"\ncp build/app/outputs/bundle/release/app-release.aab \"$publish/citizenwallet-unsigned.aab\"\ntest -s \"$publish/citizenwallet-unsigned.apk\"\ntest -s \"$publish/citizenwallet-unsigned.aab\"\nif \"$ANDROID_HOME/build-tools/37.0.1/apksigner\" verify \"$publish/citizenwallet-unsigned.apk\" >/dev/null 2>&1; then\n  echo '未签名APK意外包含有效签名' >&2; exit 1\nfi\nif keytool -printcert -jarfile \"$publish/citizenwallet-unsigned.aab\" >/dev/null 2>&1; then\n  echo '未签名AAB意外包含有效签名' >&2; exit 1\nfi"
   },
   "11": {
     "shell": "bash",
-    "source": "cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\n# 中文边界：platform 是对外身份，固定为 Android；内部 Tag/target/workflow、资产名与字段保持原 wire。\nnode <<'NODE'\n  const { createHash } = require(\"node:crypto\");\n  const fs = require(\"node:fs\");\n  const root = \"build/release\";\n  const digest = (name) => createHash(\"sha256\").update(fs.readFileSync(`${root}/${name}`)).digest(\"hex\");\n  fs.writeFileSync(`${root}/citizenwallet-release-android.json`, `${JSON.stringify({\n    product_id: \"citizenwallet\", version: process.env.SOFTWARE_VERSION,\n    github_run_number: Number(process.env.GITHUB_RUN_NUMBER), head_sha: process.env.SOURCE_SHA,\n    bundle_id: \"ios.citizenwallet\", package_name: \"com.crcfrcn.citizenwallet\",\n    assets: [\n      { platform: \"Android\", asset_name: \"citizenwallet.apk\", asset_sha256: digest(\"citizenwallet.apk\") },\n      { platform: \"Android\", asset_name: \"citizenwallet.aab\", asset_sha256: digest(\"citizenwallet.aab\") },\n    ],\n  }, null, 2)}\\n`);\nNODE\ntest \"$(find build/release -type f | wc -l | tr -d ' ')\" = 3"
+    "source": "cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\n# 中文边界：platform 是对外身份，固定为 Android；内部 Tag/target/workflow、资产名与字段保持原 wire。\nnode <<'NODE'\n  const { createHash } = require(\"node:crypto\");\n  const fs = require(\"node:fs\");\n  const root = \"build/release\";\n  const digest = (name) => createHash(\"sha256\").update(fs.readFileSync(`${root}/${name}`)).digest(\"hex\");\n  fs.writeFileSync(`${root}/citizenwallet-unsigned-android.json`, `${JSON.stringify({\n    product_id: \"citizenwallet\", version: process.env.SOFTWARE_VERSION,\n    github_run_number: Number(process.env.GITHUB_RUN_NUMBER), head_sha: process.env.SOURCE_SHA,\n    bundle_id: \"ios.citizenwallet\", package_name: \"com.crcfrcn.citizenwallet\",\n    assets: [\n      { platform: \"Android\", asset_name: \"citizenwallet-unsigned.apk\", asset_sha256: digest(\"citizenwallet-unsigned.apk\") },\n      { platform: \"Android\", asset_name: \"citizenwallet-unsigned.aab\", asset_sha256: digest(\"citizenwallet-unsigned.aab\") },\n    ],\n  }, null, 2)}\\n`);\nNODE\ntest \"$(find build/release -type f | wc -l | tr -d ' ')\" = 3"
   }
 });
 const shaPattern = /^[0-9a-f]{40}$/u;
@@ -352,32 +352,6 @@ export async function collectProduced(environment=process.env) {
 
 
 
-export async function publish(directory,environment=process.env) {
-  const identity=runVersion(environment);const metadata=JSON.parse(readFileSync(join(directory,'automation.json'),'utf8'));
-  if(Object.entries(identity).some(([key,value])=>metadata[key]!==value)||!Array.isArray(metadata.assets)
-    ||metadata.assets.map(file=>file?.name).sort().join('\0')!==[...owner.required_assets].sort().join('\0'))fail('完整产物身份或资产闭集无效');
-  const files=metadata.assets;
-  if(readdirSync(directory).sort().join('\0')!==[...files.map(value=>value.name),'automation.json'].sort().join('\0'))fail('产物目录与完整资产集合不符');
-  for(const file of files){const path=join(directory,assetName(file.name));if(regular(path).size!==file.size||await digestFile(path)!==file.sha256)fail('正式产物在交付前改变');}
-  if(await request(`git/ref/tags/${encodeURIComponent(identity.tag)}`)!==null)fail('本次Tag已经存在');
-  await request('git/refs',{method:'POST',body:{ref:`refs/tags/${identity.tag}`,sha:identity.source_sha}});
-  const release=await request('releases',{method:'POST',body:{tag_name:identity.tag,target_commitish:identity.source_sha,
-    name:`${owner.product} · ${owner.platform} · ${identity.version}`,draft:false,prerelease:false,make_latest:'false',
-    body:`${owner.product} · ${owner.platform} · ${identity.version}\nSource: ${identity.source_sha}\nRun: ${identity.run_id} / ${identity.run_attempt}`}});
-  if(!Number.isSafeInteger(release?.id)||!release.upload_url)fail('正式Release创建未确认');
-  for(const file of files){const url=new URL(release.upload_url.replace(/\{.*$/u,''));url.searchParams.set('name',file.name);
-    const asset=await request(url.href,{method:'POST',body:createReadStream(join(directory,file.name)),size:file.size});
-    if(asset?.name!==file.name||asset.size!==file.size||asset.state!=='uploaded')fail('正式资产上传未确认');
-    const response=await request(asset.url,{raw:true});if(!response?.body)fail('正式资产回读失败');
-    const hash=createHash('sha256');let size=0;for await(const bytes of response.body){hash.update(bytes);size+=bytes.length;if(size>file.size)fail('正式资产回读超过声明大小');}
-    if(size!==file.size||hash.digest('hex')!==file.sha256)fail('GitHub资产逐件回读不一致');
-  }
-  const readback=await request(`releases/${release.id}`);if((await walletRelease(readback,owner.platform,tag=>request('git/ref/tags/'+encodeURIComponent(tag))))?.run_id!==identity.run_id||readback.draft||readback.prerelease
-    ||readback.assets?.length!==files.length)fail('完整正式Release回查失败');
-  for(const file of files){const asset=readback.assets.find(value=>value.name===file.name);if(!asset||asset.state!=='uploaded'||asset.size!==file.size||asset.digest!==`sha256:${file.sha256}`)fail('完整正式资产证明回查失败');}
-  output('verified','true');output('release_id',release.id);output('tag',identity.tag);
-}
-
 function ownedRun(run) {
   // 每个目标只处理自身现行Workflow；文件缺失不能证明历史任务归属。
   return Number.isSafeInteger(run?.id)&&run.id>0&&run.path===workflowPath
@@ -445,36 +419,16 @@ export function precedingResult(needs) {
   if(!needs||typeof needs!=='object'||Array.isArray(needs)||!Object.keys(needs).length)fail('前置任务结果缺失');
   return Object.values(needs).every(value=>value?.result==='success')?'success':'failed';
 }
-async function discardCurrent(identity,api) {
-  for(const release of await pages('releases',null,api)){
-    const metadata=(await walletRelease(release,owner.platform,tag=>api('git/ref/tags/'+encodeURIComponent(tag))));
-    if(metadata?.run_id===identity.run_id&&metadata.run_attempt===identity.run_attempt)
-      await removeRunRelease({id:identity.run_id,head_sha:identity.source_sha},[release],api);
-  }
-  const tag=process.env.RELEASE_TAG;
-  if(tag&&tag.startsWith(prefix)&&tag.endsWith(`-r${identity.run_id}-a${identity.run_attempt}`)){
-    const path=`git/refs/tags/${encodeURIComponent(tag)}`;
-    if(await api(path.replace(/^git\/refs\//u,'git/ref/'))!==null)await remove(path,api);
-  }
-}
 export async function finish(needs=JSON.parse(process.env.RELEASE_NEEDS||'null'),api=request,identity=context()) {
-  const result=precedingResult(needs),errors=[];
-  const attempt=async action=>{try{return await action();}catch(error){errors.push(error);return null;}};
-  let removed;
+  const result=precedingResult(needs);
+  // 成功自动化只保留未签名资产；旧正式发布在本机新包成功上传前不得清理。
   if(result==='success') {
-    removed=await attempt(()=>cleanup('success',identity,api));
-    if(errors.length) {
-      await attempt(()=>discardCurrent(identity,api));
-      await attempt(()=>cleanup('failed',identity,api));
-    }
-  } else {
-    // 本次撤销失败也必须尝试清理同目标旧失败；各项真实错误均保留。
-    await attempt(()=>discardCurrent(identity,api));
-    removed=await attempt(()=>cleanup('failed',identity,api));
+    if(process.env.GITHUB_STEP_SUMMARY)appendFileSync(process.env.GITHUB_STEP_SUMMARY,'本目标未签名自动化成功；正式签名与发布等待本机确认。\n');
+    return;
   }
-  if(errors.length)throw new AggregateError(errors,'本目标最后处理失败：'+errors.map(error=>error.message).join('；'));
-  if(process.env.GITHUB_STEP_SUMMARY)appendFileSync(process.env.GITHUB_STEP_SUMMARY,`本目标${result==='success'?'成功':'失败'}；已清理同类旧Run：${removed.join('、')||'无'}。\n`);
-  if(result==='failed')fail('前置任务未全部成功');
+  const removed=await cleanup('failed',identity,api);
+  if(process.env.GITHUB_STEP_SUMMARY)appendFileSync(process.env.GITHUB_STEP_SUMMARY,`本目标失败；已清理同类旧失败Run：${removed.join('、')||'无'}。\n`);
+  fail('前置任务未全部成功');
 }
 
 const direct=process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url);
@@ -485,7 +439,7 @@ if(direct&&!testing){
     else if(command==='project'&&args.length===0)process.stdout.write(prepareProject()+'\n');
     else if(command==='native'&&args.length===0)buildNative();
     else if(command==='verify-native'&&args.length===0)verifyNativePackage();
-    else if(command==='collect-produced')await collectProduced();else if(command==='publish')await publish(args[0]);else if(command==='finish')await finish();
+    else if(command==='collect-produced')await collectProduced();else if(command==='finish')await finish();
     else fail('自动化命令无效');
   }catch(error){console.error(error.message);process.exitCode=1;}
 }
@@ -499,17 +453,18 @@ if(testing){
     for(const path of ['.github/workflows/release.yml',`.github/workflows/${owner.product}-${owner.platform}-ci.yml`,'.github/workflows/deleted.yml'])
       assert.deepEqual(cleanupPlan([{...old,path}],current,'success'),[]);
   });
-  test('撤销当前产物失败仍处理旧失败且最终失败',async()=>{
+  test('成功自动化保留旧正式发布，失败只清同目标旧失败',async()=>{
     const current={id:9,path:workflowPath,head_branch:'main',event:'workflow_dispatch',created_at:'2026-01-02T00:00:00Z'};
-    let releases=0,history=0;
-    const api=async path=>{
-      if(path.startsWith('releases?')){if(++releases===1)throw Error('撤销中断');return [];}
+    const paths=[];
+    const api=async path=>{paths.push(path);
       if(path==='actions/runs/9')return current;
-      if(path.startsWith('actions/runs?')){history++;return {workflow_runs:[]};}
+      if(path.startsWith('actions/runs?'))return {workflow_runs:[]};
+      if(path.startsWith('releases?'))return [];
       throw Error('未声明请求');
     };
-    await assert.rejects(finish({build:{result:'failure'}},api,{run_id:9}),/撤销中断/);
-    assert.equal(history,1);assert.equal(releases,2);
+    await finish({flow:{result:'success'}},api,{run_id:9});assert.deepEqual(paths,[]);
+    await assert.rejects(finish({flow:{result:'failure'}},api,{run_id:9}),/前置任务未全部成功/u);
+    assert.ok(paths.includes('actions/runs/9'));
   });
   test('清理旧失败Run同时回收其多个Attempt的准确孤立Tag',async()=>{
     const old={id:2,run_attempt:2,path:workflowPath,head_branch:'main',event:'workflow_dispatch',head_sha:'a'.repeat(40),status:'completed',conclusion:'failure',created_at:'2026-01-01T00:00:00Z'},current={...old,id:9,status:'in_progress',created_at:'2026-01-02T00:00:00Z'};
@@ -526,7 +481,7 @@ if(testing){
     assert.deepEqual(await cleanup('failed',{run_id:9},api),[2]);assert.equal([...deleted].filter(path=>path.startsWith('git/refs/')).length,2);
   });
   test('全部前置成功才成功，其余结论一律失败',()=>{
-    assert.equal(precedingResult({build:{result:'success'},publish:{result:'success'}}),'success');
+    assert.equal(precedingResult({prepare:{result:'success'},flow:{result:'success'}}),'success');
     for(const result of ['failure','cancelled','skipped','timed_out',undefined])assert.equal(precedingResult({build:{result}}),'failed');
     assert.throws(()=>precedingResult({}));
   });
@@ -644,13 +599,12 @@ if(testing){
         RELEASE_WORK:task,RELEASE_ASSETS_DIR:assets,GITHUB_OUTPUT:githubOutput};
       for(const name of owner.required_assets)writeFileSync(join(release,name),name);
       const extra=join(release,'extra.json');writeFileSync(extra,'extra');await assert.rejects(collectProduced(environment),/集合/);rmSync(extra);
-      const apk=join(release,'citizenwallet.apk');rmSync(apk);await assert.rejects(collectProduced(environment),/集合/);
+      const apk=join(release,'citizenwallet-unsigned.apk');rmSync(apk);await assert.rejects(collectProduced(environment),/集合/);
       writeFileSync(join(area,'other'),'other');symlinkSync(join(area,'other'),apk);await assert.rejects(collectProduced(environment),/普通文件/);
       rmSync(apk);writeFileSync(apk,'apk');const result=await collectProduced(environment);
       assert.deepEqual(result.assets.map(file=>file.name).sort(),[...owner.required_assets].sort());
       assert.deepEqual(readdirSync(assets).sort(),[...owner.required_assets,'automation.json'].sort());
-      writeFileSync(join(assets,'automation.json'),JSON.stringify({...result,assets:[...result.assets,{name:'extra.json',size:1,sha256:'a'.repeat(64)}]}));
-      await assert.rejects(publish(assets,environment),/闭集/);
+      assert.doesNotMatch(readFileSync(join(root,workflowPath),'utf8'),/secrets\.(?:APP_KEY|IOS_KEY|WALLET_PROFILE)|^  publish:/mu);
     }finally{rmSync(area,{recursive:true,force:true});}
   });
 
@@ -659,9 +613,10 @@ if(testing){
     assert.doesNotMatch(source,/scripts\/build\.mjs/u);
     const marker="python3 - <<'VERIFY_REGISTRY'\n",start=source.indexOf(marker),end=source.lastIndexOf('\nVERIFY_REGISTRY');
     assert.ok(start>=0&&end>start);
-    const python=source.slice(start+marker.length,end),result=spawnSync(process.env.PRODUCT_TEST_PYTHON||'python3',
+    const executable=process.env.PRODUCT_TEST_PYTHON;assert.ok(executable,'注册表回归须交付本仓登记Python');
+    const python=source.slice(start+marker.length,end),result=spawnSync(executable,
       ['-c','import ast,sys;ast.parse(sys.stdin.read())'],{input:python,encoding:'utf8'});
-    assert.equal(result.status,0,result.stderr);
+    assert.equal(result.status,0,result.error?.message||result.stderr);
   });
 
 }

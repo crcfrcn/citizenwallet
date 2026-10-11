@@ -238,19 +238,27 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 - 现行两端均由 `.github/workflows/release-<平台>.yml` 与同名 MJS 独立执行正式自动化，不恢复旧 CI 文件或 Debug 包。注册表的固定公开链提交由 `lib/signing/chain_constants.dart` 唯一声明；工作流只读核对 Pallet 和业务调用索引，漂移失败，不从邻仓回写钱包源码。
 - 本机移动端 Build 在依赖准备前交付已验真 Flutter 与随包 Dart，工具缺失或验真失败立即停止；自动化不调用本机 Build。转账入口保持 `OnchainTransaction(4).transfer_with_remark(0)`，不得恢复 `Balances` 直签入口。
-- 自动化逐件验收 Android APK/AAB 或 iOS IPA，完成正式签名、资产回读并直接创建本端 GitHub Release；iOS 与 Android 的版本及 build number 各自独立推进。
-- `APP_KEY` 与 CitizenApp 共用，作为固定 GitHub Repository Secret，内容至少包含
+- 自动化逐件验收 Android 未签名 APK/AAB 或 iOS 未签名 Runner.app 压缩包，交付与准确 Run/SHA 绑定的完整资产；本仓 `scripts/publish.mjs` 在本机签名并验真后才可形成正式包与 Release。iOS 与 Android 的版本及 build number 各自独立推进。
+- `APP_KEY` 与 CitizenApp 共用，由塔塔控制台唯一保管并在本机签名时交付，内容至少包含
   `keystore=<base64后的jks>` 和 `password=<keystore密码>`；默认 alias 为 `upload`，可增加
   `alias=<key别名>`，key password 默认复用 `password`。禁止普通查看、长期 keystore 文件和
   调试签名回退。
-- `IOS_KEY` 同样与 CitizenApp 共用，CitizenWallet 描述文件由固定 Secret
-  `WALLET_PROFILE` 提供。加密 PKCS#12 与临时钥匙串只在 Release
-  runner 当前 job 内存在，随后立即清除。禁止普通查看、登录钥匙串长期私钥和密码认证回退。
+- `IOS_KEY` 同样与 CitizenApp 共用，CitizenWallet 描述文件由控制台保管的
+  `WALLET_PROFILE` 提供。加密 PKCS#12 与临时钥匙串只在本机本次签名现场存在，随后立即清除。禁止普通查看、登录钥匙串长期私钥和密码认证回退。
+- 本仓 `scripts/publish.mjs` 公开准确未签名资产文件名供调度方提取，先核对成功 Run 的仓库、平台、提交、尝试次数、版本与未签名资产闭集，并逐件校验自动化清单和字节摘要；Android 在独占本机现场生成正式 APK/AAB，iOS 使用临时钥匙串签名 Runner.app 并生成 IPA。独立调用方交付本仓准确产物与临时签名材料，控制台调度时只从自身安全保管处按声明交付；签名临时现场用后清理。
+- 本仓公开签名与发布函数不依赖控制台源码；正式任务仍按全局规则只由塔塔控制台发起，不提供绕过控制台的直接发布命令。
+- 本仓 `scripts/publish.mjs` 公开本次本机签名与移动端自动化相关的三个同仓 Node 测试入口；控制台测试动作只按该清单发起产品自己的回归，不把产品用例并入控制台自身测试。
+- 本机签名接口在长驻控制台中按本仓 `scripts/config.mjs` 与 `scripts/build.mjs` 当前字节摘要重新读取需求和工具声明；保存时与使用时都消费所属最新修订，缺失或身份不符直接失败。
+- 所属测试还只做 Android/iOS 本机签名 Shell 的语法检查与合成资产、网络回执验证，不读取实际签名材料或执行签名。
+- 本机签名工具以异步子进程执行并等待退出，超时终止本轮进程组；控制台 Worker 可继续处理其它产品任务。正式材料不进入工具日志，只有退出和产物回验结果可用于状态报告。
+- 本机签名所需 Xcode 或 Java、Android SDK 版本从本仓现有 Build 声明读取；控制台只核对已登记且已安装的工具，不在发布准备中安装或替换资源。Android 证书摘要使用 macOS 已有 `shasum -a 256` 核对。
+- iOS 本机签名前核对未签名压缩包的路径闭集并拒绝链接或特殊文件，提取后再次核对真实路径；临时钥匙串加入用户搜索列表前保存原列表，结束时恢复并删除本轮钥匙串。控制台同一时刻只允许一个移动端签名事务占用该共享用户状态。Android 本机版本核对使用所属产品交付的 build number，不继承 GitHub 运行环境。
+- 正式发布只接受本次本机签名回执，上传前重验产物字节、成功 Run 身份及其仍为本平台最新成功自动化，创建准确 Tag/Release 后逐件回读。写入失败尝试撤销本次准确 Tag/Release 并报告未确认回滚；新正式包完整回读后才清理同平台旧成功。商店分发继续只消费已确认正式 Release。
 - 禁止 `continue-on-error`；单端失败必须使该端 Release 失败，但不得阻断另一端独立成功。
 
 ## Release 全量构建（第 7.4 步）
 
-正式 Release 固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。版本、签名、校验、产物和发布流程保持原有产品合同。
+正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。版本与未签名产物仍由本仓自动化生成；签名、正式产物校验和发布由本仓本机接口消费同一成功Run后执行。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
 
@@ -310,9 +318,9 @@ CitizenWallet Android 的实际 KGP 已与受控 Flutter 修订统一为 2.2.20�
 
 
 
-本产品的 iOS、Android 自动化分别使用各自的 YAML/MJS，主 Job 为 `flow`；各端自行完成版本、工程装配、原生构建、签名、资产验真、正式 GitHub Release 与历史清理。独立 `scripts/publish.mjs` 只消费成功的自动化产物并准备商店分发，商店上传渠道尚未实现；三条流程不互相启动或调用。
+本产品的 iOS、Android 自动化分别使用各自的 YAML/MJS，主 Job 为 `flow`；各端自行完成版本、工程装配、原生构建、未签名资产验真与交付。独立 `scripts/publish.mjs` 以同一成功 Run/SHA 的产物在本机签名、验真并在明确授权后创建正式 GitHub Release，商店上传渠道尚未实现；三条流程不互相启动或调用。
 
-两端自动化在 `RUNNER_TEMP` 内复制源码并装配 Flutter 工程，图标、Flutter、原生库和签名资产都归本次临时工程。自动化的资产收集只读取该工程的 `build/release`；原始检出只作为只读脚本和配置输入，不创建或链接根层 `build/`。签名域、二进制前缀域与 SCALE 金标由本仓夹具承载，门禁按 `ChainConstants.registrySourceSha` 指定的公开链提交逐项核对；Flutter 测试消费已验真的本仓夹具，不声称运行时读取邻仓。
+两端自动化在 `RUNNER_TEMP` 内复制源码并装配 Flutter 工程，图标、Flutter、原生库和未签名资产都归本次临时工程。自动化的资产收集只读取该工程的 `build/release`；原始检出只作为只读脚本和配置输入，不创建或链接根层 `build/`。正式签名材料只在后续本机授权现场使用；签名域、二进制前缀域与 SCALE 金标由本仓夹具承载，门禁按 `ChainConstants.registrySourceSha` 指定的公开链提交逐项核对；Flutter 测试消费已验真的本仓夹具，不声称运行时读取邻仓。
 
 每个 `flow` Job 先装载本仓声明的 Node 25.2.1，再由同名自动化的 `job` 入口领取并公布本次 Runner 工作目录与原生输出目录，然后顺序执行本平台步骤。iOS 的 IPA 只写入该工程的 `build/release`，与清单生成及资产收集使用同一目录。iOS 正式资产闭集为 `citizenwallet.ipa` 和 `citizenwallet-release-ios.json`；Android 为 `citizenwallet.apk`、`citizenwallet.aab` 和 `citizenwallet-release-android.json`。收集及上传前均拒绝缺件、多件、链接与错误目录，不提供任意路径收集命令。历史版本仅取准确平台、成功 Run、工作流、事件、分支、提交和运行尝试均一致的正式 Release；当前运行序号继续作为版本下界。
 
@@ -332,7 +340,7 @@ AGP 9 新 DSL 的源码路径使用 `directories`，不调用已废弃的 `setSr
 
 Flutter 插件注册表只生成于当轮外部工程的 `android/app/src/main/java`，main Java 源集显式消费这一目录。清理源码旧注册表后仍须能完整构建；APK 验收同时检查 MainActivity 与 GeneratedPluginRegistrant，并验证真实平台通道可用。
 
-Android CI 使用实际登记的 `:app:testDebugUnitTest` 运行硬件金库单元测试；正式应用仍仅构建和安装签名 Release。
+Android CI 使用实际登记的 `:app:testDebugUnitTest` 运行硬件金库单元测试；远端自动化只构建未签名正式候选，签名 Release 在本机发布阶段形成。
 ## 完整产品组织与执行合同
 
 本产品为离线冷钱包；名称仅允许`CitizenWallet`、`citizenwallet`、“公民钱包”，禁止旧名与别名。
@@ -651,12 +659,12 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 ## GitHub自动化
 
-本仓自动化只在GitHub的main源码上执行；控制台只调用与展示。各目标独立拥有同名的YAML与Node实现，不调用其他仓或其他目标的Workflow。版本、构建、测试、签名、完整产物核验与正式tag/Release均由本仓负责。
+本仓自动化只在GitHub的main源码上执行；控制台只调用与展示。各目标独立拥有同名的YAML与Node实现，不调用其他仓或其他目标的Workflow。版本、构建、测试及未签名产物核验由本仓自动化负责；本仓 `scripts/publish.mjs` 在本机负责正式签名、完整产物核验与明确授权后的tag/Release。
 
 - `.github/workflows/release-android.yml`及同名`.mjs`。
 - `.github/workflows/release-ios.yml`及同名`.mjs`。
 
-每个目标的最后任务使用always读取所有前置结果：全部成功清本仓本目标旧成功，否则清旧失败并失败退出。仅保留最新成功、最新失败各一条；保护本次Run和所有活动任务，另一类结果与其他目标不受影响。删除关联正式Release、tag、Actions产物和Run后回查；任何清理错误都按实际失败报告，不自动重试。
+每个目标的最后任务使用always读取全部前置结果：未签名自动化成功时保留本次资产及既有正式发布，等待本机签名和新正式包上传后再清理同目标旧成功；失败时仅清同目标旧失败并失败退出。保护本次Run和所有活动任务，另一类结果与其他目标不受影响。清理逐项回查，任何错误如实报告，不自动重试。
 
 所属回归位于各目标同名mjs，覆盖前置结果、版本边界、平台隔离、活动保护和完整分页；真实GitHub构建与发布验收依任务授权另行执行。
 
@@ -669,7 +677,7 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 ### 当前自动化最后处理
 
-本仓每个自动化目标仅由自身release-<平台>.yml与同名mjs执行，最后处理依赖全部前置任务。清理只接受该目标准确Workflow路径、main和手动事件，不根据已删除文件或旧入口名称猜测归属。前置失败时，本次产物撤销与旧失败清理分别尝试并汇总错误；任何一项未确认均失败。固定依赖仍由本仓声明和原锁管理，不参加自产历史结果分类。
+本仓每个自动化目标仅由自身release-<平台>.yml与同名mjs执行，最后处理依赖全部前置任务。清理只接受该目标准确Workflow路径、main和手动事件，不根据已删除文件或旧入口名称猜测归属。前置失败时清理同目标旧失败并报告真实错误；本次未签名资产保留供诊断。固定依赖仍由本仓声明和原锁管理，不参加自产历史结果分类。
 
 
 ### 本仓 GitHub 自动化与塔塔门禁目录
@@ -684,3 +692,9 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 本仓 GitHub 门禁接受 actions/checkout 的准确 HTTPS origin（同一仓库地址有或没有 `.git` 后缀），仓库、事件、提交和工作流身份仍逐项校验。
 
 门禁清理接口只对 URL 的路径部分拒绝越界，允许 created 查询中的时间范围分隔符；同文件回归直接执行正式 HTTP 参数校验，覆盖时间范围和越界拒绝。
+
+## 配置需求公开接口
+
+本仓 `scripts/config.mjs` 是只读配置需求接口。本机正式签名需要与 CitizenApp 共用的 `APP_KEY`、`IOS_KEY`，以及本产品独有的 `WALLET_PROFILE`，按 `android-signing` 和 `ios-signing` 用途声明。桌面更新密钥和应用商店发布凭据当前没有本仓已实现的消费者，不作为现行需求登记；配置值不得进入源码。实际值迁入控制台和删除旧 GitHub Secrets 属于另行授权的操作。
+
+本机发布回归的临时目录先解析为真实路径，正式资产读取继续拒绝非规范目录、越界、额外文件和字节变化；测试同时覆盖这些拒绝路径。scripts/publish.mjs公开testFiles与testTools：测试工具沿用本产品现有锁定声明，调度模式由调度方交付路径，缺件失败。自动化仅交付未签名产物，本机正式签名、回执和上传复验保持原流程。
