@@ -9,7 +9,7 @@ import 'package:citizenwallet/signing/payload_decoder.dart';
 
 // SCALE **解码**金标锁(citizenwallet ⇔ citizenchain)。
 //
-// 本测试读取本仓镜像；塔塔门禁按固定公开链提交核对镜像全部向量。
+// 本测试读取本仓镜像；镜像更新必须与公民链公开真源一致。
 //
 // 为什么解码方向必须单独锁:编码错会签出链端不认的交易,当场失败;
 // 解码错则是**冷钱包给用户展示的交易内容与实际要签的不符**——用户在错误信息下

@@ -1,5 +1,7 @@
 # CitizenWallet 技术文档
 
+> 当前塔塔鹿鹿：每仓 `.github/tatalulu.yml` 只登记仓库身份；控制台 `.github/tatalulu.mjs` 保存并推送后，以 GitHub `main` 回查结果收口。本文早期推送触发检查记录仅供历史追溯。
+
 ## 平台编译现场
 
 本产品编译任务使用本仓 `target/build/<平台>` 独立临时目录，平台键为 `ios`、`android`。不同平台同时领取并执行；同平台已有活跃任务时立即拒绝再次领取。资源准备、工程副本、缓存和编译输出只写本平台现场；确认进程及后代退出、结果被调用方消费后，删除整个平台目录。`target/build` 仅是父目录，`target/test` 仍用于独立测试。独立执行和控制台调度调用同一本仓编译入口与清理接口。
@@ -23,7 +25,7 @@ Flutter iOS 的Xcode复制步骤经本仓既有受控 `rsync` 入口调用 `scri
 
 Android源码在android/app/source，资源原件在android/resources；原资源限定目录名成为文件名前缀，装配到当前任务工程时恢复android/app/res下的原限定目录和文件名。iOS原件分别位于config、native、project、resources、source、tests；Xcode工程、workspace、本地化资源、Flutter配置和原生pod目录仅在当前target工程内恢复。同名workspace文件及图标Contents.json通过文件名区分，内容保持唯一原件。图标仍由icons原件生成，无新增设计或图像副本。源码内不得恢复深层原生工程包。
 
-`scripts/` 只保留 `build.mjs` 与 `publish.mjs`。Build 持有本仓编译声明、资源配方与固定工作根，不登记或调用自动化；Publish 独立核验已完成的正式 GitHub Release 资产，实际商店渠道另行确定。iOS、Android 各自的 GitHub 自动化由 `.github/workflows/` 的同名 YAML/MJS 完整创建并回读 Release；自动化生成物只归本次 Runner 临时工程，源码检出根不创建 `build/`。门禁两件文件位于 `.github/tatagate/`，其内嵌增量扫描直接使用现行 `tatagate.mjs` 接口。二维码生成文件唯一真源仍在链端，链端一致性检查路径为 `lib/protocol/generated/qr_bodies.g.dart`。
+`scripts/` 只保留 `build.mjs` 与 `publish.mjs`。Build 持有本仓编译声明、资源配方与固定工作根，不登记或调用自动化；Publish 独立核验已完成的正式 GitHub Release 资产，实际商店渠道另行确定。iOS、Android 各自的 GitHub 自动化由 `.github/workflows/` 的同名 YAML/MJS 完整创建并回读 Release；自动化生成物只归本次 Runner 临时工程，源码检出根不创建 `build/`。`.github/tatalulu.yml`只登记本仓身份，保存与推送由控制台直接完成。二维码生成文件唯一真源仍在链端，链端一致性检查路径为 `lib/protocol/generated/qr_bodies.g.dart`。
 
 `node scripts/build.mjs describe` 只读交付产品编译声明；`wallet <ios|android|prepare-ios|prepare-android>`、`native <目标>`、`analysis-options` 继续负责本机工程、原生库与分析规则。图标派生实现位于 `icons/generate.mjs`，Build 仅调用该功能；旧跨仓索引回写已移除，正式自动化对本仓注册表与固定公开链提交只读核对，漂移立即失败。`scripts/publish.mjs identity|inspect` 不调用 Build 或 Workflow，分发输入只来自已完成的正式 Release。
 
@@ -42,7 +44,7 @@ Android源码在android/app/source，资源原件在android/resources；原资�
 
 当前代码通过公开资源协议执行控制台供给，真实两端完整Build仍待验收；不能以文档更新代替编译、签名、安装及回读成功。
 
-本仓现行入口以 `scripts/build.mjs describe`、独立 `scripts/publish.mjs` 和各平台同名 Workflow 实现为准；本文按日期保留的历史验收只描述当时结果，不作为当前工具、私有调用者或实际商店上传的运行凭证。独立塔塔门禁的职责和未验收状态见文末。
+本仓现行入口以 `scripts/build.mjs describe`、独立 `scripts/publish.mjs` 和各平台同名 Workflow 实现为准；本文按日期保留的历史验收只描述当时结果，不作为当前工具、私有调用者或实际商店上传的运行凭证。早期推送检查的历史记录见文末，当前不再运行。
 
 
 ## 当前工作目录归属（第8步，2026-10-06）
@@ -247,7 +249,7 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
   `WALLET_PROFILE` 提供。加密 PKCS#12 与临时钥匙串只在本机本次签名现场存在，随后立即清除。禁止普通查看、登录钥匙串长期私钥和密码认证回退。
 - 本仓 `scripts/publish.mjs` 公开准确未签名资产文件名供调度方提取，先核对成功 Run 的仓库、平台、提交、尝试次数、版本与未签名资产闭集，并逐件校验自动化清单和字节摘要；Android 在独占本机现场生成正式 APK/AAB，iOS 使用临时钥匙串签名 Runner.app 并生成 IPA。独立调用方交付本仓准确产物与临时签名材料，控制台调度时只从自身安全保管处按声明交付；签名临时现场用后清理。
 - 本仓公开签名与发布函数不依赖控制台源码；正式任务仍按全局规则只由塔塔控制台发起，不提供绕过控制台的直接发布命令。
-- 本仓 `scripts/publish.mjs` 公开本次本机签名与移动端自动化相关的三个同仓 Node 测试入口；控制台测试动作只按该清单发起产品自己的回归，不把产品用例并入控制台自身测试。
+- 本仓 `scripts/build.mjs` 声明本机签名与移动自动化的同仓 Node 回归；控制台一次编译任务先执行这些回归，再进入所选平台构建。
 - 本机签名接口在长驻控制台中按本仓 `scripts/config.mjs` 与 `scripts/build.mjs` 当前字节摘要重新读取需求和工具声明；保存时与使用时都消费所属最新修订，缺失或身份不符直接失败。
 - 所属测试还只做 Android/iOS 本机签名 Shell 的语法检查与合成资产、网络回执验证，不读取实际签名材料或执行签名。
 - 本机签名工具以异步子进程执行并等待退出，超时终止本轮进程组；控制台 Worker 可继续处理其它产品任务。正式材料不进入工具日志，只有退出和产物回验结果可用于状态报告。
@@ -267,7 +269,7 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
   明确的公开制品边界映射，没有建立第二套 CI 或 Release 流程。
 - 当时的独立发布清单测试（现已并入 `scripts/build.mjs`）直接提取并执行 外部调用方 受控复合 Action 的真实
   Node writer，锁定 writer 所属 Release job、七个顶层字段、三个资产字段、产品与原生应用身份、
-  实际文件 SHA-256 和精确资产闭集。该历史测试当时由两个移动CI执行；当前脚本回归统一由塔塔门禁执行。
+  实际文件 SHA-256 和精确资产闭集。该历史测试当时由两个移动CI执行；当前脚本回归由所属测试与构建入口执行。
 - 外部调用方 的 Citizen 移动严格验证器由 CitizenApp 与 CitizenWallet 共用。CitizenWallet iOS
   只接受 `citizenwallet.ipa`，Android 只接受 `citizenwallet.apk` 与 `citizenwallet.aab`；两个平台
   都同时固定 Bundle ID `ios.citizenwallet` 和 Android package
@@ -549,11 +551,11 @@ Apple验真器测试由同一锁定Xcode的swiftc编译实际XCTest Bundle，使
 
 ## Pub本轮缓存摘要格式
 
-本仓资源配方在本轮工作根解包已验真的锁定Pub原件，并按Pub实际读取格式写入hosted-hashes：内容严格为原始锁的64位十六进制SHA256，不追加换行。重复物化按相同字节核验，旧格式、错误摘要及取消据实失败；不改变包版本、来源、锁文件、离线策略或控制台供给职责。该实现由独立执行、控制台供给和本仓门禁共同使用；真实Dart离线消费测试验证缓存可用，完整移动编译仍须单独验收。
+本仓资源配方在本轮工作根解包已验真的锁定Pub原件，并按Pub实际读取格式写入hosted-hashes：内容严格为原始锁的64位十六进制SHA256，不追加换行。重复物化按相同字节核验，旧格式、错误摘要及取消据实失败；不改变包版本、来源、锁文件、离线策略或控制台供给职责。该实现由独立执行和控制台供给共同使用；真实Dart离线消费测试验证缓存可用，完整移动编译仍须单独验收。
 
 ## 构建脚本回归与本机Build
 
-平台工程装配、工作目录隔离和原生入口回归统一维护在scripts/build.mjs末尾，仅由node --test直接执行该文件时注册。原独立发布清单测试已合并并移除，重复Android源集及注册表检查归入同一平台配置用例，移动CI中的重复工程装配夹具并入同一构建回归；本机Build及移动CI不再重复调用脚本自测，统一由同提交塔塔门禁串行执行并核验完整回执，避免不同脚本测试争用固定现场。正常编译继续执行宿主签名库构建、Flutter业务测试、平台原生库与最终产物校验。
+平台工程装配、工作目录隔离和原生入口回归统一维护在scripts/build.mjs末尾，仅由node --test直接执行该文件时注册。原独立发布清单测试已合并并移除，重复Android源集及注册表检查归入同一平台配置用例，移动CI中的重复工程装配夹具并入同一构建回归；本机Build及移动CI分别按所属入口执行适用回归，避免不同脚本测试争用固定现场。正常编译继续执行宿主签名库构建、Flutter业务测试、平台原生库与最终产物校验。
 
 嵌套Shell入口按wallet与native子步骤分别在当前工作根embedded/<command>物化脚本，结束时只清理自己的子步骤目录。跨仓回写索引入口已删除；外层钱包编译调用宿主及移动原生入口时，不竞争同一个implementation.sh，真实嵌套CLI回归须保留Cargo子进程失败状态。
 
@@ -629,9 +631,7 @@ citizenwallet/
     │   ├── release-ios.mjs       # iOS完整GitHub Release实现
     │   ├── release-android.yml   # Android自动化作业
     │   └── release-android.mjs   # Android完整GitHub Release实现
-    └── tatagate/
-        ├── tatagate.json        # 本仓门禁合同
-        └── tatagate.mjs         # 本仓门禁实现与回归
+    └── tatalulu.yml            # 本仓身份与main分支
 ```
 
 ### scripts 同文件回归
@@ -697,4 +697,8 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 本仓 `scripts/config.mjs` 是只读配置需求接口。本机正式签名需要与 CitizenApp 共用的 `APP_KEY`、`IOS_KEY`，以及本产品独有的 `WALLET_PROFILE`，按 `android-signing` 和 `ios-signing` 用途声明。桌面更新密钥和应用商店发布凭据当前没有本仓已实现的消费者，不作为现行需求登记；配置值不得进入源码。实际值迁入控制台和删除旧 GitHub Secrets 属于另行授权的操作。
 
-本机发布回归的临时目录先解析为真实路径，正式资产读取继续拒绝非规范目录、越界、额外文件和字节变化；测试同时覆盖这些拒绝路径。scripts/publish.mjs公开testFiles与testTools：测试工具沿用本产品现有锁定声明，调度模式由调度方交付路径，缺件失败。自动化仅交付未签名产物，本机正式签名、回执和上传复验保持原流程。
+本机发布回归的临时目录先解析为真实路径，正式资产读取继续拒绝非规范目录、越界、额外文件和字节变化；测试同时覆盖这些拒绝路径。scripts/build.mjs公开testFiles与testTools：测试工具沿用本产品现有锁定声明，调度模式由调度方交付路径，缺件失败。自动化仅交付未签名产物，本机正式签名、回执和上传复验保持原流程。
+
+控制台任务取消信号传入本仓签名和发布接口：本机签名工具终止本轮进程组并等待退出；发布请求立即中止后，使用不受取消信号影响的回查接口核对并撤销本次已确认归属的 Tag/Release。创建回执不明时不删除同名远端资源，并报告未闭合失败；历史清理与本次发布成功回执之间仍按本仓流程验真。
+
+编译入口在同一次任务中先执行本仓 `scripts/build.mjs` 声明的适用代码回归，全部通过后才执行所选平台构建；测试失败、取消或测试文件在阶段间变化均禁止生成正式编译产物。测试清单与所需工具只由本仓 Build 接口声明，控制台不再提供独立测试按钮或从发布接口读取测试清单。

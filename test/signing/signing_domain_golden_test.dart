@@ -11,7 +11,7 @@ import 'package:citizenwallet/signing/qr_signer.dart';
 
 // 冷钱包哈希域金标锁(citizenwallet ⇔ citizenchain)。
 //
-// 本测试读取本仓镜像；塔塔门禁按固定公开链提交核对签名域向量。
+// 本测试读取本仓镜像；镜像更新必须与公民链公开真源一致。
 //
 // 为什么必须有这个文件:qr_signer_test.dart 里三处签名域断言都是**自证**——
 // 测试自己用 Blake2bDigest 算一遍当 expected,再与实现比。那只证明了「实现调用了

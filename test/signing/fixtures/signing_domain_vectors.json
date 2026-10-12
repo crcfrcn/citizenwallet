@@ -1,5 +1,5 @@
 {
-  "_comment": "签名协议金标向量的公民钱包镜像。公开真源为 citizenchain/runtime/primitives/tests/fixtures/signing_domain_vectors.json；塔塔门禁按 ChainConstants.registrySourceSha 固定提交核对全部哈希域，Flutter 测试只读取本仓已验真镜像。被签消息为 blake2_256(GMB || op_tag || scale_payload)；二进制前缀域另见 binary_prefix_domain_vectors.json。镜像不得单方面改值。",
+  "_comment": "签名协议金标向量的公民钱包镜像。公开真源为 citizenchain/runtime/primitives/tests/fixtures/signing_domain_vectors.json；Flutter 测试只读取本仓镜像，更新时须与公开真源一致。被签消息为 blake2_256(GMB || op_tag || scale_payload)；二进制前缀域另见 binary_prefix_domain_vectors.json。镜像不得单方面改值。",
   "domain": "GMB",
   "vectors": [
     {

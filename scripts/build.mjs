@@ -3377,6 +3377,12 @@ export function outputDigest(path) {
  }visit(path);return hash.digest('hex');
 }
 
+// 编译任务先执行本仓现有回归；测试清单只归所属产品Build接口。
+export function testFiles(){return ['scripts/build.mjs','scripts/publish.mjs','.github/workflows/release-android.mjs','.github/workflows/release-ios.mjs'];}
+export async function testTools(){const python=contract.platforms.android.tools.find(item=>item.id==='python');
+ if(!python?.version)throw Error('本产品测试Python声明缺失');
+ return [{id:python.id,version:python.version}];}
+
 export async function execute(platform,work,request={},options={}) {
  checkFixedWork(work,{create:true});
  return withFixedWork(taskScope(work),()=>executeTask(platform,work,request,options),{run_id:request.run_id,environment:options.environment||process.env,retain:(options.environment||process.env).PRODUCT_RESOURCE_FD==='4'||(options.environment||process.env).PRODUCT_HOST_FD==='3'});
