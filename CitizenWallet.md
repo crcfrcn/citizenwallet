@@ -6,7 +6,7 @@
 
 > GitHub iOS Runner 向产品 Build 显式交付当前 Xcode 内的真实 Clang 路径，满足本仓原生签名库的现有工具校验。
 
-> Android Runner 在注入签名材料前，使用本仓 `scripts/build.mjs` 已登记的 Flutter 修订重建工具快照，以匹配产品的 AGP 9 工程。
+> Android Runner 在注入签名材料前，安装产品声明的 CMake 3.31.6，并使用本仓 `scripts/build.mjs` 已登记的 Flutter 修订重建工具快照，以匹配产品的 AGP 9 工程。
 
 ## 平台编译现场
 
