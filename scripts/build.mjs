@@ -3517,7 +3517,9 @@ async function productHost() {
   let end;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);try{const reply=JSON.parse(line),entry=pending.get(reply.id);if(!entry)throw Error();pending.delete(reply.id);clearTimeout(entry.timer);if(reply.ok!==true)entry.reject(Error('开发签名材料宿主操作失败'));else entry.resolve(reply.value);}catch{socket.destroy();}}});
  const close=()=>{const state=executions.getStore();if(state&&!state.finished)state.cancellation?.abort();for(const entry of pending.values()){clearTimeout(entry.timer);entry.reject(Error('产品宿主通道中断'));}pending.clear();};socket.on('error',close);socket.on('close',close);socket.unref();
  const host=(operation,value)=>new Promise((resolve,reject)=>{if(!['development.read','development.create','artifact'].includes(operation))return reject(Error('宿主能力未授权'));
-  const id=String(++sequence),timer=setTimeout(()=>{pending.delete(id);reject(Error('开发材料操作超时'));socket.destroy();},30000);
+  // 开发材料允许原生Touch ID完整120秒及回传；产物确认仍保持30秒边界。
+  const timeout=operation==='artifact'?30000:150000;
+  const id=String(++sequence),timer=setTimeout(()=>{pending.delete(id);reject(Error('开发材料操作超时'));socket.destroy();},timeout);
   pending.set(id,{resolve,reject,timer});socket.write(JSON.stringify({id,operation,...(value===undefined?{}:operation==='artifact'?{files:value}:{value})})+'\n');});
  executions.getStore().host=host;executions.getStore().socket=socket;return host;
 }
@@ -4031,7 +4033,8 @@ test('ADB实际子进程先等待授权再安装，超时取消多USB和原始�
   await installAndroidAPK(adb,['-d'],join(work,'signed.apk'),env,work);
   const calls=readFileSync(trace,'utf8').trim().split('\n').map(JSON.parse);assert.deepEqual(calls.at(-1),['-d','install','-r',join(work,'signed.apk')]);
   await assert.rejects(installAndroidAPK(adb,['-d'],'fixture.apk',{...env,TEST_MODE:'install-failure'},work),/退出码 1：Failure \[INSTALL_FAILED_UPDATE_INCOMPATIBLE\]/);
-  await assert.rejects(waitAndroidDevice(adb,['-d'],{...env,TEST_MODE:'never'},work,{timeout:1500,pollMs:5}),/等待USB设备授权超时.*unauthorized/);
+  // 先取得一次真实未授权状态，再等期限结束；不在最后数毫秒启动新子进程。
+  await assert.rejects(waitAndroidDevice(adb,['-d'],{...env,TEST_MODE:'never'},work,{timeout:1500,pollMs:2000}),/等待USB设备授权超时.*unauthorized/);
   assert.equal(await waitAndroidDevice(adb,['-d'],{...env,TEST_MODE:'multiple'},work,options),'multiple');
   assert.deepEqual(androidUSBSerials('List of devices attached\nFIRST unauthorized usb:1\nSECOND device usb:2\n',{allowPending:true}),['FIRST','SECOND']);
   const abort=new AbortController();abort.abort();const previous=readFileSync(trace,'utf8');
@@ -4834,9 +4837,10 @@ test('原生宿主库消费固定任务目录，外部缓存归位且输出链�
     assert.notEqual(run({},platform==='ios'?'android':'ios').status,0);assert.equal(existsSync(trace),false);
     for(const wrong of [source,join(work,'current')]){assert.notEqual(run({PRODUCT_WORK_DIR:wrong}).status,0);assert.equal(existsSync(trace),false);}
     const accepted=run();assert.equal(accepted.status,73,accepted.stderr);assert.equal(readFileSync(trace,'utf8'),join(source,'rust')+'\n'+target);unlinkSync(trace);
-    // 独立入口拥有自己的固定build现场，不继承测试任务的租约或可写状态。
-    const independent=run({PRODUCT_WORK_DIR:'',PRODUCT_WORK_LEASE:'',CARGO_TARGET_DIR:'',TMPDIR:'',NODE_TEST_CONTEXT:'',CITIZENWALLET_TEST_SESSION:''});assert.equal(independent.status,73,independent.stderr);
-    assert.equal(readFileSync(trace,'utf8'),join(source,'rust')+'\n'+join(source,'target/build/cargo'));unlinkSync(trace);
+    // native 只允许属于当前平台的子步骤；无现场的独立调用必须在Cargo前拒绝。
+    const independent=run({PRODUCT_WORK_DIR:'',PRODUCT_WORK_LEASE:'',CARGO_TARGET_DIR:'',TMPDIR:'',NODE_TEST_CONTEXT:'',CITIZENWALLET_TEST_SESSION:''});
+    assert.notEqual(independent.status,0);assert.match(independent.stderr,/原生子步骤缺少当前平台现场/u);
+    assert.equal(existsSync(trace),false);
   });
 });
 

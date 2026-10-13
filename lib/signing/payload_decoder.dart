@@ -215,6 +215,10 @@ class PayloadDecoder {
         final publish = _decodePublishAuthorization(raw);
         if (publish != null) return publish;
       }
+      if (expectedAction == 'citizenserve_cloudflare_publish') {
+        final publish = _decodePublishAuthorization(raw, citizenserveCloudflare: true);
+        if (publish != null) return publish;
+      }
       if (expectedAction == 'node_deploy') {
         final deployment = _decodeNodeDeployAuthorization(raw);
         if (deployment != null) return deployment;
@@ -3809,9 +3813,10 @@ class PayloadDecoder {
   /// 严格解码产品正式发布授权。
   ///
   /// SCALE 布局固定为：product_id、platform、version_tag 三个字符串，20 字节
-  /// source_sha，32 字节 artifact_sha256，previous_deployment_id 字符串，
+  /// source_sha，32 字节 artifact_sha256；独立公民服务端动作码17再跟随32字节最终Wrangler配置SHA-256；
+  /// 然后是previous_deployment_id字符串，
   /// expires_at:u64 LE，nonce:[u8;32]。必须消费全部字节，防止尾部夹带字段。
-  static DecodedPayload? _decodePublishAuthorization(Uint8List bytes) {
+  static DecodedPayload? _decodePublishAuthorization(Uint8List bytes, {bool citizenserveCloudflare = false}) {
     var offset = 0;
     final product = _readStrictBoundedUtf8(bytes, offset, maxLength: 32);
     if (product == null || product.$1.isEmpty) return null;
@@ -3832,13 +3837,14 @@ class PayloadDecoder {
       // 产品端与部署供应商必须分离：公民网的端是 web，Cloudflare Pages
       // 只是部署实现；公民服务端的正式端才是 cloudflare。
       'citizenweb': {'web'},
-      'citizenserve': {'cloudflare'},
       'tuyulove': {'ios', 'android'},
       'tuyuserve': {'cloudflare'},
       'tuyuweb': {'web'},
       'tuyubooking': {'macos', 'linux', 'windows'},
     };
-    if (!(productPlatforms[product.$1]?.contains(platform.$1) ?? false)) {
+    if (citizenserveCloudflare
+        ? product.$1 != 'citizenserve' || platform.$1 != 'cloudflare'
+        : !(productPlatforms[product.$1]?.contains(platform.$1) ?? false)) {
       return null;
     }
 
@@ -3863,11 +3869,21 @@ class PayloadDecoder {
       'linux': 'Linux',
       'windows': 'Windows',
     };
-    if (offset + 20 + 32 > bytes.length) return null;
+    final hasCloudflareConfiguration = citizenserveCloudflare;
+    if (offset + 20 + 32 + (hasCloudflareConfiguration ? 32 : 0) > bytes.length) {
+      return null;
+    }
     final sourceSha = _bytesToLowerHex(bytes.sublist(offset, offset + 20));
     offset += 20;
     final artifactSha = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
     offset += 32;
+    String? configSha;
+    if (hasCloudflareConfiguration) {
+      final configuration = bytes.sublist(offset, offset + 32);
+      if (configuration.every((byte) => byte == 0)) return null;
+      configSha = _bytesToLowerHex(configuration);
+      offset += 32;
+    }
     final previous = _readStrictBoundedUtf8(bytes, offset, maxLength: 128);
     if (previous == null || previous.$1.isEmpty) return null;
     offset = previous.$2;
@@ -3885,12 +3901,13 @@ class PayloadDecoder {
       'version_tag': version.$1,
       'source_sha': sourceSha,
       'artifact_sha256': artifactSha,
+      if (configSha != null) 'config_sha256': configSha,
       'previous_deployment_id': previous.$1,
       'expires_at': expiresAt.toString(),
       'nonce': _bytesToLowerHex(nonce),
     };
     return DecodedPayload(
-      action: 'publish',
+      action: citizenserveCloudflare ? 'citizenserve_cloudflare_publish' : 'publish',
       summary:
           '授权发布 ${productNamesZh[product.$1]} ${version.$1} 到 ${platformNames[platform.$1]}',
       fields: fields,

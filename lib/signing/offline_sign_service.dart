@@ -284,7 +284,9 @@ class OfflineSignService {
         );
       }
     }
-    if (body.action == QrActions.publish || body.action == QrActions.nodeDeploy) {
+    if (body.action == QrActions.publish ||
+        body.action == QrActions.citizenserveCloudflarePublish ||
+        body.action == QrActions.nodeDeploy) {
       final payloadExpiresAt = int.tryParse(decoded.fields['expires_at'] ?? '');
       if (payloadExpiresAt != request.expiresAt) {
         return OfflineSignVerification(

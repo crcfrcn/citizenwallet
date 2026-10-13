@@ -373,9 +373,12 @@ void main() {
         signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
       final publish = SignRequestBody.fromHex(action:QrActions.publish,
         signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
+      final citizenserve = SignRequestBody.fromHex(action:QrActions.citizenserveCloudflarePublish,
+        signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
       expect(_hexBytes(QrSigner.signingBytesFor(node)),
         'eb42a7b0dbe8195a2e6269b2afb9ec32ff5b07abf90f921ef754c62f987acdce');
       expect(QrSigner.signingBytesFor(node).toList(),isNot(QrSigner.signingBytesFor(publish).toList()));
+      expect(QrSigner.signingBytesFor(citizenserve).toList(),QrSigner.signingBytesFor(publish).toList());
     });
     test('公民签名确认使用 GMB OP_SIGN_CITIZEN_IDENTITY 哈希域', () {
       final body = SignRequestBody.fromHex(

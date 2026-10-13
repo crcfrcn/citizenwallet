@@ -128,8 +128,8 @@ List<int> _switchDefaultAccountPayload({
   ...List<int>.filled(16, 0x66),
 ];
 
-/// 中文注释：全部产品端复用同一份 SCALE 发布载荷，参数化只替换闭集身份，
-/// 字段顺序、签名域和防重放字段始终与生产 QR_V1 合同一致。
+/// 中文注释：公民服务端独立动作在产物摘要后追加最终配置摘要；
+/// 其它产品仍使用原 SCALE 发布布局和相同发布签名域。
 List<int> _publishAuthorizationPayload({
   required String product,
   required String platform,
@@ -140,6 +140,7 @@ List<int> _publishAuthorizationPayload({
   ..._scaleString('1.2.3'),
   ...List<int>.generate(20, (index) => index + 1),
   ...List<int>.generate(32, (index) => index + 21),
+  if (product == 'citizenserve') ...List<int>.filled(32, 0x44),
   ..._scaleString('deployment-stable-1'),
   ..._u64Le(expiresAt),
   ...List<int>.filled(32, 0x66),
@@ -285,13 +286,14 @@ void main() {
         requestId: 'offline-publish-authorization',
         signerPublicKey: signingAccount.accountId,
         payloadHex: '0x${_toHex(payload)}',
-        action: QrActions.publish,
+        action: QrActions.citizenserveCloudflarePublish,
         expiresAt: expiresAt,
       );
 
       final verification = service.verifyPayload(request);
       expect(verification.status, SignDecisionStatus.normal);
-      expect(verification.actionLabel, '生产发布授权');
+      expect(verification.actionLabel, '公民服务端 Cloudflare 发布授权');
+      expect(verification.decoded?.fields['config_sha256'], '0x${'44' * 32}');
       expect(verification.decoded?.fields['product_id'], 'citizenserve');
       expect(verification.decoded?.fields['platform'], 'cloudflare');
       expect(
@@ -330,7 +332,7 @@ void main() {
         requestId: 'offline-publish-expiry-mismatch',
         signerPublicKey: signingAccount.accountId,
         payloadHex: '0x${_toHex(payload)}',
-        action: QrActions.publish,
+        action: QrActions.citizenserveCloudflarePublish,
         expiresAt: expiresAt + 1,
       );
       expect(service.verifyPayload(mismatch).status, SignDecisionStatus.reject);

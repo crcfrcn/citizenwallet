@@ -1,4 +1,4 @@
-// 本文件由 citizenchain/crates/qr-protocol 生成，禁止手改。
+// 本文件由 citizenchain/crates/protocol 生成，禁止手改。
 // 扫码签名动作、中文动作名、字段中文名和固定展示值的唯一真源在 registry/*.yaml。
 
 class GeneratedQrActionRegistry {
@@ -18,6 +18,7 @@ class GeneratedQrActionRegistry {
     13: 'mls_device_bind',
     15: 'publish',
     16: 'node_deploy',
+    17: 'citizenserve_cloudflare_publish',
     0x0400: 'transfer',
     0x0700: 'propose_create_personal',
     0x0701: 'propose_close_personal',
@@ -112,6 +113,7 @@ class GeneratedQrActionRegistry {
     'mls_device_bind': 13,
     'publish': 15,
     'node_deploy': 16,
+    'citizenserve_cloudflare_publish': 17,
     'transfer': 0x0400,
     'propose_create_personal': 0x0700,
     'propose_close_personal': 0x0701,
@@ -206,6 +208,7 @@ class GeneratedQrActionRegistry {
     'mls_device_bind': 'MLS设备登记',
     'publish': '生产发布授权',
     'node_deploy': '节点部署批准',
+    'citizenserve_cloudflare_publish': '公民服务端 Cloudflare 发布授权',
     'transfer': '转账',
     'propose_create_personal': '发起创建个人多签',
     'propose_close_personal': '发起关闭个人多签',
@@ -331,6 +334,7 @@ class GeneratedQrActionRegistry {
     'citizen_sex': '公民性别',
     'citizen_status': '身份状态',
     'city_code': '市级代码',
+    'config_sha256': '最终部署配置 SHA-256',
     'content_hash': '内容哈希',
     'create_threshold': '创建阈值',
     'current_account_id': '当前绑定账户',
@@ -403,8 +407,8 @@ class GeneratedQrActionRegistry {
     'spec_version': 'Runtime 规格版本',
     'storage_receipt_id': '存储回执编号',
     'system': '系统',
-    'task_id': '控制台任务编号',
     'target': '操作目标',
+    'task_id': '控制台任务编号',
     'ticket_claim': '投票票据类型',
     'tier': '法律层级',
     'tier_id': '档位编号',

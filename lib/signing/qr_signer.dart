@@ -201,7 +201,8 @@ class QrSigner {
     if (body.action == QrActions.squareAccountAction) {
       return _gmbSigningMessage(_opSignSquareAction, payload);
     }
-    if (body.action == QrActions.publish) {
+    if (body.action == QrActions.publish ||
+        body.action == QrActions.citizenserveCloudflarePublish) {
       return _gmbSigningMessage(_opSignPublish, payload);
     }
     if (body.action == QrActions.nodeDeploy) {

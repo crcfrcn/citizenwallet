@@ -249,6 +249,8 @@ void main() {
         String product,
         String platform, {
         String? previous,
+        bool omitCitizenserveConfig = false,
+        int configByte = 0x44,
       }) {
         const versionTag = '1.2.3';
         return <int>[
@@ -257,6 +259,8 @@ void main() {
           ...compactVec(versionTag),
           ...List<int>.filled(20, 0x11),
           ...List<int>.filled(32, 0x22),
+          if (product == 'citizenserve' && !omitCitizenserveConfig)
+            ...List<int>.filled(32, configByte),
           ...compactVec(previous ?? 'deployment-previous'),
           ...u64Le(expiresAt),
           ...List<int>.filled(32, 0x33),
@@ -295,15 +299,22 @@ void main() {
       for (final productEntry in validProductPlatforms.entries) {
         for (final platform in productEntry.value) {
           final payload = publishPayload(productEntry.key, platform);
+          final action = productEntry.key == 'citizenserve'
+              ? 'citizenserve_cloudflare_publish' : 'publish';
           final decoded = PayloadDecoder.decode(
             hexOf(payload),
-            expectedAction: 'publish',
+            expectedAction: action,
           );
-          expect(decoded?.action, 'publish');
+          expect(decoded?.action, action);
           expect(decoded?.fields['product_id'], productEntry.key);
           expect(decoded?.fields['platform'], platform);
           expect(decoded?.fields['source_sha'], '0x${'11' * 20}');
           expect(decoded?.fields['artifact_sha256'], '0x${'22' * 32}');
+          if (productEntry.key == 'citizenserve') {
+            expect(decoded?.fields['config_sha256'], '0x${'44' * 32}');
+          } else {
+            expect(decoded?.fields.containsKey('config_sha256'), isFalse);
+          }
           expect(decoded?.fields['expires_at'], '$expiresAt');
           expect(
             decoded?.summary,
@@ -338,11 +349,33 @@ void main() {
       final payload = publishPayload('citizenweb', 'web');
       expect(
         PayloadDecoder.decode(
-          hexOf(publishPayload('citizenserve', 'cloudflare', previous: '')),
-          expectedAction: 'publish',
+          hexOf(publishPayload('citizenserve', 'cloudflare', omitCitizenserveConfig: true)),
+          expectedAction: 'citizenserve_cloudflare_publish',
         ),
         isNull,
       );
+      expect(
+        PayloadDecoder.decode(
+          hexOf(publishPayload('citizenserve', 'cloudflare', configByte: 0)),
+          expectedAction: 'citizenserve_cloudflare_publish',
+        ),
+        isNull,
+      );
+      expect(
+        PayloadDecoder.decode(
+          hexOf(publishPayload('citizenserve', 'cloudflare', previous: '')),
+          expectedAction: 'citizenserve_cloudflare_publish',
+        ),
+        isNull,
+      );
+      expect(PayloadDecoder.decode(
+        hexOf(publishPayload('citizenserve', 'cloudflare')),
+        expectedAction: 'publish',
+      ), isNull);
+      expect(PayloadDecoder.decode(
+        hexOf(publishPayload('citizenweb', 'web')),
+        expectedAction: 'citizenserve_cloudflare_publish',
+      ), isNull);
       expect(
         PayloadDecoder.decode(
           hexOf(publishPayload('citizenweb', 'web', previous: '')),
