@@ -204,6 +204,15 @@ class QrSigner {
     if (body.action == QrActions.publish) {
       return _gmbSigningMessage(_opSignPublish, payload);
     }
+    if (body.action == QrActions.nodeDeploy) {
+      // 节点部署只在链下使用共享 QR 协议域，不能与发布或链交易签名互认。
+      final prefix = utf8.encode('GMB\u0000TATA_NODE_DEPLOY_V1\u0000');
+      final digest = Blake2bDigest(digestSize: 32)
+        ..update(Uint8List.fromList([...prefix, ...payload]), 0, prefix.length + payload.length);
+      final result = Uint8List(32);
+      digest.doFinal(result, 0);
+      return result;
+    }
     if (QrActions.isChainAction(body.action) && payload.length > 256) {
       final digest = Blake2bDigest(digestSize: 32)
         ..update(payload, 0, payload.length);

@@ -215,6 +215,30 @@ void main() {
   String ss58FromBytes(List<int> bytes) => Keyring().encodeAddress(bytes, 2027);
 
   group('PayloadDecoder', () {
+    test('节点部署批准逐项审阅目标并拒绝异产品、类别和尾字节', () {
+      final payload = <int>[
+        1, ...'citizenchain'.codeUnits, 1,
+        6, ...'prczss'.codeUnits,
+        10, ...'192.0.2.10'.codeUnits,
+        15, ...'citizenchain-v1'.codeUnits,
+        ...List<int>.filled(20, 0x11), ...List<int>.filled(32, 0x22),
+        ...'123456789'.codeUnits, ...u64Le(1800000000),
+        ...List<int>.filled(32, 0x33),
+      ];
+      final decoded = PayloadDecoder.decode(hexOf(payload), expectedAction:'node_deploy');
+      expect(decoded?.action, 'node_deploy');
+      expect(decoded?.fields['deployment_kind'], '权威节点');
+      expect(decoded?.fields['node_id'], 'prczss');
+      expect(decoded?.fields['server_ip'], '192.0.2.10');
+      expect(decoded?.fields['task_id'], '123456789');
+      expect(decoded?.summary, '授权部署 权威节点 prczss 到 192.0.2.10');
+      expect(PayloadDecoder.decode(hexOf(payload)), isNull);
+      expect(PayloadDecoder.decode(hexOf([...payload,0]),expectedAction:'node_deploy'),isNull);
+      final wrongProduct=List<int>.from(payload)..[1]='x'.codeUnitAt(0);
+      expect(PayloadDecoder.decode(hexOf(wrongProduct),expectedAction:'node_deploy'),isNull);
+      final wrongKind=List<int>.from(payload)..[1+'citizenchain'.length]=3;
+      expect(PayloadDecoder.decode(hexOf(wrongKind),expectedAction:'node_deploy'),isNull);
+    });
     // 发布授权必须按链端定义完整消费所有 SCALE 字段；同时覆盖 action 绑定与尾字节拒绝，
     // 防止钱包把其它动作或带有未解释附加数据的载荷展示成可签名发布请求。
     test('生产发布授权严格绑定产品端并拒绝错误标识与尾字节', () {

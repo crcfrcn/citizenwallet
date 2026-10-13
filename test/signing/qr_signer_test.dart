@@ -364,6 +364,19 @@ void main() {
   });
 
   group('QrSigner.signingBytesFor', () {
+    test('节点部署使用独立链下签名域，不与生产发布互认', () {
+      final payload = <int>[1,...'citizenchain'.codeUnits,1,6,...'prczss'.codeUnits,
+        10,...'192.0.2.10'.codeUnits,15,...'citizenchain-v1'.codeUnits,
+        ...List<int>.filled(20,0x11),...List<int>.filled(32,0x22),
+        ...'123456789'.codeUnits,..._u64Le(1800000000),...List<int>.filled(32,0x33)];
+      final node = SignRequestBody.fromHex(action:QrActions.nodeDeploy,
+        signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
+      final publish = SignRequestBody.fromHex(action:QrActions.publish,
+        signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
+      expect(_hexBytes(QrSigner.signingBytesFor(node)),
+        'eb42a7b0dbe8195a2e6269b2afb9ec32ff5b07abf90f921ef754c62f987acdce');
+      expect(QrSigner.signingBytesFor(node).toList(),isNot(QrSigner.signingBytesFor(publish).toList()));
+    });
     test('公民签名确认使用 GMB OP_SIGN_CITIZEN_IDENTITY 哈希域', () {
       final body = SignRequestBody.fromHex(
         action: QrActions.citizenIdentity,

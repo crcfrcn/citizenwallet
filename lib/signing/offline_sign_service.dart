@@ -284,14 +284,14 @@ class OfflineSignService {
         );
       }
     }
-    if (body.action == QrActions.publish) {
+    if (body.action == QrActions.publish || body.action == QrActions.nodeDeploy) {
       final payloadExpiresAt = int.tryParse(decoded.fields['expires_at'] ?? '');
       if (payloadExpiresAt != request.expiresAt) {
         return OfflineSignVerification(
           decoded: decoded,
           status: SignDecisionStatus.reject,
           actionLabel: qrActionLabel,
-          rejectReason: '发布授权过期时间与签名请求不一致，已拒绝签名',
+          rejectReason: '生产批准过期时间与签名请求不一致，已拒绝签名',
         );
       }
     }

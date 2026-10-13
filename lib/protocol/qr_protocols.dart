@@ -55,6 +55,7 @@ class QrActions {
   static int get switchDefaultAccount => _code('switch_default_account');
   static int get mlsDeviceBind => _code('mls_device_bind');
   static int get publish => _code('publish');
+  static int get nodeDeploy => _code('node_deploy');
   static int get onchinaAdmin => _code('onchina_admin_action');
   static int get activateAdmin => _code('activate_admin_account');
   static int get decryptAdmin => _code('decrypt_admin');

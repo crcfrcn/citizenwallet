@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:polkadart_keyring/polkadart_keyring.dart' show Keyring;
@@ -213,6 +214,10 @@ class PayloadDecoder {
       if (expectedAction == 'publish') {
         final publish = _decodePublishAuthorization(raw);
         if (publish != null) return publish;
+      }
+      if (expectedAction == 'node_deploy') {
+        final deployment = _decodeNodeDeployAuthorization(raw);
+        if (deployment != null) return deployment;
       }
       if (raw.length == _activateAdminPayloadLen &&
           _hasPrefix(raw, _activateAdminPrefix)) {
@@ -3891,6 +3896,63 @@ class PayloadDecoder {
       fields: fields,
       reviewFields: fields,
     );
+  }
+
+  /// 独立 QR 协议的节点部署批准；消费全部字节并固定产品、类别、目标与任务。
+  static DecodedPayload? _decodeNodeDeployAuthorization(Uint8List bytes) {
+    const product = 'citizenchain';
+    final productBytes = utf8.encode(product);
+    if (bytes.length < 1 + productBytes.length + 1 || bytes[0] != 1) return null;
+    for (var index = 0; index < productBytes.length; index++) {
+      if (bytes[index + 1] != productBytes[index]) return null;
+    }
+    var offset = 1 + productBytes.length;
+    final kind = bytes[offset++];
+    if (kind != 1 && kind != 2) return null;
+
+    String? readText(int maximum) {
+      if (offset >= bytes.length) return null;
+      final length = bytes[offset++];
+      if (length < 1 || length > maximum || offset + length > bytes.length) return null;
+      final part = bytes.sublist(offset, offset + length);
+      offset += length;
+      try {
+        return utf8.decode(part, allowMalformed: false);
+      } on FormatException {
+        return null;
+      }
+    }
+
+    final nodeId = readText(64);
+    final ip = readText(45);
+    final version = readText(64);
+    if (nodeId == null || ip == null || version == null ||
+        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(nodeId) ||
+        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(version) ||
+        InternetAddress.tryParse(ip)?.address != ip ||
+        offset + 20 + 32 + 9 + 8 + 32 != bytes.length) return null;
+    final sourceBytes = bytes.sublist(offset, offset + 20);
+    final source = _bytesToLowerHex(sourceBytes); offset += 20;
+    final artifactBytes = bytes.sublist(offset, offset + 32);
+    final artifact = _bytesToLowerHex(artifactBytes); offset += 32;
+    final taskBytes = bytes.sublist(offset, offset + 9);
+    final taskId = String.fromCharCodes(taskBytes); offset += 9;
+    final expiresAt = _readU64Le(bytes, offset); offset += 8;
+    final nonceBytes = bytes.sublist(offset, offset + 32);
+    final nonce = _bytesToLowerHex(nonceBytes);
+    if (sourceBytes.every((value) => value == 0) ||
+        artifactBytes.every((value) => value == 0) ||
+        nonceBytes.every((value) => value == 0) ||
+        !RegExp(r'^[1-9][0-9]{8}$').hasMatch(taskId) || expiresAt <= 0) return null;
+    final kindName = kind == 1 ? '权威节点' : '权益节点';
+    final fields = <String,String>{
+      'product_id': product, 'deployment_kind': kindName, 'node_id': nodeId,
+      'server_ip': ip, 'version_tag': version, 'source_sha': source,
+      'artifact_sha256': artifact, 'task_id': taskId,
+      'expires_at': expiresAt.toString(), 'nonce': nonce,
+    };
+    return DecodedPayload(action:'node_deploy',summary:'授权部署 $kindName $nodeId 到 $ip',fields:fields,
+      reviewFields:{...fields,'product_id':'公民链'});
   }
 
   /// 32 字节账户/公钥 bytes → CitizenChain SS58 地址。

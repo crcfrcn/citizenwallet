@@ -145,6 +145,17 @@ List<int> _publishAuthorizationPayload({
   ...List<int>.filled(32, 0x66),
 ];
 
+// 与公民链独立 QR 库的固定节点批准布局逐字节对应，不借用发布载荷。
+List<int> _nodeDeployPayload(int expiresAt) => <int>[
+  1, ...'citizenchain'.codeUnits, 1,
+  6, ...'prczss'.codeUnits,
+  10, ...'192.0.2.10'.codeUnits,
+  15, ...'citizenchain-v1'.codeUnits,
+  ...List<int>.filled(20, 0x11), ...List<int>.filled(32, 0x22),
+  ...'123456789'.codeUnits, ..._u64Le(expiresAt),
+  ...List<int>.filled(32, 0x33),
+];
+
 void main() {
   group('OfflineSignService', () {
     late _FakeWalletManager walletManager;
@@ -324,6 +335,28 @@ void main() {
       );
       expect(service.verifyPayload(mismatch).status, SignDecisionStatus.reject);
       expect(service.verifyPayload(mismatch).rejectReason, contains('过期时间'));
+    });
+
+    test('节点部署冷签展示准确目标、期限一致且一次请求只能签一次', () async {
+      final expiresAt=DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
+      final payload=_nodeDeployPayload(expiresAt);
+      final request=_buildTestRequest(requestId:'offline-node-deploy-authorization',
+        signerPublicKey:signingAccount.accountId,payloadHex:'0x${_toHex(payload)}',
+        action:QrActions.nodeDeploy,expiresAt:expiresAt);
+      final verified=service.verifyPayload(request);
+      expect(verified.status,SignDecisionStatus.normal);
+      expect(verified.actionLabel,'节点部署批准');
+      expect(verified.decoded?.fields['node_id'],'prczss');
+      expect(verified.decoded?.fields['server_ip'],'192.0.2.10');
+      final response=await service.signParsedRequest(accountId:signingAccount.accountId,request:request);
+      expect(_verifySr25519(signerPublicKeyHex:response.body.signerPublicKeyHex,
+        message:QrSigner.signingBytesFor(request.body),signatureHex:response.body.signatureHex),isTrue);
+      await expectLater(service.signParsedRequest(accountId:signingAccount.accountId,request:request),
+        throwsA(isA<OfflineSignException>().having((error)=>error.code,'code',OfflineSignErrorCode.replayed)));
+      final mismatch=_buildTestRequest(requestId:'offline-node-deploy-expiry',
+        signerPublicKey:signingAccount.accountId,payloadHex:'0x${_toHex(payload)}',
+        action:QrActions.nodeDeploy,expiresAt:expiresAt+1);
+      expect(service.verifyPayload(mismatch).status,SignDecisionStatus.reject);
     });
 
     test('MLS设备登记复用 0x1C，且只接受载荷账户和签发时间一致的请求', () async {
