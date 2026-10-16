@@ -27,9 +27,9 @@ Flutter iOS 的Xcode复制步骤经本仓既有受控 `rsync` 入口调用 `scri
 
 公民钱包根为0级，受控源码目录最大为3级；每个源码目录至少有两个直接文件或子目录。工具约定的`.github`、`lib`、`ios`保留，其他目录以单个小写英文单词命名。`.git`内部状态及整个`target`运行现场不属于源码目录合同；编译工具的必需内部目录只在当前任务现场装配。目录整理不修改功能、页面布局、文案、数据库字段、应用标识、密钥格式或签名算法。
 
-根保留技术文档、README、LICENSE、pubspec及依赖锁；一级源码目录为`.github`、`android`、`icons`、`ios`、`lib`、`rust`、`scripts`、`test`。Dart按wallet、security、storage、protocol、scanner、signing、pages、helpers归档；protocol仅下设bodies和generated，pages仅下设widgets。登录签名处理及链常量归signing，PIN页面归pages。测试按对应职责归档，签名固定向量归test/signing/fixtures。Rust入口为rust/source/lib.rs，由Cargo.toml的lib.path明确指定。
+根保留技术文档、README、LICENSE、pubspec及依赖锁；一级源码目录为`.github`、`android`、`icons`、`ios`、`lib`、`signing`、`scripts`、`test`。Dart按wallet、security、storage、protocol、scanner、signing、pages、helpers归档；protocol仅下设bodies和generated，pages仅下设widgets。登录签名处理及链常量归signing，PIN页面归pages。测试按对应职责归档，签名固定向量归test/signing/fixtures。Rust签名入口为signing/lib.rs，由Cargo.toml的lib.path明确指定。
 
-Android源码在android/app/source，资源原件在android/resources；原资源限定目录名成为文件名前缀，装配到当前任务工程时恢复android/app/res下的原限定目录和文件名。iOS原件分别位于config、native、project、resources、source、tests；Xcode工程、workspace、本地化资源、Flutter配置和原生pod目录仅在当前target工程内恢复。同名workspace文件及图标Contents.json通过文件名区分，内容保持唯一原件。图标仍由icons原件生成，无新增设计或图像副本。源码内不得恢复深层原生工程包。
+Android源码统一位于android/source，Gradle应用配置与单测位于android/app，资源原件位于android/resources；所有源码目录都直接位于android根下，不再增加第二层源码目录。唯一Manifest原件由构建脚本装配到当前任务工程android/app/src/main/AndroidManifest.xml，满足Flutter检查器与Gradle的标准入口，不在源码仓生成该路径。原资源限定目录名成为文件名前缀，装配到当前任务工程时恢复android/app/res下的原限定目录和文件名。iOS原件分别位于config、project、resources、source、tests；Podspec 配置归 project；Xcode工程、workspace、本地化资源及Flutter配置仅在当前target工程内恢复。同名workspace文件及图标Contents.json通过文件名区分，内容保持唯一原件。图标仍由icons原件生成，无新增设计或图像副本。源码内不得恢复深层原生工程包。
 
 `scripts/` 只保留 `build.mjs` 与 `publish.mjs`。Build 持有本仓编译声明、资源配方与固定工作根，不登记或调用自动化；Publish 独立核验已完成的正式 GitHub Release 资产，实际商店渠道另行确定。iOS、Android 各自的 GitHub 自动化由 `.github/workflows/` 的同名 YAML/MJS 完整创建并回读 Release；自动化生成物只归本次 Runner 临时工程，源码检出根不创建 `build/`。`.github/tatalulu.yml`只登记本仓身份，保存与推送由控制台直接完成。二维码生成文件唯一真源仍在链端，链端一致性检查路径为 `lib/protocol/generated/qr_bodies.g.dart`。
 
@@ -77,11 +77,11 @@ CitizenWallet 涉及聊天时只作为依赖使用方；本条不代表尚未接
 回归子进程显式继承本轮测试会话，嵌入式钱包Shell只接受规范的当前会话测试根或正式平台根；Swift验真测试使用同一已验真Xcode内的`swiftc`编译入口。子进程缺会话、错平台或越界工作根仍在产品入口拒绝。
 钱包子命令在领取固定现场前先验证目标平台；测试Swift编译同时继承该Xcode的macOS SDK根。独立Build成功后删除本平台工作目录，回归按目录消失验收，测试副本的独立入口不继承外层测试会话。
 
-当前依赖边界：钱包自己的源码和锁文件决定依赖、版本和来源。本机iOS、Android适配分别在各自完整流程中交付既有验真工具，并按钱包pubspec.lock与rust/Cargo.lock离线准备本任务Pub和Cargo目录；经控制台执行时，已有原件由控制台供给，缺件由控制台按本产品声明取得、验真保存后供给；独立执行由产品自行处理。明确离线缺件、未知来源或回执越界据实失败。两个平台独立实现，不调用对方流程或公民SDK实现。Android继续交付已登记Gradle并由钱包入口对照自身声明回验；iOS交付Flutter随包Dart、Python、Rust/Cargo、Git、CocoaPods和同一登记Xcode工具，现有pod入口绑定受控Ruby和Gem。工具版本不变，独立环境仍由调用方按钱包声明准备。
+当前依赖边界：钱包自己的源码和锁文件决定依赖、版本和来源。本机iOS、Android适配分别在各自完整流程中交付既有验真工具，并按钱包pubspec.lock与signing/Cargo.lock离线准备本任务Pub和Cargo目录；经控制台执行时，已有原件由控制台供给，缺件由控制台按本产品声明取得、验真保存后供给；独立执行由产品自行处理。明确离线缺件、未知来源或回执越界据实失败。两个平台独立实现，不调用对方流程或公民SDK实现。Android继续交付已登记Gradle并由钱包入口对照自身声明回验；iOS交付Flutter随包Dart、Python、Rust/Cargo、Git、CocoaPods和同一登记Xcode工具，现有pod入口绑定受控Ruby和Gem。工具版本不变，独立环境仍由调用方按钱包声明准备。
 
-iOS 原生签名库由钱包脚本编译到本轮外部目录，源码 `ios/native/citizenwallet_signer.podspec`（装配后为任务工程的 `ios/signer/citizenwallet_signer.podspec`） 通过既有 `-force_load` 绝对路径及八个 `-Wl,-u` 符号将其链接到 App；不设置 CocoaPods 只接受相对路径的 `vendored_libraries`。此调整仅修复 Pod 安装阶段的路径校验，不改变签名库实现或 FFI 合同。
+iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原件位于 `ios/project/citizenwallet_signer.podspec`，装配到任务工程 `ios/signer/`。该本地 Pod 不包含独立源文件；`preserve_paths` 仅保留真实Podspec以满足CocoaPods文件模式校验，不添加占位源码。静态库仍通过既有 `-force_load` 绝对路径及八个 `-Wl,-u` 符号链接到 App；不设置只接受相对路径的 `vendored_libraries`。此调整不改变签名库实现或 FFI 合同。
 
-本机 Build 边界：Worker创建独立任务并清空本产品固定build现场；控制台按钱包公开资源需求交付验真工具和锁定依赖，再调用钱包完整入口。测试、编译、密码学实现和产品失败条件由CitizenWallet独立维护。钱包入口在 Pub 依赖就绪后，先用已登记 Node 运行钱包自身构建合同测试，再将宿主 FFI 动态库编译到本轮源码外 Cargo 目录，运行 `flutter test --no-pub` 全套钱包单元与组件测试；测试失败即停止该端 Build，不进入平台编译、签名或安装。Android产品入口把本轮Flutter配置选出的Android SDK及调用方JDK传给同一次Gradle调用，固定携带 `--no-daemon`，仅整体离线模式再追加 `--offline`；本机未提供JDK时使用Android Studio随包JBR，不在Worker增加前置检查。iOS/Android 编译成功后进入设备安装收尾，日志只写对应缓存目录。
+本机 Build 边界：Worker创建独立任务并清空本产品固定build现场；控制台按钱包公开资源需求交付验真工具和锁定依赖，再调用钱包完整入口。测试、编译、密码学实现和产品失败条件由CitizenWallet独立维护。钱包入口在 Pub 依赖就绪后，先用已登记 Node 运行钱包自身构建合同测试，再将宿主 FFI 动态库编译到本轮源码外 Cargo 目录，运行 `flutter test --no-pub` 全套钱包单元与组件测试；测试失败即停止该端 Build，不进入平台编译、签名或安装。Android Gradle/Maven资源闭包只在Android资源准备中解析；iOS使用Pod锁与Xcode流程，不启动Android Gradle解析。Android产品入口把本轮Flutter配置选出的Android SDK及调用方JDK传给同一次Gradle调用，固定携带 `--no-daemon`，仅整体离线模式再追加 `--offline`；本机未提供JDK时使用Android Studio随包JBR，不在Worker增加前置检查。iOS/Android 编译成功后进入设备安装收尾，日志只写对应缓存目录。
 
 公民钱包 iOS 本机 Build 在已签名 Release 编译后、交付原生安装收尾前，使用钱包工程的 `RunnerUITests` 在唯一可用 iOS 真机运行 XCUITest。现有 Runner 方案只引用 `RunnerUITests/RunnerUITests.xctestplan`；计划保留原有 `RunnerTests` 和新增 UI 目标，并将自动屏幕采集设为关闭，避免测试采集触发钱包既有录屏保护。创建页测试只切换 12/18/24 词，以当前熵说明核验选择状态、比较密码框与词数选项宽度；导入页只输入非词表占位词，按 Flutter 可访问标签核验非法词数提示与第 25 词被拒绝。选择页左缘返回和备份页返回拦截由钱包组件测试覆盖；真机合成左缘拖动未能稳定复现原生手势，不能以该动作的 XCUITest 断言证明真实手势行为。测试不创建、导入或导出真实钱包，不输入真实密码或助记词；设备未解锁、设备不唯一、敏感页录屏保护触发或测试失败时 Build 失败，绝不绕过保护。Xcode 入口按控制台唯一登记版本校验后传给钱包脚本，测试编译物及结果仅写本轮钱包 iOS Build 工作目录，失败时禁止 Xcode 自动采集设备诊断包。
 真机 UI 测试从首页进入创建/导入页时，无钱包直接点击首页按钮；已有钱包先点“添加钱包”，再按标题前缀定位底部菜单的 `StaticText`。真机可访问树显示该 Flutter InkWell 把标题与副标题合并到同一个 `StaticText` 标签。
@@ -270,7 +270,7 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 ## Release 全量构建（第 7.4 步）
 
-正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。版本与未签名产物仍由本仓自动化生成；签名、正式产物校验和发布由本仓本机接口消费同一成功Run后执行。
+正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。Android Gradle 构建在 `android/` 执行后，必须切回产品工程根目录运行 Flutter appbundle，使 Flutter 从任务工程读取标准 Manifest 与 v2 embedding 声明。版本与未签名产物仍由本仓自动化生成；签名、正式产物校验和发布由本仓本机接口消费同一成功Run后执行。两端创建 Release 草稿前，工作流调用本仓 `ci-create-release-tag` 显式建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；引用不匹配或创建失败时，不创建 Release。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
 
@@ -342,7 +342,7 @@ CitizenWallet Android 的实际 KGP 已与受控 Flutter 修订统一为 2.2.20�
 
 图标原件唯一存放于根目录 `icons/`：界面圆角图、启动页图、iOS 方形应用图、Android 旧版启动器图与自适应前景分别保留原有外观；扫码 SVG 也在该目录。Flutter 仅声明实际使用的界面 PNG 与 SVG，不把平台母图打进 Dart 资源包。`scripts/build.mjs icons` 使用 Node 标准库从原件生成尺寸，Build prepare 与 Shell 平台准备/构建共用该入口，只允许写本轮target/build工程。iOS 图标槽位原件归 `ios/resources/AppIcon.json` 与 `ios/resources/CitizenLaunchLogo.json`，装配为任务工程 `ios/IconAssets/` 的槽位配置；图片生成到任务工程 `ios/build/Assets.xcassets/`；Android 图片生成到任务工程 `android/build/generated-icons/`，由 Gradle 与任务工程 `android/app/res/` 的 XML 合并。圆形启动器名称通过 XML 别名复用普通图标；iOS 相同像素尺寸共用一个文件。源码不保留平台尺寸副本，也不再保留根 resources 目录。
 
-Android 主源码及 Manifest 原件位于 `android/app/source/`，装配为任务工程 `android/app/src/main/`；单测 `android/app/HardwareSecretvaultPluginTest.kt` 单独登记测试源集，禁止进入正式包。Android XML 原件位于 `android/resources/`，装配时恢复任务工程 `android/app/res/` 的标准限定目录。iOS Swift、Plist 与头文件位于 `ios/source/`，Storyboard、字符串与图标配置位于 `ios/resources/`，单测位于 `ios/tests/`，Runner scheme 位于 `ios/project/`；构建只在任务工程恢复 Runner、测试包及资源目录。
+Android 主源码及 Manifest 原件位于 `android/source/`，任务工程将唯一 Manifest 原件物化为 `android/app/src/main/AndroidManifest.xml`；Android 单测 `android/app/HardwareSecretvaultPluginTest.kt` 单独登记测试源集，禁止进入正式包。Android XML 原件位于 `android/resources/`，装配时恢复任务工程 `android/app/res/` 的标准限定目录。iOS Swift、Plist 与头文件位于 `ios/source/`，Storyboard、字符串与图标配置位于 `ios/resources/`，单测位于 `ios/tests/`，Runner scheme 位于 `ios/project/`；构建只在任务工程恢复 Runner、测试包及资源目录。
 
 `node scripts/build.mjs wallet prepare-ios|prepare-android` 仅装配本产品源码外工程，拒绝重复目标和链接回写；本机 Build 消费调用方工程，远端 Pub/构建使用已装配工程。远端 `prepare-android` 从 `FLUTTER_ROOT` 指定 Flutter 的 `bin/cache/artifacts/gradle_wrapper/` 逐字节复制三个 Wrapper 工具文件，工具缺失、链接或重复来源直接失败；本机 Android 使用已登记 Gradle，产品不保存 Wrapper 副本。iOS 注册表与 SwiftPM 生成状态不进入源码视图，Android 配置唯一源为 `android/gradle-wrapper.properties`。扫码测试归入 `test/scanner/`。
 
@@ -436,7 +436,7 @@ Pub/npm/Cargo按原始锁准备；Git按固定HTTPS提交检出，Git Cargo目�
 
 `PRODUCT_WORK_DIR`、`PRODUCT_BASH_BIN`、`PRODUCT_RSYNC_BIN`及`PRODUCT_SOURCE_DIR`是公开工作/工具/工程入口；Flutter修订不读取调用方私有变量，也不回退系统rsync。旧Flutter补丁对象与当前配方不符时拒绝复用，真实替换须按准确资源操作另行授权。本步不改变编译、签名、安装及回读顺序，不修改产品UI，也未执行真实工具下载/安装。受控资源测试不能代替官方首次取得、正式编译或最终真实运行验收；第4至7步仍待逐步确认实施。
 
-锁解析器、固定Git bundle与Pod spec/源码只在本轮固定工作根物化使用，不提交共享派生目录；可选依赖供给继续读取已登记的`objects/<SHA256>.blob`原件，独立模式按原锁取得缺件，显式离线缺原件必须失败。源码工具依赖与官方补丁仍按本产品声明准备。Pod spec每次按锁中的规范checksum回验，Git tag只核对发行声明并消费本产品预锁提交；HTTP发行件消费固定SHA256，首次源码准备命令来自该已验真spec并由GNU Bash执行。spec与源码按原锁在本轮使用；供给索引不决定产品版本。正式PATH排除旧POSIX Shell，`sh`对应已验真的GNU Bash。
+锁解析器（YAML/TOML）、固定Git bundle与Pod spec/源码均属于依赖：调度模式从依赖库按准确上游URL及锁定完整性取得，独立模式由产品按同一锁自行处理；物化结果只在本轮固定工作根使用，不提交共享派生目录。可选依赖供给读取已登记的`objects/<SHA256>.blob`原件，显式离线缺原件必须失败。源码工具依赖与官方补丁仍按本产品声明准备。Pod spec每次按锁中的规范checksum回验，Git tag只核对发行声明并消费本产品预锁提交；HTTP发行件消费固定SHA256，首次源码准备命令来自该已验真spec并由GNU Bash执行。spec与源码按原锁在本轮使用；供给索引不决定产品版本。正式PATH排除旧POSIX Shell，`sh`对应已验真的GNU Bash。
 
 独立缺省资源目录内`tools`保存工具发行件及工具编译输入，`rely`保存本产品声明允许的原件；锁解析器、Git bundle和Pod物化视图仅归本轮固定工作根，工具退出且结果消费后清理。根据用户最新要求，分步骤先完成实现与用例，整项解耦任务完成后统一测试；本步实施记录不等于真实工具首次取得、完整Build或安装验收通过。
 

@@ -75,6 +75,7 @@ jobs:
           tag="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.tag)' "$plan")"
           notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
           assets="$GITHUB_WORKSPACE/target/build/android/release-assets"
+          node scripts/build.mjs ci-create-release-tag android
           gh release create "$tag" "$assets"/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "citizenwallet · android · $tag" --notes-file "$notes" --draft --latest=false
           node scripts/build.mjs ci-verify-release android draft
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false

@@ -65,14 +65,15 @@ val productVersionName = flutterBuildProperties.getProperty("flutter.versionName
 
 android {
     // AGP 9 的 Kotlin 与 Java 源集分别登记；单测位于 app 根，仅作为单文件测试输入。
-    sourceSets.getByName("main").kotlin.directories.apply { clear(); add("source") }
+    sourceSets.getByName("main").kotlin.directories.apply { clear(); add("../source") }
     // Flutter 在当轮外部工程生成插件注册表；必须显式编译它，不能依赖源码内旧生成物。
     sourceSets.getByName("main").java.directories.apply {
         clear()
-        add("source")
+        add("../source")
         add(flutterProductRoot.resolve("android/app/src/main/java").absolutePath)
     }
-    sourceSets.getByName("main").manifest.srcFile("source/AndroidManifest.xml")
+    // Flutter 自身也检查标准位置；构建脚本把唯一原件装配到本轮工程此处。
+    sourceSets.getByName("main").manifest.srcFile("src/main/AndroidManifest.xml")
     sourceSets.getByName("test").kotlin.directories.clear()
     sourceSets.getByName("test").java.directories.clear()
     sourceSets.getByName("main").res.directories.clear()

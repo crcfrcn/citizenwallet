@@ -145,7 +145,7 @@ void main() {
     final androidBuild = sourceFile('android/app/build.gradle.kts')
         .readAsStringSync();
     final androidEntry = sourceFile(
-      'android/app/source/MainActivity.kt',
+      'android/source/MainActivity.kt',
     ).readAsStringSync();
     final iosProject = sourceFile('ios/project/Runner.pbxproj')
         .readAsStringSync();

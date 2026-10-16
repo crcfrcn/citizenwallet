@@ -1,7 +1,7 @@
 #
 # CitizenWallet 冷钱包 sr25519 原生签名静态库（schnorrkel）。
 #
-# 实现来自 citizenwallet/rust/source/sr25519.rs（由公民钱包独立维护），
+# 实现来自 citizenwallet/signing/sr25519.rs（由公民钱包独立维护），
 # 本机编译与 GitHub 自动化分别在各自任务现场生成 libcitizenwallet_signer.a。
 #
 # 为什么用静态库而不是 dylib：裸 .dylib 需要嵌入 App 并单独代码签名，且 App Store
@@ -25,7 +25,7 @@ Pod::Spec.new do |s|
   s.summary          = 'CitizenWallet sr25519 原生签名静态库'
   s.description      = <<-DESC
 CitizenWallet 冷钱包 sr25519 原生签名（schnorrkel）。全端唯一实现，
-使用公民钱包内部 citizenwallet/rust/source/sr25519.rs。
+使用公民钱包内部 citizenwallet/signing/sr25519.rs。
                        DESC
   s.homepage         = 'https://github.com/crcfrcn/citizenwallet'
   s.license          = { :type => 'MIT' }
@@ -33,10 +33,10 @@ CitizenWallet 冷钱包 sr25519 原生签名（schnorrkel）。全端唯一实�
   s.source           = { :path => '.' }
   s.platform         = :ios, '16.0'
 
-  # CocoaPods 要求至少有一个源文件；用一个空的占位 .m，真正的实现全在 .a 里。
-  s.source_files     = 'placeholder.m'
-  # 原生库位于本轮外部构建目录；CocoaPods 的 vendored_libraries 只接受相对路径。
-  # 由下方 -force_load 按已编译的绝对路径链接，不把该库声明为 Pod 内文件。
+  # 本地Pod只提供Runner静态库链接配置；保留真实Podspec作为包文件，不添加占位源码。
+  # 原生库位于本轮外部构建目录；CocoaPods的vendored_libraries只接受相对路径，
+  # 因此由下方-force_load按已编译库的准确绝对路径链接。
+  s.preserve_paths = 'citizenwallet_signer.podspec'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

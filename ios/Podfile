@@ -31,7 +31,7 @@ target 'Runner' do
   use_frameworks!
 
   # sr25519 原生签名静态库（schnorrkel）。本机编译与 GitHub 自动化
-  # 各自生成本轮库，均使用公民钱包自有的 rust/source/sr25519.rs。
+  # 各自生成本轮库，均使用公民钱包自有的 signing/sr25519.rs。
   pod 'citizenwallet_signer', :path => 'signer'
 
   # 源码外工程的 Podfile 可能是链接；插件清单必须从当前工程而非源码根读取。

@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 
 /// sr25519 原生签名（schnorrkel）的 Dart 侧唯一入口。
 ///
-/// 实现来自 `citizenwallet/rust/source/sr25519.rs`，由钱包独立维护。
+/// 实现来自 `citizenwallet/signing/sr25519.rs`，由钱包独立维护。
 /// 派生语义保持迁移前一致。冷钱包永久离线，
 /// 只把这份签名实现编成独立小库 `libcitizenwallet_signer`（几百 KB），不引入链。
 ///
