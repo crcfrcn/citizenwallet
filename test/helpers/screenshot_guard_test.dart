@@ -137,7 +137,7 @@ void main() {
   });
 
   test('永久应用标识、原生通道和 Isar 静态库输出保持统一', () {
-    // 中央校验根只生成当前平台配置；原生源码断言读取链接的真实钱包源码。
+    // Flutter 测试运行于本轮已物化工程；原生断言读取任务工程的标准平台路径。
     final sourceRoot = File('test/helpers/screenshot_guard_test.dart')
         .resolveSymbolicLinksSync();
     final root = File(sourceRoot).parent.parent.parent.path;
@@ -160,14 +160,19 @@ void main() {
     );
     expect(androidBuild, contains('namespace = "com.crcfrcn.citizenwallet"'));
     expect(androidEntry, contains('package com.crcfrcn.citizenwallet'));
+    expect(androidEntry, contains('class HardwareSecretvaultPlugin : FlutterPlugin'));
+    expect(androidEntry, contains('flutterEngine.plugins.add(HardwareSecretvaultPlugin())'));
     expect(androidEntry, contains('"citizenwallet/security"'));
     expect(
       iosProject,
       contains('PRODUCT_BUNDLE_IDENTIFIER = ios.citizenwallet;'),
     );
     expect(iosProject, contains('DEVELOPMENT_TEAM = MHYMVRN6FC;'));
+    expect(iosProject, contains('WalletUITests.swift in Sources'));
+    expect(iosProject, isNot(contains('RunnerTests')));
     expect(iosEntry, contains('name: "citizenwallet/security"'));
     expect(iosEntry, contains('name: "citizenwallet/security_events"'));
+    expect(iosEntry, contains('class SceneDelegate: FlutterSceneDelegate'));
     // 当前销售范围排除法国，App Store Connect 已判定标准加密无须上传文稿。
     expect(
       infoPlist,
@@ -183,6 +188,7 @@ void main() {
     // 首次 pod install 的 post_install 阶段可能尚无 Isar 支持目录。
     expect(podfile, contains('FileUtils.mkdir_p(isar_support_dir)'));
     expect(podfile, contains('flutter_install_all_ios_pods File.dirname(__FILE__)'));
+    expect(podfile, isNot(contains("target 'RunnerTests'")));
     expect(podfile, isNot(contains('File.dirname(File.realpath(__FILE__))')));
     expect(
       podfile.indexOf('FileUtils.mkdir_p(isar_support_dir)'),

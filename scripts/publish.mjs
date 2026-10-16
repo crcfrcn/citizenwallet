@@ -93,7 +93,7 @@ export function androidStorePackageName(text) {
  if(matches.length!==1||!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u.test(matches[0][1]))fail('Android应用标识无效');return matches[0][1];
 }
 export function storeIdentity(){
- const names=['pubspec.yaml','scripts/publish.mjs','ios/project/Runner.pbxproj','android/app/build.gradle.kts'];
+ const names=['pubspec.yaml','scripts/publish.mjs','ios/Runner.pbxproj','android/App.gradle.kts'];
  const sources=names.map(name=>readStoreSource(root,name));
  const manifest=sources[0].toString('utf8');
  if([...manifest.matchAll(/^name:[ \t]*([^\r\n]+)[ \t]*$/gmu)].map(row=>row[1]).join('\0')!=='citizenwallet')fail('产品原始名称无效');

@@ -29,7 +29,7 @@ Flutter iOS 的Xcode复制步骤经本仓既有受控 `rsync` 入口调用 `scri
 
 根保留技术文档、README、LICENSE、pubspec及依赖锁；一级源码目录为`.github`、`android`、`icons`、`ios`、`lib`、`signing`、`scripts`、`test`。Dart按wallet、security、storage、protocol、scanner、signing、pages、helpers归档；protocol仅下设bodies和generated，pages仅下设widgets。登录签名处理及链常量归signing，PIN页面归pages。测试按对应职责归档，签名固定向量归test/signing/fixtures。Rust签名入口为signing/lib.rs，由Cargo.toml的lib.path明确指定。
 
-Android源码统一位于android/source，Gradle应用配置与单测位于android/app，资源原件位于android/resources；所有源码目录都直接位于android根下，不再增加第二层源码目录。唯一Manifest原件由构建脚本装配到当前任务工程android/app/src/main/AndroidManifest.xml，满足Flutter检查器与Gradle的标准入口，不在源码仓生成该路径。原资源限定目录名成为文件名前缀，装配到当前任务工程时恢复android/app/res下的原限定目录和文件名。iOS原件分别位于config、project、resources、source、tests；Podspec 配置归 project；Xcode工程、workspace、本地化资源及Flutter配置仅在当前target工程内恢复。同名workspace文件及图标Contents.json通过文件名区分，内容保持唯一原件。图标仍由icons原件生成，无新增设计或图像副本。源码内不得恢复深层原生工程包。
+`ios/` 和 `android/` 源码目录不保留子目录，也不保留不足或等于100行的分散文件。两端各用一份按原行存储的 `inputs.json` 无损保存原生工具要求的短配置、资源和测试原件；Build 只在本轮 `target` 工程恢复 Xcode、CocoaPods、Gradle 的标准文件路径。CocoaPods 物理锁文件归产品根 `Podfile.lock`，装配时恢复为任务工程 `ios/Podfile.lock`。iOS 保留五份超过100行的 Swift、Xcode工程、UI测试和图标原件；Android 保留 `MainActivity.kt` 与应用 Gradle 原件。源码内不恢复深层原生工程包，也不填充占位行数。
 
 `scripts/` 只保留 `build.mjs` 与 `publish.mjs`。Build 持有本仓编译声明、资源配方与固定工作根，不登记或调用自动化；Publish 独立核验已完成的正式 GitHub Release 资产，实际商店渠道另行确定。iOS、Android 各自的 GitHub 自动化由 `.github/workflows/` 的同名 YAML/MJS 完整创建并回读 Release；自动化生成物只归本次 Runner 临时工程，源码检出根不创建 `build/`。`.github/tatalulu.yml`只登记本仓身份，保存与推送由控制台直接完成。二维码生成文件唯一真源仍在链端，链端一致性检查路径为 `lib/protocol/generated/qr_bodies.g.dart`。
 
@@ -79,11 +79,11 @@ CitizenWallet 涉及聊天时只作为依赖使用方；本条不代表尚未接
 
 当前依赖边界：钱包自己的源码和锁文件决定依赖、版本和来源。本机iOS、Android适配分别在各自完整流程中交付既有验真工具，并按钱包pubspec.lock与signing/Cargo.lock离线准备本任务Pub和Cargo目录；经控制台执行时，已有原件由控制台供给，缺件由控制台按本产品声明取得、验真保存后供给；独立执行由产品自行处理。明确离线缺件、未知来源或回执越界据实失败。两个平台独立实现，不调用对方流程或公民SDK实现。Android继续交付已登记Gradle并由钱包入口对照自身声明回验；iOS交付Flutter随包Dart、Python、Rust/Cargo、Git、CocoaPods和同一登记Xcode工具，现有pod入口绑定受控Ruby和Gem。工具版本不变，独立环境仍由调用方按钱包声明准备。
 
-iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原件位于 `ios/project/citizenwallet_signer.podspec`，装配到任务工程 `ios/signer/`。该本地 Pod 不包含独立源文件；`preserve_paths` 仅保留真实Podspec以满足CocoaPods文件模式校验，不添加占位源码。静态库仍通过既有 `-force_load` 绝对路径及八个 `-Wl,-u` 符号链接到 App；不设置只接受相对路径的 `vendored_libraries`。此调整不改变签名库实现或 FFI 合同。
+iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文位于 `ios/inputs.json` 的 `project/citizenwallet_signer.podspec` 条目，装配到任务工程 `ios/signer/`。该本地 Pod 不包含独立源文件；`preserve_paths` 仅保留真实Podspec以满足CocoaPods文件模式校验，不添加占位源码。静态库仍通过既有 `-force_load` 绝对路径及八个 `-Wl,-u` 符号链接到 App；不设置只接受相对路径的 `vendored_libraries`。此调整不改变签名库实现或 FFI 合同。
 
 本机 Build 边界：Worker创建独立任务并清空本产品固定build现场；控制台按钱包公开资源需求交付验真工具和锁定依赖，再调用钱包完整入口。测试、编译、密码学实现和产品失败条件由CitizenWallet独立维护。钱包入口在 Pub 依赖就绪后，先用已登记 Node 运行钱包自身构建合同测试，再将宿主 FFI 动态库编译到本轮源码外 Cargo 目录，运行 `flutter test --no-pub` 全套钱包单元与组件测试；测试失败即停止该端 Build，不进入平台编译、签名或安装。Android Gradle/Maven资源闭包只在Android资源准备中解析；iOS使用Pod锁与Xcode流程，不启动Android Gradle解析。Android产品入口把本轮Flutter配置选出的Android SDK及调用方JDK传给同一次Gradle调用，固定携带 `--no-daemon`，仅整体离线模式再追加 `--offline`；本机未提供JDK时使用Android Studio随包JBR，不在Worker增加前置检查。iOS/Android 编译成功后进入设备安装收尾，日志只写对应缓存目录。
 
-公民钱包 iOS 本机 Build 在已签名 Release 编译后、交付原生安装收尾前，使用钱包工程的 `RunnerUITests` 在唯一可用 iOS 真机运行 XCUITest。现有 Runner 方案只引用 `RunnerUITests/RunnerUITests.xctestplan`；计划保留原有 `RunnerTests` 和新增 UI 目标，并将自动屏幕采集设为关闭，避免测试采集触发钱包既有录屏保护。创建页测试只切换 12/18/24 词，以当前熵说明核验选择状态、比较密码框与词数选项宽度；导入页只输入非词表占位词，按 Flutter 可访问标签核验非法词数提示与第 25 词被拒绝。选择页左缘返回和备份页返回拦截由钱包组件测试覆盖；真机合成左缘拖动未能稳定复现原生手势，不能以该动作的 XCUITest 断言证明真实手势行为。测试不创建、导入或导出真实钱包，不输入真实密码或助记词；设备未解锁、设备不唯一、敏感页录屏保护触发或测试失败时 Build 失败，绝不绕过保护。Xcode 入口按控制台唯一登记版本校验后传给钱包脚本，测试编译物及结果仅写本轮钱包 iOS Build 工作目录，失败时禁止 Xcode 自动采集设备诊断包。
+公民钱包 iOS 本机 Build 在已签名 Release 编译后、交付原生安装收尾前，使用钱包工程的 `RunnerUITests` 在唯一可用 iOS 真机运行 XCUITest。Runner 方案只引用任务工程 `RunnerUITests/RunnerUITests.xctestplan`；计划仅登记含两项真实用例的 UI 测试目标，源码原件为 `ios/WalletUITests.swift`。空示例 `RunnerTests` 目标已移除。自动屏幕采集设为关闭，避免测试采集触发钱包既有录屏保护。创建页测试只切换 12/18/24 词，以当前熵说明核验选择状态、比较密码框与词数选项宽度；导入页只输入非词表占位词，按 Flutter 可访问标签核验非法词数提示与第 25 词被拒绝。选择页左缘返回和备份页返回拦截由钱包组件测试覆盖；真机合成左缘拖动未能稳定复现原生手势，不能以该动作的 XCUITest 断言证明真实手势行为。测试不创建、导入或导出真实钱包，不输入真实密码或助记词；设备未解锁、设备不唯一、敏感页录屏保护触发或测试失败时 Build 失败，绝不绕过保护。Xcode 入口按控制台唯一登记版本校验后传给钱包脚本，测试编译物及结果仅写本轮钱包 iOS Build 工作目录，失败时禁止 Xcode 自动采集设备诊断包。
 真机 UI 测试从首页进入创建/导入页时，无钱包直接点击首页按钮；已有钱包先点“添加钱包”，再按标题前缀定位底部菜单的 `StaticText`。真机可访问树显示该 Flutter InkWell 把标题与副标题合并到同一个 `StaticText` 标签。
 
 iOS `Podfile` 的 post-install 钩子修正 Isar 静态 XCFramework 的输出清单。首次安装时先创建准确的 Isar 目标支持目录，再写 `libisar.a` 清单；生成物只位于本轮工程的 `Pods` 目录。
@@ -226,8 +226,8 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 ##### 永久应用标识与平台接线（2026-08-09）
 
 - Android 的唯一永久应用标识与 namespace 均为 `com.crcfrcn.citizenwallet`，Kotlin 入口包为
-  `com.crcfrcn.citizenwallet`；iOS 的唯一永久 Bundle ID 为 `ios.citizenwallet`，测试目标为
-  `ios.citizenwallet.RunnerTests`，签名团队为付费团队 `MHYMVRN6FC`。
+  `com.crcfrcn.citizenwallet`；iOS 的唯一永久 Bundle ID 为 `ios.citizenwallet`，真机 UI 测试目标为
+  `ios.citizenwallet.RunnerUITests`，签名团队为付费团队 `MHYMVRN6FC`。
 - 截屏保护和安全事件属于应用内部 Flutter/原生协议，唯一通道分别为
   `citizenwallet/security` 与 `citizenwallet/security_events`，不得与 Android/iOS
   应用标识耦合。
@@ -339,11 +339,11 @@ CitizenWallet Android 的实际 KGP 已与受控 Flutter 修订统一为 2.2.20�
 
 ## 目录整合与平台输入
 
-图标原件唯一存放于根目录 `icons/`：界面圆角图、启动页图、iOS 方形应用图、Android 旧版启动器图与自适应前景分别保留原有外观；扫码 SVG 也在该目录。Flutter 仅声明实际使用的界面 PNG 与 SVG，不把平台母图打进 Dart 资源包。`scripts/build.mjs icons` 使用 Node 标准库从原件生成尺寸，Build prepare 与 Shell 平台准备/构建共用该入口，只允许写本轮target/build工程。iOS 图标槽位原件归 `ios/resources/AppIcon.json` 与 `ios/resources/CitizenLaunchLogo.json`，装配为任务工程 `ios/IconAssets/` 的槽位配置；图片生成到任务工程 `ios/build/Assets.xcassets/`；Android 图片生成到任务工程 `android/build/generated-icons/`，由 Gradle 与任务工程 `android/app/res/` 的 XML 合并。圆形启动器名称通过 XML 别名复用普通图标；iOS 相同像素尺寸共用一个文件。源码不保留平台尺寸副本，也不再保留根 resources 目录。
+图标原件唯一存放于根目录 `icons/`：界面圆角图、启动页图、iOS 方形应用图、Android 旧版启动器图与自适应前景分别保留原有外观；扫码 SVG 也在该目录。Flutter 仅声明实际使用的界面 PNG 与 SVG，不把平台母图打进 Dart 资源包。`scripts/build.mjs icons` 使用 Node 标准库从原件生成尺寸，Build prepare 与 Shell 平台准备/构建共用该入口，只允许写本轮target/build工程。iOS 图标槽位原件归 `ios/AppIcon.json` 与 `ios/inputs.json` 的 `resources/CitizenLaunchLogo.json` 条目，装配为任务工程 `ios/IconAssets/` 的槽位配置；图片生成到任务工程 `ios/build/Assets.xcassets/`；Android 图片生成到任务工程 `android/build/generated-icons/`，由 Gradle 与任务工程 `android/app/res/` 的 XML 合并。圆形启动器名称通过 XML 别名复用普通图标；iOS 相同像素尺寸共用一个文件。源码不保留平台尺寸副本，也不再保留根 resources 目录。
 
-Android 主源码及 Manifest 原件位于 `android/source/`，任务工程将唯一 Manifest 原件物化为 `android/app/src/main/AndroidManifest.xml`；Android 单测 `android/app/HardwareSecretvaultPluginTest.kt` 单独登记测试源集，禁止进入正式包。Android XML 原件位于 `android/resources/`，装配时恢复任务工程 `android/app/res/` 的标准限定目录。iOS Swift、Plist 与头文件位于 `ios/source/`，Storyboard、字符串与图标配置位于 `ios/resources/`，单测位于 `ios/tests/`，Runner scheme 位于 `ios/project/`；构建只在任务工程恢复 Runner、测试包及资源目录。
+Android 唯一 Kotlin 原件位于 `android/MainActivity.kt`，同时定义启动 Activity 与硬件金库插件，Activity 完整类名保持 `com.crcfrcn.citizenwallet.MainActivity`；应用 Gradle 原件位于 `android/App.gradle.kts`。Manifest、原生单测、Gradle 根配置与限定资源原文按行归 `android/inputs.json`，只在任务工程恢复 `android/app/src/main/AndroidManifest.xml`、单测输入和 `android/app/res/` 标准资源目录。单测仍单独编译，禁止进入正式包。最低 API 为 24，启动背景只使用 `drawable-v21_launch_background.xml`。iOS Swift、Xcode 工程、UI 测试和应用图标的大型原件直接位于 `ios/`；`AppDelegate.swift` 同时定义 Info.plist 登记的 SceneDelegate 类。短 Plist、桥接头、Storyboard、本地化、scheme、Podspec、Podfile 和测试计划按行归 `ios/inputs.json`，只在任务工程恢复原生目录和路径。两端输入清单保留原文及原行结束符，构建入口拒绝越界、缺件和重复目标；两个源码平台目录均无子目录、无不足或等于100行的文件。忽略规则集中在根 `.gitignore` 并按路径限定；仅供 IDE 记忆警告和预览状态的四份 Workspace 文件不进入源码。
 
-`node scripts/build.mjs wallet prepare-ios|prepare-android` 仅装配本产品源码外工程，拒绝重复目标和链接回写；本机 Build 消费调用方工程，远端 Pub/构建使用已装配工程。远端 `prepare-android` 从 `FLUTTER_ROOT` 指定 Flutter 的 `bin/cache/artifacts/gradle_wrapper/` 逐字节复制三个 Wrapper 工具文件，工具缺失、链接或重复来源直接失败；本机 Android 使用已登记 Gradle，产品不保存 Wrapper 副本。iOS 注册表与 SwiftPM 生成状态不进入源码视图，Android 配置唯一源为 `android/gradle-wrapper.properties`。扫码测试归入 `test/scanner/`。
+`node scripts/build.mjs wallet prepare-ios|prepare-android` 仅装配本产品源码外工程，拒绝重复目标和链接回写；本机 Build 消费调用方工程，远端 Pub/构建使用已装配工程。远端 `prepare-android` 从 `FLUTTER_ROOT` 指定 Flutter 的 `bin/cache/artifacts/gradle_wrapper/` 逐字节复制三个 Wrapper 工具文件，工具缺失、链接或重复来源直接失败；本机 Android 使用已登记 Gradle，产品不保存 Wrapper 副本。iOS 注册表与 SwiftPM 生成状态不进入源码视图，Android Wrapper 版本配置唯一原文在 `android/inputs.json` 的 `gradle-wrapper.properties` 条目。扫码测试归入 `test/scanner/`。
 
 AGP 9 将 Kotlin 与 Java 源集分开处理：扁平 Kotlin 目录必须通过 `sourceSets.<name>.kotlin` 显式登记。仅修改 Java 源目录会生成缺少 MainActivity 的 APK；验收必须检查入口类及真机启动，不能以 Gradle 成功或安装成功代替。
 
@@ -542,7 +542,7 @@ Apple验真器测试由同一锁定Xcode的swiftc编译实际XCTest Bundle，使
 
 `build.mjs describe` 以 `resource_entry=scripts/build.mjs` 公开本产品唯一准备配方；完整execute在控制台供给模式通过独立PRODUCT_RESOURCE_FD=4调用同一文件，PRODUCT_HOST_FD=3继续承载既有开发材料和结果。两次资源阶段绑定产品、平台、规范工作根、任务编号和包含原锁SHA256的需求摘要。产品接收供给后回验完整工具/SDK回执及额外平台树，再离线执行既有准备、编译、签名安装回读。供给失败、断开或身份漂移直接失败，不自行获取。独立execute继续自行准备并使用同一公开配方，无控制台私有模块依赖。
 
-控制台已有工具在tools/shared复用，缺件由控制台执行产品公开配方下载、验真并保存；工具归档保存内容地址blob，依赖归档及Pod发布文件保存rely/objects并登记rely/index.json。可写工作视图只归本轮target。Android额外API平台按产品树摘要保存工具库，Gradle按产品工程解析后回验官方Maven发布文件并保存，iOS显式声明ios/Podfile.lock。HTTP请求声明identity；若服务端仍压缩传输，仅按解码后原件摘要验证，不把压缩Content-Length与解码字节数比较。未编码长度不符或摘要不符继续失败。
+控制台已有工具在tools/shared复用，缺件由控制台执行产品公开配方下载、验真并保存；工具归档保存内容地址blob，依赖归档及Pod发布文件保存rely/objects并登记rely/index.json。可写工作视图只归本轮target。Android额外API平台按产品树摘要保存工具库，Gradle按产品工程解析后回验官方Maven发布文件并保存，iOS显式声明产品根 `Podfile.lock`，在任务工程恢复 CocoaPods 标准锁路径。HTTP请求声明identity；若服务端仍压缩传输，仅按解码后原件摘要验证，不把压缩Content-Length与解码字节数比较。未编码长度不符或摘要不符继续失败。
 
 本条随候选补丁提交审核；临时测试覆盖通道、缓存、取消、异常与两阶段接线，不代表真实双端Build、签名安装回读已通过。正式接线及真实验收完成前，修复任务保持开发中。
 
@@ -684,7 +684,7 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 ### 当前自动化最后处理
 
-Run 记录和 Cargo cache 是不同对象，分别清理。本机平台缓存位于 `target/cache/cargo/<平台>`；GitHub cache key 使用平台名与 Run/attempt，末尾 Job 通过 Actions cache API 只保留本仓 `main` 上该平台最新一份。历史 Run 清理不会删除缓存，缓存清理不会改动 Run 结论。清理失败需在对应日志明确失败并令最终 Run 失败；下一次同平台自动化可再次收敛未完成的旧记录。
+Run 记录和 Cargo cache 是不同对象，分别清理。本机平台缓存位于 `target/cache/cargo/<平台>`；产品资源环境和执行环境共用唯一 `cargoTargetDirectory` 入口。原生 Shell 只在工作根准确为 `target/build/ios` 或 `target/build/android` 时允许 Cargo 使用对应平台固定缓存，其它原生产物和临时目录仍须位于本轮工作根；测试会话使用自身临时 Cargo 目录，链接、跨平台和任意外部路径均拒绝。GitHub cache key 使用平台名与 Run/attempt，末尾 Job 通过 Actions cache API 只保留本仓 `main` 上该平台最新一份。历史 Run 清理不会删除缓存，缓存清理不会改动 Run 结论。清理失败需在对应日志明确失败并令最终 Run 失败；下一次同平台自动化可再次收敛未完成的旧记录。
 
 
 ### 本仓 GitHub 自动化与塔塔门禁目录

@@ -220,3 +220,6 @@ private class SecurityEventStreamHandler: NSObject, FlutterStreamHandler {
     return nil
   }
 }
+
+// Scene 配置仍在 Info.plist 中按类名注册；空生命周期代理与应用入口共用源码。
+class SceneDelegate: FlutterSceneDelegate {}
