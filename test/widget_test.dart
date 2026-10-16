@@ -26,6 +26,16 @@ void main() {
     }
   }
 
+  Future<void> waitForHomeEmptyState(WidgetTester tester) async {
+    for (var attempt = 0; attempt < 80; attempt++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      });
+      await tester.pump();
+      if (find.text('创建或导入钱包后开始使用').evaluate().isNotEmpty) return;
+    }
+  }
+
   Future<void> releasePage(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
@@ -74,9 +84,8 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(theme: AppTheme.darkTheme, home: const HomePage()),
       );
-      await Future<void>.delayed(const Duration(milliseconds: 300));
     });
-    await tester.pump();
+    await waitForHomeEmptyState(tester);
 
     expect(find.text('创建或导入钱包后开始使用'), findsOneWidget);
     expect(find.text('创建或导入一个钱包来开始使用'), findsNothing);
