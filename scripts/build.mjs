@@ -4935,6 +4935,9 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
 test('iOS与Android独立Workflow各自清Run并维护唯一平台Cargo缓存',()=>{
  for(const platform of ['ios','android']){
   const workflow=readFileSync(new URL('../.github/workflows/'+platform+'.yml',import.meta.url),'utf8');
+  const checkoutSHAs=[...workflow.matchAll(/^\s*- uses: actions\/checkout@([a-f0-9]{40})\s*$/gmu)].map(value=>value[1]);
+  assert.deepEqual(checkoutSHAs,['fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09','fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'],
+   platform+'的cleanup必须复用本平台release已经验收的checkout SHA');
   assert.ok(workflow.includes('name: citizenwallet.'+platform));
   assert.ok(workflow.includes('key: citizenwallet-cargo-'+platform+'-${{ github.run_id }}-${{ github.run_attempt }}'));
   assert.ok(workflow.includes('path: target/cache/cargo/'+platform));

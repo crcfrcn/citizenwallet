@@ -114,7 +114,7 @@ jobs:
       GH_TOKEN: "${{ github.token }}"
       CITIZENWALLET_RELEASE_RESULT: "${{ needs.release.result }}"
     steps:
-      - uses: actions/checkout@fbc6f3992d24b7965d048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: "${{ github.sha }}"
           persist-credentials: false
