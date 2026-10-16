@@ -3663,23 +3663,24 @@ export async function ciBuild(platform,environment=process.env){
   return plan;
  },{environment,retain:true});
 }
-export async function ciVerifyRelease(platform,phase,environment=process.env,{fetchImpl=fetch}={}){
+export async function ciVerifyRelease(platform,phase,releaseId,environment=process.env,{fetchImpl=fetch}={}){
  if(!['draft','published'].includes(phase)||environment.GITHUB_ACTIONS!=='true'
   ||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product||environment.GITHUB_WORKFLOW!==product+'.'+platform)
   fail('GitHub移动Release核验身份无效');
+ if(typeof releaseId!=='string'||! /^[1-9][0-9]*$/u.test(releaseId))fail('GitHub移动Release ID无效');
  const work=fixedWork('build/'+platform);checkFixedWork(work);
  const plan=JSON.parse(readFileSync(join(work,'release-plan.json'),'utf8')),token=environment.GH_TOKEN||environment.GITHUB_TOKEN;
  if(!token||plan.product_id!==product||plan.platform!==platform||plan.source_sha!==environment.GITHUB_SHA)fail('GitHub移动Release计划无效');
- const response=await fetchImpl('https://api.github.com/repos/crcfrcn/'+product+'/releases/tags/'+encodeURIComponent(plan.tag),
-  {redirect:'error',headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token}});
+ const base='https://api.github.com/repos/crcfrcn/'+product,headers={Accept:'application/vnd.github+json',Authorization:'Bearer '+token};
+ const response=await fetchImpl(base+'/releases/'+releaseId,
+  {redirect:'error',headers});
  if(!response.ok)fail('GitHub移动Release回读失败');
- const reference=await fetchImpl('https://api.github.com/repos/crcfrcn/'+product+'/git/ref/tags/'+encodeURIComponent(plan.tag),
-  {redirect:'error',headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token}});
+ const reference=await fetchImpl(base+'/git/ref/tags/'+encodeURIComponent(plan.tag),{redirect:'error',headers});
  if(!reference.ok)fail('GitHub移动Tag回读失败');
  const tag=await reference.json();
  if(tag.ref!=='refs/tags/'+plan.tag||tag.object?.type!=='commit'||tag.object?.sha!==plan.source_sha)fail('GitHub移动Tag来源不符');
  const release=await response.json();
- if(release.tag_name!==plan.tag||release.target_commitish!==plan.source_sha||release.prerelease!==false
+ if(String(release.id)!==releaseId||release.tag_name!==plan.tag||release.target_commitish!==plan.source_sha||release.prerelease!==false
   ||release.draft!==(phase==='draft')||phase==='published'&&!release.published_at
   ||release.body?.trim()!==readFileSync(plan.notes,'utf8').trim()
   ||!Array.isArray(release.assets)||release.assets.length!==plan.assets.length)fail('GitHub移动Release身份不符');
@@ -3689,7 +3690,20 @@ export async function ciVerifyRelease(platform,phase,environment=process.env,{fe
   if(rows.length!==1||rows[0].state!=='uploaded'||rows[0].size!==item.size||rows[0].digest!=='sha256:'+item.sha256)
    fail('GitHub移动Release资产回读不符');
  }
- return {platform,tag:plan.tag,phase};
+ return {platform,tag:plan.tag,release_id:releaseId,phase};
+}
+
+export async function ciPublishRelease(platform,releaseId,environment=process.env,{fetchImpl=fetch}={}){
+ const verified=await ciVerifyRelease(platform,'draft',releaseId,environment,{fetchImpl});
+ const token=environment.GH_TOKEN||environment.GITHUB_TOKEN;
+ const response=await fetchImpl('https://api.github.com/repos/crcfrcn/'+product+'/releases/'+releaseId,
+  {method:'PATCH',redirect:'error',headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,'Content-Type':'application/json'},
+   body:JSON.stringify({draft:false})});
+ if(!response.ok)fail('GitHub移动Release发布失败');
+ const release=await response.json();
+ if(String(release.id)!==releaseId||release.tag_name!==verified.tag||release.draft!==false||!release.published_at)
+  fail('GitHub移动Release发布回执不符');
+ return {platform,tag:verified.tag,release_id:releaseId,phase:'published'};
 }
 
 async function ensureReleaseTagReference(plan,token,{fetchImpl=fetch}={}){
@@ -3739,8 +3753,12 @@ async function runCLI(){
   process.stdout.write(JSON.stringify(await ciCreateReleaseTag(process.argv[3]))+'\n');return;
  }
  if(process.argv[2]==='ci-verify-release'){
-  if(process.argv.length!==5)fail('GitHub移动Release核验参数无效');
-  process.stdout.write(JSON.stringify(await ciVerifyRelease(process.argv[3],process.argv[4]))+'\n');return;
+  if(process.argv.length!==6)fail('GitHub移动Release核验参数无效');
+  process.stdout.write(JSON.stringify(await ciVerifyRelease(process.argv[3],process.argv[4],process.argv[5]))+'\n');return;
+ }
+ if(process.argv[2]==='ci-publish-release'){
+  if(process.argv.length!==5)fail('GitHub移动Release发布参数无效');
+  process.stdout.write(JSON.stringify(await ciPublishRelease(process.argv[3],process.argv[4]))+'\n');return;
  }
  const [operation,platform,flag,work]=process.argv.slice(2);
  if(operation==='execute'&&process.env.PRODUCT_RESOURCE_FD!=='4'){if(flag!=='--work'||work!==fixedWork('build/'+platform))fail('平台编译现场不符');return withFixedWork('build/'+platform,()=>runCommand(),{environment:process.env,retain:process.env.PRODUCT_HOST_FD==='3'});}
@@ -4705,8 +4723,12 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
   const workflow=readFileSync(new URL('../.github/workflows/'+platform+'.yml',import.meta.url),'utf8');
   const create=workflow.indexOf('node scripts/build.mjs ci-create-release-tag '+platform);
   const draft=workflow.indexOf('gh release create "$tag"');
-  const verify=workflow.indexOf('ci-verify-release '+platform+' draft');
-  assert.ok(create>=0&&draft>create&&verify>draft,platform+'必须先核实Tag，再创建并校验Release草稿');
+  const resolveId=workflow.indexOf('releases/tags/$release_ref');
+  const verify=workflow.indexOf('ci-verify-release '+platform+' draft "$release_id"');
+  const publish=workflow.indexOf('ci-publish-release '+platform+' "$release_id"');
+  const verifyPublished=workflow.indexOf('ci-verify-release '+platform+' published "$release_id"');
+  assert.ok(create>=0&&draft>create&&resolveId>draft&&verify>resolveId&&publish>verify&&verifyPublished>publish,
+   platform+'必须按Release ID验证草稿、发布并回读');
  }
 });
 
@@ -4749,6 +4771,51 @@ test('Release Tag已有引用必须相同，创建或回读异常均失败',asyn
   calls++;return options.method==='POST'?response(201):calls===1?response(404):response(200,{...correct,object:{type:'tag',sha:'d'.repeat(40)}});
  }}),/来源不符/u);
  assert.equal(calls,3);
+});
+
+test('移动Release通过GitHub返回的ID校验草稿、发布并回读',async()=>{
+ await withFixedWork('build/ios',async work=>{
+  const tag='citizenwallet-ios-v1.0.0-r789-a1',sha='e'.repeat(40),releaseId='987654321';
+  const notes=join(work,'release-notes.txt'),assetsDir=join(work,'release-assets');mkdirSync(assetsDir);
+  writeFileSync(notes,'release notes\n');
+  const bytes=Buffer.from('synthetic ipa'),digest=createHash('sha256').update(bytes).digest('hex');
+  writeFileSync(join(assetsDir,'citizenwallet.ipa'),bytes);
+  const plan={schema:1,product_id:'citizenwallet',platform:'ios',tag,source_sha:sha,notes,directory:assetsDir,
+   assets:[{name:'citizenwallet.ipa',size:bytes.length,sha256:digest}]};
+  writeFileSync(join(work,'release-plan.json'),JSON.stringify(plan)+'\n');
+  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_WORKFLOW:'citizenwallet.ios',GITHUB_SHA:sha,GH_TOKEN:'test-token'};
+  const tagReference={ref:'refs/tags/'+tag,object:{type:'commit',sha}};
+  const asset={name:'citizenwallet.ipa',state:'uploaded',size:bytes.length,digest:'sha256:'+digest};
+  const draft={id:Number(releaseId),tag_name:tag,target_commitish:sha,prerelease:false,draft:true,published_at:null,
+   body:'release notes',assets:[asset]};
+  const published={...draft,draft:false,published_at:'2026-10-16T00:00:00Z'};
+  const response=(status,value={})=>({status,ok:status>=200&&status<300,json:async()=>value});
+  let current=draft;const calls=[];
+  const fetchImpl=async(url,options={})=>{
+   calls.push({url,options});
+   if(url.endsWith('/releases/'+releaseId)&&options.method==='PATCH'){
+    assert.deepEqual(JSON.parse(options.body),{draft:false});current=published;return response(200,current);
+   }
+   if(url.endsWith('/releases/'+releaseId))return response(200,current);
+   if(url.endsWith('/git/ref/tags/'+encodeURIComponent(tag)))return response(200,tagReference);
+   throw Error('unexpected GitHub endpoint: '+url);
+  };
+  const draftResult=await ciVerifyRelease('ios','draft',releaseId,env,{fetchImpl});
+  assert.deepEqual(draftResult,{platform:'ios',tag,release_id:releaseId,phase:'draft'});
+  const publishResult=await ciPublishRelease('ios',releaseId,env,{fetchImpl});
+  assert.deepEqual(publishResult,{platform:'ios',tag,release_id:releaseId,phase:'published'});
+  const finalResult=await ciVerifyRelease('ios','published',releaseId,env,{fetchImpl});
+  assert.deepEqual(finalResult,{platform:'ios',tag,release_id:releaseId,phase:'published'});
+  assert.ok(calls.some(call=>call.url.endsWith('/releases/'+releaseId)),'必须按Release ID回读');
+  assert.equal(calls.filter(call=>call.options.method==='PATCH').length,1);
+  await assert.rejects(ciVerifyRelease('ios','published','987654322',env,{fetchImpl:async()=>response(404)}),/回读失败/u);
+  const wrongTag=async(url,options={})=>url.endsWith('/releases/'+releaseId)
+   ?response(200,published):response(200,{...tagReference,object:{type:'commit',sha:'f'.repeat(40)}});
+  await assert.rejects(ciVerifyRelease('ios','published',releaseId,env,{fetchImpl:wrongTag}),/Tag来源不符/u);
+  const denied=async(url,options={})=>url.endsWith('/releases/'+releaseId)&&options.method==='PATCH'
+   ?response(403):url.endsWith('/releases/'+releaseId)?response(200,draft):response(200,tagReference);
+  await assert.rejects(ciPublishRelease('ios',releaseId,env,{fetchImpl:denied}),/Release发布失败/u);
+ });
 });
 
 test('CitizenWallet依赖准备默认联网且离线模式必须显式选择', () => {

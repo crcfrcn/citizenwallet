@@ -76,10 +76,16 @@ jobs:
           notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
           assets="$GITHUB_WORKSPACE/target/build/ios/release-assets"
           node scripts/build.mjs ci-create-release-tag ios
-          gh release create "$tag" "$assets"/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "citizenwallet · ios · $tag" --notes-file "$notes" --draft --latest=false
-          node scripts/build.mjs ci-verify-release ios draft
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
-          node scripts/build.mjs ci-verify-release ios published
+          release_url="$(gh release create "$tag" "$assets"/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "citizenwallet · ios · $tag" --notes-file "$notes" --draft --latest=false)"
+          release_prefix="https://github.com/$GITHUB_REPOSITORY/releases/tag/"
+          [[ "$release_url" == "$release_prefix"* ]]
+          release_ref="${release_url#"$release_prefix"}"
+          [[ "$release_ref" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_ref" --jq '.id')"
+          [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
+          node scripts/build.mjs ci-verify-release ios draft "$release_id"
+          node scripts/build.mjs ci-publish-release ios "$release_id"
+          node scripts/build.mjs ci-verify-release ios published "$release_id"
       - name: 清理本平台编译现场
         if: always()
         shell: bash

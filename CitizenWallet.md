@@ -270,7 +270,7 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 ## Release 全量构建（第 7.4 步）
 
-正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。Android Gradle 构建在 `android/` 执行后，必须切回产品工程根目录运行 Flutter appbundle，使 Flutter 从任务工程读取标准 Manifest 与 v2 embedding 声明。版本与未签名产物仍由本仓自动化生成；签名、正式产物校验和发布由本仓本机接口消费同一成功Run后执行。两端创建 Release 草稿前，工作流调用本仓 `ci-create-release-tag` 显式建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；引用不匹配或创建失败时，不创建 Release。
+正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。Android Gradle 构建在 `android/` 执行后，必须切回产品工程根目录运行 Flutter appbundle，使 Flutter 从任务工程读取标准 Manifest 与 v2 embedding 声明。版本与未签名产物仍由本仓自动化生成；签名、正式产物校验和发布由本仓本机接口消费同一成功Run后执行。两端创建 Release 草稿前，工作流调用本仓 `ci-create-release-tag` 显式建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；引用不匹配或创建失败时，不创建 Release。GitHub 草稿可能以 `untagged-*` 地址返回，工作流须从返回地址解析 Release ID；草稿身份、tag、提交、资产均按该 ID 回读，正式发布通过 Release ID 修改 draft 状态，再次按 ID 验收。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
 
