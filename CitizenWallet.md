@@ -248,7 +248,7 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
   `${PODS_XCFRAMEWORKS_BUILD_DIR}/isar_community_flutter_libs/libisar.a`，避免 Xcode 27
   在静态库复制完成前启动链接器；不得修改 pub cache 或恢复手工预构建流程。
 
-- 现行两端均由 `.github/workflows/release-<平台>.yml` 与同名 MJS 独立执行正式自动化，不恢复旧 CI 文件或 Debug 包。注册表的固定公开链提交由 `lib/signing/chain_constants.dart` 唯一声明；工作流只读核对 Pallet 和业务调用索引，漂移失败，不从邻仓回写钱包源码。
+- 现行 iOS 与 Android 分别由 `.github/workflows/ios.yml`、`android.yml` 执行独立正式自动化，各自只构建、签名、验真和发布本平台，不合并平台工作流或 Release。注册表的固定公开链提交由 `lib/signing/chain_constants.dart` 唯一声明；工作流只读核对 Pallet 和业务调用索引，漂移失败，不从邻仓回写钱包源码。
 - 本机移动端 Build 在依赖准备前交付已验真 Flutter 与随包 Dart，工具缺失或验真失败立即停止；自动化不调用本机 Build。转账入口保持 `OnchainTransaction(4).transfer_with_remark(0)`，不得恢复 `Balances` 直签入口。
 - 自动化在各自 GitHub Runner 内正式签名并验收 Android APK/AAB 与 iOS IPA，逐件绑定准确 Run/SHA；对应 workflow 创建、发布并回读正式 Release。`scripts/publish.mjs` 只读取已完成的正式 Release，应用商店和官网渠道上传仍待授权配置。iOS 与 Android 的版本及 build number 各自独立推进。
 - `APP_KEY` 与 CitizenApp 共用，Tower Console 加密密钥库保管本机签名真源；CitizenWallet Android workflow 从本仓 GitHub Actions `APP_KEY` Secret 读取镜像值，在 Runner 内签名 APK/AAB。轮换时须同步更新 Tower Console 与本仓 Secret。内容至少包含
@@ -269,7 +269,7 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 ## Release 全量构建（第 7.4 步）
 
-正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。Android CI 在同一次 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 都写入本轮产品 `BUILD_DIR`，随后使用本仓 GitHub Actions `APP_KEY` Secret 在 Runner 内签名。签名后从本轮 `$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer` 绝对路径回读并校验 APK 包名与版本，不依赖 Runner 的 `PATH` 搜索。iOS workflow 同样在 Runner 内使用其签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。两端创建 Release 草稿前，工作流调用本仓 `ci-create-release-tag` 显式建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；引用不匹配或创建失败时，不创建 Release。GitHub 草稿可能以 `untagged-*` 地址返回，工作流须从返回地址解析 Release ID；草稿身份、tag、提交、资产均按该 ID 回读，正式发布通过 Release ID 修改 draft 状态，再次按 ID 验收。
+正式自动化按平台在独立 GitHub Runner 执行产品测试、全量原生构建、签名、正式包验真、Tag/Release 创建及回读；Android 在同一 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 写入本轮产品 `BUILD_DIR`，并使用 GitHub Actions `APP_KEY` Secret 签名；iOS 使用对应签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。本机与 GitHub Runner 的 Cargo 编译目标目录按平台落入 `target/cache/cargo/ios` 或 `target/cache/cargo/android`，不属于本轮 `target/build/<平台>` 临时现场；两者缓存互相隔离。GitHub workflow 按平台恢复并保存唯一 Run 键缓存，末尾清理 Job 独立裁剪该平台旧 Cargo cache。创建 Release 前，工作流调用本仓 `ci-create-release-tag` 建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；草稿身份、tag、提交、资产按 Release ID 回读，发布后再次按 ID 验收。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
 
@@ -351,7 +351,7 @@ AGP 9 新 DSL 的源码路径使用 `directories`，不调用已废弃的 `setSr
 
 Flutter 插件注册表只生成于当轮外部工程的 `android/app/src/main/java`，main Java 源集显式消费这一目录。清理源码旧注册表后仍须能完整构建；APK 验收同时检查 MainActivity 与 GeneratedPluginRegistrant，并验证真实平台通道可用。
 
-Android CI 使用实际登记的 `:app:testDebugUnitTest` 运行硬件金库单元测试；远端自动化只构建未签名正式候选，签名 Release 在本机发布阶段形成。
+Android CI 使用实际登记的 `:app:testDebugUnitTest` 运行硬件金库单元测试；GitHub Android workflow 在 Runner 内签名 APK/AAB、验真并发布正式 Release。
 ## 完整产品组织与执行合同
 
 本产品为离线冷钱包；名称仅允许`CitizenWallet`、`citizenwallet`、“公民钱包”，禁止旧名与别名。
@@ -619,7 +619,7 @@ Android签名入口按真实混合资源声明选择唯一Build Tools SDK组件�
 
 ## 目录与路径复审（2026-10-08）
 
-本次复审以当时工作树为对象，保留已有未提交改动。已修正合并模块普通导入时的远端环境副作用及伪装CLI入口，删除旧app根目录兼容分支和钱包不消费的ChatServer归档环境分支；商店身份与iOS收尾只接受原始工程位置，旧工程单独存在、重复来源及链接继续拒绝。门禁清单与资料扫描覆盖已跟踪和未忽略、未暂存源码，排除已删除的迁移旧路径；现行 Release 增量防护以 `.github/workflows/release-<平台>.mjs` 为实现入口。
+本次复审以当时工作树为对象，保留已有未提交改动。已修正合并模块普通导入时的远端环境副作用及伪装CLI入口，删除旧app根目录兼容分支和钱包不消费的ChatServer归档环境分支；商店身份与iOS收尾只接受原始工程位置，旧工程单独存在、重复来源及链接继续拒绝。门禁清单与资料扫描覆盖已跟踪和未忽略、未暂存源码，排除已删除的迁移旧路径；当前 iOS、Android 正式流程分别由 `.github/workflows/ios.yml`、`android.yml` 调用 `scripts/build.mjs` 实现。
 
 已更新文档中的原生源路径、功能登记总数、错误的SDK/MLS宿主说明和历史测试文件说明；修正已删除公民App路径的协议注释及合并后签名测试路径，清理重复忽略项、两个系统目录缓存文件和既有21条Dart静态提示。Isar兼容回归使用本轮独占临时目录，扫码后端的虚拟输入路径明确标为非文件IO夹具。功能、页面设计、数据库字段、签名算法、产品身份与原依赖锁均保持。
 
@@ -636,10 +636,8 @@ citizenwallet/
 │   └── generate.mjs              # 图标派生；原始图标仍在同目录
 └── .github/
     ├── workflows/
-    │   ├── release-ios.yml       # iOS自动化作业
-    │   ├── release-ios.mjs       # iOS完整GitHub Release实现
-    │   ├── release-android.yml   # Android自动化作业
-    │   └── release-android.mjs   # Android完整GitHub Release实现
+    │   ├── ios.yml               # iOS 独立自动化与历史清理
+    │   └── android.yml           # Android 独立自动化与历史清理
     └── tatalulu.yml            # 本仓身份与main分支
 ```
 
@@ -668,14 +666,14 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 ## GitHub自动化
 
-本仓自动化只在GitHub的main源码上执行；控制台只调用与展示。各目标独立拥有同名的YAML与Node实现，不调用其他仓或其他目标的Workflow。版本、构建、测试及未签名产物核验由本仓自动化负责；本仓 `scripts/publish.mjs` 在本机负责正式签名、完整产物核验与明确授权后的tag/Release。
+本仓自动化只在GitHub的main源码上执行；控制台分别以“自动化 · iOS”和“自动化 · Android”按钮派发准确平台 Workflow。两份平台 Workflow 互不调用，各自包含产品测试、单平台原生编译、正式签名、产物验真及该平台 Release。
 
-- `.github/workflows/release-android.yml`及同名`.mjs`。
-- `.github/workflows/release-ios.yml`及同名`.mjs`。
+- `.github/workflows/ios.yml` 与 `.github/workflows/android.yml`。
+- 平台产品构建、Tag/Release 验真及清理合同统一由 `scripts/build.mjs` 实现，控制台不复制产品逻辑。
 
-每个目标的最后任务使用always读取全部前置结果：未签名自动化成功时保留本次资产及既有正式发布，等待本机签名和新正式包上传后再清理同目标旧成功；失败时仅清同目标旧失败并失败退出。保护本次Run和所有活动任务，另一类结果与其他目标不受影响。清理逐项回查，任何错误如实报告，不自动重试。
+每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行；它只查询本仓 `main` 分支、该平台精确 Workflow 的已完成 `workflow_dispatch` 与旧 `push` Run。Run ID、工作流路径、分支、事件及仓库身份逐项核验；当前活动 Run 和另一结果类别的最新 Run 保留，成功与非成功终态各保留最新一条。删除请求和清理范围的回读失败会明确报错并使 cleanup Job 失败；之前已完成的构建与 Release 事实不被改写，但整个 Workflow 最终状态因此为失败。清理只由未来对应平台 Workflow 执行，不在改造时删除现有历史记录。
 
-所属回归位于各目标同名mjs，覆盖前置结果、版本边界、平台隔离、活动保护和完整分页；真实GitHub构建与发布验收依任务授权另行执行。
+所属构建、Tag/Release 与 Run/cache 清理回归位于 `scripts/build.mjs`，覆盖平台隔离、活动Run保护、完整分页、删除失败和缓存保留。控制台镜像只读取 `main` 上手动派发且已完成的对应平台 Run，每个平台的成功/失败各保留最新一条；本机活动任务独立显示。真实 GitHub 自动化与 Release 仍需按授权另行启动。
 
 调度方按本仓supplyRequirements和prepareToolSupply取得工具候选；调度模式的获取、提交及执行使用供给方交付的能力；产品配方自行清理自己的临时生成物。缓存复用消费实际路径，运行Node版本/字节、Apple资源签名及工具全树复验不作为本机编译门禁；上游锁与正式应用签名、安装回读继续由各自真实流程执行。
 
@@ -686,7 +684,7 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 ### 当前自动化最后处理
 
-本仓每个自动化目标仅由自身release-<平台>.yml与同名mjs执行，最后处理依赖全部前置任务。清理只接受该目标准确Workflow路径、main和手动事件，不根据已删除文件或旧入口名称猜测归属。前置失败时清理同目标旧失败并报告真实错误；本次未签名资产保留供诊断。固定依赖仍由本仓声明和原锁管理，不参加自产历史结果分类。
+Run 记录和 Cargo cache 是不同对象，分别清理。本机平台缓存位于 `target/cache/cargo/<平台>`；GitHub cache key 使用平台名与 Run/attempt，末尾 Job 通过 Actions cache API 只保留本仓 `main` 上该平台最新一份。历史 Run 清理不会删除缓存，缓存清理不会改动 Run 结论。清理失败需在对应日志明确失败并令最终 Run 失败；下一次同平台自动化可再次收敛未完成的旧记录。
 
 
 ### 本仓 GitHub 自动化与塔塔门禁目录

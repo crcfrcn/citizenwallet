@@ -198,7 +198,7 @@ const {AsyncLocalStorage}=await import('node:async_hooks');
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const product=declaredProduct;
 const sessions=new AsyncLocalStorage();
-const scopes=new Set(['build','test']);
+const scopes=new Set(['build','test','cache']);
 const fail=message=>{throw Error(product+' target：'+message);};
 function fixedWork(scope){
  const testRoot=testSession?join(root,'target/test/sessions',testSession):null;
@@ -208,6 +208,13 @@ function fixedWork(scope){
   const platform=scope.slice(6);if(Object.hasOwn(contract.platforms,platform))return testRoot?join(testRoot,'build',platform):join(root,'target/build',platform);
  }
  fail('工作根用途无效');
+}
+function cargoTargetDirectory(platform,work){
+ platformContract(platform);checkWork(work);
+ if(work!==fixedWork('build/'+platform))return join(work,'cargo');
+ const root=dirname(dirname(work)),path=join(root,'cache','cargo',platform);
+ directory(path,true);
+ return path;
 }
 function isBuildWork(work){return typeof work==='string'&&Object.keys(contract.platforms).some(platform=>work===fixedWork('build/'+platform));}
 function validWork(work){return work===fixedWork('test')||isBuildWork(work);}
@@ -317,9 +324,12 @@ function trackWorkProcess(pid){
 function workEnvironment(environment=process.env){
  const session=sessions.getStore();if(!session)return environment;
  const work=session.owner.work,result={...environment,PRODUCT_WORK_LEASE:session.owner.nonce};
+ const cargoPlatform=Object.keys(contract.platforms).find(platform=>work===fixedWork('build/'+platform));
+ const cargoCache=cargoPlatform?cargoTargetDirectory(cargoPlatform,work):null;
  for(const [key,name]of Object.entries({TMPDIR:'tmp',TMP:'tmp',TEMP:'tmp',CARGO_TARGET_DIR:'cargo',CARGO_HOME:'dependencies/cargo-home',npm_config_cache:'dependencies/npm',PUB_CACHE:'dependencies/pub',GRADLE_USER_HOME:'dependencies/gradle',XDG_CACHE_HOME:'cache',XDG_CONFIG_HOME:'config',CLANG_MODULE_CACHE_PATH:'cache/clang',SWIFT_MODULECACHE_PATH:'cache/swift'})){
   const supplied=result[key];
   if(supplied!==undefined&&typeof supplied!=='string')fail('可写环境目录无效：'+key);
+  if(key==='CARGO_TARGET_DIR'&&cargoCache&&supplied===cargoCache){result[key]=cargoCache;continue;}
   const local=supplied&&(resolve(supplied)===work||resolve(supplied).startsWith(work+sep));
   result[key]=local?supplied:join(work,name);directory(resolve(result[key]),true);
  }
@@ -2556,7 +2566,7 @@ export function resourceEnvironment(platform,work,receipt,base={}) {
   ||!receipt.tools||!receipt.dependencies||!receipt.archives)fail('资源回执身份无效');
  const env={PLATFORM:platform,HOME:work,USERPROFILE:work,USER:base.USER,LOGNAME:base.LOGNAME,LANG:'zh_CN.UTF-8',LC_ALL:'en_US.UTF-8',
   ...receipt.environment,TMPDIR:join(work,'tmp')+sep,TMP:join(work,'tmp'),TEMP:join(work,'tmp'),XDG_CACHE_HOME:join(work,'cache'),XDG_CONFIG_HOME:join(work,'config'),
-  CARGO_TARGET_DIR:join(work,'work/cargo-target'),CARGO_NET_OFFLINE:'true',CARGO_INCREMENTAL:'1',
+  CARGO_TARGET_DIR:cargoTargetDirectory(platform,work),CARGO_NET_OFFLINE:'true',CARGO_INCREMENTAL:'1',
   npm_config_offline:'true',npm_config_audit:'false',npm_config_fund:'false'};
  const allowedEnvironment=new Set([prefix+'_RESOURCE_MODE','PRODUCT_WORK_DIR','PRODUCT_BASH_BIN','PRODUCT_RSYNC_BIN','PATH','DEVELOPER_DIR','SDKROOT','DART_EXECUTABLE','XCODEBUILD','XATTR','CODESIGN','SECURITY','XCRUN','XCODE_SELECT','CC','CXX','SWIFT','OTOOL','INSTALL_NAME_TOOL','LIPO','MAKE','AR','RANLIB','NM','STRIP','LLVM_NM','LD','LDCXX','CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER','ANDROID_HOME','ANDROID_SDK_ROOT','ANDROID_NDK_HOME','ANDROID_USER_HOME','ANDROID_EMULATOR_HOME','GRADLE_INIT_SCRIPT','GRADLE_USER_HOME']);
  if(Object.keys(receipt.environment||{}).some(key=>!allowedEnvironment.has(key)))fail('资源回执包含未声明环境或注入变量');
@@ -3580,6 +3590,94 @@ export async function ciPrepareFlutter(platform,environment=process.env){
  return {platform,flutter_root:sdk};
 }
 
+const GITHUB_API='https://api.github.com/repos/crcfrcn/'+product;
+const GITHUB_API_HEADERS=token=>({Accept:'application/vnd.github+json',Authorization:'Bearer '+token,'X-GitHub-Api-Version':'2026-03-10'});
+function completedRunOrder(left,right){return left.run_number-right.run_number||left.run_attempt-right.run_attempt||left.id-right.id;}
+async function githubPages(url,property,token,fetchImpl){
+ const values=[];
+ for(let page=1;page<=1000;page++){
+  const address=new URL(url);address.searchParams.set('per_page','100');address.searchParams.set('page',String(page));
+  const response=await fetchImpl(address.href,{redirect:'error',headers:GITHUB_API_HEADERS(token)});
+  if(!response.ok)fail('GitHub清理分页读取失败：HTTP '+response.status);
+  const body=await response.json(),items=Array.isArray(body)?body:body?.[property];
+  if(!Array.isArray(items))fail('GitHub清理分页结构无效');values.push(...items);
+  if(items.length<100)return values;
+ }
+ fail('GitHub清理分页超过上限');
+}
+function checkedCleanupRun(run,platform,event){
+ return run&&Number.isSafeInteger(run.id)&&run.id>0&&Number.isSafeInteger(run.run_number)&&run.run_number>0
+  &&Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0&&run.path==='.github/workflows/'+platform+'.yml'
+  &&run.head_branch==='main'&&run.event===event&&['workflow_dispatch','push'].includes(event)
+  &&run.repository?.full_name==='crcfrcn/'+product&&run.status==='completed'
+  &&typeof run.conclusion==='string'&&run.conclusion.length>0;
+}
+function cleanupRunState(run){return run.conclusion==='success'?'success':'failure';}
+async function listCleanupRuns(platform,token,fetchImpl){
+ const values=[];
+ for(const event of ['workflow_dispatch','push']){
+  const url=GITHUB_API+'/actions/workflows/'+platform+'.yml/runs?branch=main&event='+event;
+  values.push(...await githubPages(url,'workflow_runs',token,fetchImpl));
+ }
+ const unique=new Map();
+ for(const run of values){
+  if(run?.path!=='.github/workflows/'+platform+'.yml'||run?.head_branch!=='main'||!['workflow_dispatch','push'].includes(run?.event)
+   ||run?.repository?.full_name!=='crcfrcn/'+product)continue;
+  if(run.status==='completed'&&!checkedCleanupRun(run,platform,run.event))fail('GitHub清理Run身份或终态无效');
+  if(run.status==='completed')unique.set(run.id,run);
+ }
+ return [...unique.values()].sort(completedRunOrder);
+}
+async function deleteCompletedRun(run,token,fetchImpl){
+ const response=await fetchImpl(GITHUB_API+'/actions/runs/'+run.id,{method:'DELETE',redirect:'error',headers:GITHUB_API_HEADERS(token)});
+ if(response.status!==204)fail('删除旧Run失败：'+run.id+'，HTTP '+response.status);
+}
+async function verifyRunsDeleted(platform,deleted,token,fetchImpl){
+ if(!deleted.length)return;
+ const remaining=await listCleanupRuns(platform,token,fetchImpl),ids=new Set(remaining.map(run=>run.id));
+ const found=deleted.find(run=>ids.has(run.id));if(found)fail('旧Run删除后仍存在：'+found.id);
+}
+async function cleanupCargoCaches(platform,token,fetchImpl){
+ const prefix='citizenwallet-cargo-'+platform+'-',url=GITHUB_API+'/actions/caches?ref=refs/heads/main&key='+encodeURIComponent(prefix);
+ const rows=await githubPages(url,'actions_caches',token,fetchImpl),caches=rows.filter(value=>value?.ref==='refs/heads/main'
+  &&typeof value.key==='string'&&value.key.startsWith(prefix)&&Number.isSafeInteger(value.id)&&value.id>0
+  &&typeof value.created_at==='string'&&!Number.isNaN(Date.parse(value.created_at)));
+ caches.sort((left,right)=>Date.parse(left.created_at)-Date.parse(right.created_at)||left.id-right.id);
+ if(caches.length<=1)return {platform,retained:caches[0]?.id??null,deleted:[]};
+ const retained=caches.at(-1),deleted=caches.slice(0,-1);
+ for(const cache of deleted){
+  const response=await fetchImpl(GITHUB_API+'/actions/caches/'+cache.id,{method:'DELETE',redirect:'error',headers:GITHUB_API_HEADERS(token)});
+  if(response.status!==204)fail('删除旧Cargo缓存失败：'+platform+'，HTTP '+response.status);
+ }
+ const check=await githubPages(url,'actions_caches',token,fetchImpl),remaining=check.filter(value=>value?.ref==='refs/heads/main'
+  &&typeof value.key==='string'&&value.key.startsWith(prefix));
+ if(remaining.length!==1||remaining[0].id!==retained.id)fail('Cargo缓存清理回读不符：'+platform);
+ return {platform,retained:retained.id,deleted:deleted.map(value=>value.id)};
+}
+// 各平台Workflow在末尾清理自己的历史Run与Cargo缓存；当前Run及另一结果类别的最新记录受保护。
+export async function ciCleanup(platform,environment=process.env,{fetchImpl=fetch}={}){
+ platformContract(platform);
+ const runId=environment.GITHUB_RUN_ID,upstream=environment.CITIZENWALLET_RELEASE_RESULT,token=environment.GH_TOKEN||environment.GITHUB_TOKEN;
+ if(environment.GITHUB_ACTIONS!=='true'||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product
+  ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
+  ||environment.GITHUB_WORKFLOW!==product+'.'+platform||!/^[1-9][0-9]*$/u.test(runId||'')
+  ||!['success','failure','cancelled','skipped'].includes(upstream)||!token)fail('GitHub清理身份或上游结果无效');
+ // 缓存与Run记录独立维护；缓存清理失败时先停止，避免把历史成功Run删掉后让当前Run因清理失败而转为失败。
+ const cache=await cleanupCargoCaches(platform,token,fetchImpl),candidate=upstream==='success'?'success':'failure';
+ const runs=(await listCleanupRuns(platform,token,fetchImpl)).filter(run=>String(run.id)!==runId);
+ const latest={success:runs.filter(run=>cleanupRunState(run)==='success').at(-1),
+  failure:runs.filter(run=>cleanupRunState(run)==='failure').at(-1)};
+ const opposite=candidate==='success'?'failure':'success';
+ const oppositeStale=runs.filter(run=>cleanupRunState(run)===opposite&&run.id!==latest[opposite]?.id);
+ const candidateRows=runs.filter(run=>cleanupRunState(run)===candidate),candidateStale=candidateRows.slice(0,-1),candidateLatest=candidateRows.at(-1);
+ const remove=async values=>{for(const run of values)await deleteCompletedRun(run,token,fetchImpl);await verifyRunsDeleted(platform,values,token,fetchImpl);};
+ await remove(oppositeStale);
+ // 保留候选结果类别的旧最新Run，直到其他易失败的清理与回读都通过；最后删除该条旧Run。
+ await remove(candidateStale);
+ if(candidateLatest)await deleteCompletedRun(candidateLatest,token,fetchImpl);
+ return {platform,candidate,cache,runs_deleted:[...oppositeStale,...candidateStale,...(candidateLatest?[candidateLatest]:[])].map(run=>run.id)};
+}
+
 // GitHub 在当前 Runner 内完成编译、正式签名和 Release 资产准备；本机安装入口不参与。
 export async function ciBuild(platform,environment=process.env){
  platformContract(platform);
@@ -3740,6 +3838,10 @@ async function ciCreateReleaseTag(platform,environment=process.env,{fetchImpl=fe
 }
 
 async function runCLI(){
+ if(process.argv[2]==='ci-cleanup'){
+  if(process.argv.length!==4)fail('GitHub清理参数无效');
+  process.stdout.write(JSON.stringify(await ciCleanup(process.argv[3]))+'\n');return;
+ }
  if(process.argv[2]==='ci-prepare-flutter'){
   if(process.argv.length!==4)fail('GitHub Flutter 准备参数无效');
   process.stdout.write(JSON.stringify(await ciPrepareFlutter(process.argv[3]))+'\n');return;
@@ -4730,6 +4832,92 @@ test('Android从当前任务工程启动Gradle并把可写状态放入本轮工�
   assert.ok(javaSources.includes('add(flutterProductRoot.resolve("android/app/src/main/java").absolutePath)'));
 });
 
+test('本机 Cargo target cache 按平台独立于每轮编译现场',async()=>{
+ const paths={};
+ for(const platform of ['ios','android'])await withFixedWork('build/'+platform,work=>{
+  const cache=cargoTargetDirectory(platform,work),environment=workEnvironment({CARGO_TARGET_DIR:cache});
+  assert.equal(environment.CARGO_TARGET_DIR,cache);
+  assert.ok(cache.endsWith(join('cache','cargo',platform)));
+  assert.ok(!cache.startsWith(work+sep));
+  paths[platform]=cache;
+ });
+ assert.notEqual(paths.ios,paths.android);
+ await withFixedWork('test',work=>{
+  assert.equal(workEnvironment({}).CARGO_TARGET_DIR,join(work,'cargo'),'测试任务不读写持久平台缓存');
+ });
+});
+
+test('GitHub平台清理只删本仓main对应Workflow旧Run与旧Cargo缓存',async()=>{
+ const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'citizenwallet.ios',GITHUB_RUN_ID:'99',
+  CITIZENWALLET_RELEASE_RESULT:'success',GH_TOKEN:'synthetic'};
+ const make=(id,run_number,conclusion,event,path='.github/workflows/ios.yml',branch='main',status='completed')=>({
+  id,run_number,run_attempt:1,conclusion,event,path,head_branch:branch,status,repository:{full_name:'crcfrcn/citizenwallet'}});
+ const runs=[make(1,1,'success','push'),make(2,2,'success','workflow_dispatch'),make(3,3,'failure','workflow_dispatch'),
+  make(4,4,'failure','push'),make(7,7,'success','workflow_dispatch','.github/workflows/android.yml'),
+  make(8,8,'failure','push','.github/workflows/ios.yml','release'),make(99,99,null,'workflow_dispatch','.github/workflows/ios.yml','main','in_progress')];
+ const caches=[{id:10,key:'citizenwallet-cargo-ios-10-1',ref:'refs/heads/main',created_at:'2026-10-14T00:00:00Z'},
+  {id:11,key:'citizenwallet-cargo-ios-11-1',ref:'refs/heads/main',created_at:'2026-10-15T00:00:00Z'},
+  {id:12,key:'citizenwallet-cargo-android-12-1',ref:'refs/heads/main',created_at:'2026-10-16T00:00:00Z'}];
+ const deletedRuns=[],deletedCaches=[],fetchImpl=async(url,options={})=>{
+  const address=new URL(url);
+  if(address.pathname.includes('/actions/caches/')&&options.method==='DELETE'){
+   const id=Number(address.pathname.split('/').at(-1));deletedCaches.push(id);
+   const at=caches.findIndex(value=>value.id===id);if(at>=0)caches.splice(at,1);return new Response(null,{status:204});
+  }
+  if(address.pathname.endsWith('/actions/caches'))return Response.json({actions_caches:caches.filter(value=>value.key.startsWith(address.searchParams.get('key')||''))});
+  if(address.pathname.includes('/actions/runs/')){
+   if(options.method==='DELETE'){const id=Number(address.pathname.split('/').at(-1));deletedRuns.push(id);const at=runs.findIndex(value=>value.id===id);if(at>=0)runs.splice(at,1);return new Response(null,{status:204});}
+  }
+  if(address.pathname.includes('/actions/workflows/')){
+   const event=address.searchParams.get('event');return Response.json({workflow_runs:runs.filter(value=>value.event===event)});
+  }
+  throw Error('Unexpected cleanup request');
+ };
+ const result=await ciCleanup('ios',env,{fetchImpl});
+ assert.deepEqual(deletedCaches,[10]);assert.deepEqual(deletedRuns,[3,1,2]);
+ assert.deepEqual(result.runs_deleted,[3,1,2]);assert.equal(result.candidate,'success');
+ assert.ok(runs.some(value=>value.id===4),'最新失败Run必须保留');
+ assert.ok(runs.some(value=>value.id===99),'当前活动Run必须保留');
+ assert.ok(runs.some(value=>value.id===7),'Android Workflow记录必须保留');
+ assert.ok(runs.some(value=>value.id===8),'其他分支Run必须保留');
+ assert.deepEqual(caches.map(value=>value.id),[11,12],'iOS只留最新缓存，Android缓存不动');
+});
+
+test('GitHub清理失败明确失败且在缓存清理失败时不删Run',async()=>{
+ const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'citizenwallet.android',GITHUB_RUN_ID:'100',
+  CITIZENWALLET_RELEASE_RESULT:'failure',GH_TOKEN:'synthetic'};let runDeletes=0;
+ const fetchImpl=async(url,options={})=>{
+  if(String(url).includes('/actions/caches/')&&options.method==='DELETE')return new Response(null,{status:403});
+  if(String(url).includes('/actions/caches?'))return Response.json({actions_caches:[
+   {id:20,key:'citizenwallet-cargo-android-1-1',ref:'refs/heads/main',created_at:'2026-10-14T00:00:00Z'},
+   {id:21,key:'citizenwallet-cargo-android-2-1',ref:'refs/heads/main',created_at:'2026-10-15T00:00:00Z'}]});
+  if(String(url).includes('/actions/runs/')){if(options.method==='DELETE')runDeletes++;return new Response(null,{status:204});}
+  throw Error('Run清理不应在缓存清理失败后启动');
+ };
+ await assert.rejects(ciCleanup('android',env,{fetchImpl}),/删除旧Cargo缓存失败：android，HTTP 403/u);
+ assert.equal(runDeletes,0);
+});
+
+test('GitHub Run删除请求失败会明确失败而不回报清理成功',async()=>{
+ const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'citizenwallet.ios',GITHUB_RUN_ID:'101',
+  CITIZENWALLET_RELEASE_RESULT:'failure',GH_TOKEN:'synthetic'};
+ const make=(id,run_number,conclusion)=>({id,run_number,run_attempt:1,conclusion,event:'workflow_dispatch',
+  path:'.github/workflows/ios.yml',head_branch:'main',status:'completed',repository:{full_name:'crcfrcn/citizenwallet'}});
+ const runs=[make(10,10,'success'),make(11,11,'failure')];let deleteStatus=503;
+ const fetchImpl=async(url,options={})=>{
+  const address=new URL(url);
+  if(address.pathname.endsWith('/actions/caches'))return Response.json({actions_caches:[]});
+  if(address.pathname.includes('/actions/runs/'))return new Response(null,{status:deleteStatus});
+  if(address.pathname.includes('/actions/workflows/'))return Response.json({workflow_runs:runs.filter(value=>value.event===address.searchParams.get('event'))});
+  throw Error('Unexpected cleanup request');
+ };
+ await assert.rejects(ciCleanup('ios',env,{fetchImpl}),/删除旧Run失败：11，HTTP 503/u);
+ deleteStatus=204;
+});
+
 test('正式移动Release前先创建并回读当前提交Tag',()=>{
  for(const platform of ['ios','android']){
   const workflow=readFileSync(new URL('../.github/workflows/'+platform+'.yml',import.meta.url),'utf8');
@@ -4741,6 +4929,21 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
   const verifyPublished=workflow.indexOf('ci-verify-release '+platform+' published "$release_id"');
   assert.ok(create>=0&&draft>create&&resolveId>draft&&verify>resolveId&&publish>verify&&verifyPublished>publish,
    platform+'必须按Release ID验证草稿、发布并回读');
+ }
+});
+
+test('iOS与Android独立Workflow各自清Run并维护唯一平台Cargo缓存',()=>{
+ for(const platform of ['ios','android']){
+  const workflow=readFileSync(new URL('../.github/workflows/'+platform+'.yml',import.meta.url),'utf8');
+  assert.ok(workflow.includes('name: citizenwallet.'+platform));
+  assert.ok(workflow.includes('key: citizenwallet-cargo-'+platform+'-${{ github.run_id }}-${{ github.run_attempt }}'));
+  assert.ok(workflow.includes('path: target/cache/cargo/'+platform));
+  assert.ok(workflow.includes('needs: release')&&workflow.includes('    if: always()'));
+  assert.ok(workflow.includes('CITIZENWALLET_RELEASE_RESULT: "${{ needs.release.result }}"'));
+  assert.ok(workflow.includes('node scripts/build.mjs ci-cleanup '+platform));
+  assert.ok(workflow.includes('actions: write'));
+  assert.doesNotMatch(workflow,new RegExp('target/cache/cargo/'+(platform==='ios'?'android':'ios'),'u'));
+  assert.ok(workflow.indexOf('ci-cleanup '+platform)>workflow.indexOf('ci-publish-release '+platform));
  }
 });
 

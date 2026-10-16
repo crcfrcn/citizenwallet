@@ -58,6 +58,12 @@ jobs:
             echo "CITIZENWALLET_GRADLE_BIN=$RUNNER_TEMP/gradle-9.1.0/bin/gradle" >> "$GITHUB_ENV"
             "$HOME/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager" 'build-tools;37.0.1' 'platforms;android-36' 'ndk;28.2.13676358'
           fi
+      - name: 恢复 iOS Cargo 增量缓存
+        uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57
+        with:
+          path: target/cache/cargo/ios
+          key: citizenwallet-cargo-ios-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: citizenwallet-cargo-ios-
       - name: 本 Runner 编译、签名并验收
         env:
           IOS_KEY: "${{ secrets.IOS_KEY }}"
@@ -67,6 +73,11 @@ jobs:
           set -euo pipefail
           test -n "$IOS_KEY" && test -n "$IOS_PROVISIONING_PROFILE"
           node scripts/build.mjs ci-build ios > "$RUNNER_TEMP/citizenwallet-ios-result.json"
+      - name: 保存 iOS Cargo 增量缓存
+        uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57
+        with:
+          path: target/cache/cargo/ios
+          key: citizenwallet-cargo-ios-${{ github.run_id }}-${{ github.run_attempt }}
       - name: 创建并回读本平台正式 GitHub Release
         shell: bash
         run: |
@@ -91,3 +102,31 @@ jobs:
         shell: bash
         run: |
           if [ -d "target/build/ios" ]; then node scripts/build.mjs finish ios; fi
+  cleanup:
+    if: always()
+    needs: release
+    runs-on: xcode-27
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      CITIZENWALLET_RELEASE_RESULT: "${{ needs.release.result }}"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b7965d0a48ff273f7fcc4a7b6c09
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 25.2.1
+      - name: 清理 iOS 已完成 Run 与 Cargo 缓存
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! node scripts/build.mjs ci-cleanup ios; then
+            echo '::error::iOS Run/Cargo 缓存清理失败；构建与 Release 结果保持原回执。'
+            exit 1
+          fi
