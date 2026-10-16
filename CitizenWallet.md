@@ -250,14 +250,13 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 - 现行两端均由 `.github/workflows/release-<平台>.yml` 与同名 MJS 独立执行正式自动化，不恢复旧 CI 文件或 Debug 包。注册表的固定公开链提交由 `lib/signing/chain_constants.dart` 唯一声明；工作流只读核对 Pallet 和业务调用索引，漂移失败，不从邻仓回写钱包源码。
 - 本机移动端 Build 在依赖准备前交付已验真 Flutter 与随包 Dart，工具缺失或验真失败立即停止；自动化不调用本机 Build。转账入口保持 `OnchainTransaction(4).transfer_with_remark(0)`，不得恢复 `Balances` 直签入口。
-- 自动化逐件验收 Android 未签名 APK/AAB 或 iOS 未签名 Runner.app 压缩包，交付与准确 Run/SHA 绑定的完整资产；本仓 `scripts/publish.mjs` 在本机签名并验真后才可形成正式包与 Release。iOS 与 Android 的版本及 build number 各自独立推进。
-- `APP_KEY` 与 CitizenApp 共用，由塔塔控制台唯一保管并在本机签名时交付，内容至少包含
+- 自动化在各自 GitHub Runner 内正式签名并验收 Android APK/AAB 与 iOS IPA，逐件绑定准确 Run/SHA；对应 workflow 创建、发布并回读正式 Release。`scripts/publish.mjs` 只读取已完成的正式 Release，应用商店和官网渠道上传仍待授权配置。iOS 与 Android 的版本及 build number 各自独立推进。
+- `APP_KEY` 与 CitizenApp 共用，Tower Console 加密密钥库保管本机签名真源；CitizenWallet Android workflow 从本仓 GitHub Actions `APP_KEY` Secret 读取镜像值，在 Runner 内签名 APK/AAB。轮换时须同步更新 Tower Console 与本仓 Secret。内容至少包含
   `keystore=<base64后的jks>` 和 `password=<keystore密码>`；默认 alias 为 `upload`，可增加
   `alias=<key别名>`，key password 默认复用 `password`。禁止普通查看、长期 keystore 文件和
   调试签名回退。
-- `IOS_KEY` 同样与 CitizenApp 共用，CitizenWallet 描述文件由控制台保管的
-  `WALLET_PROFILE` 提供。加密 PKCS#12 与临时钥匙串只在本机本次签名现场存在，随后立即清除。禁止普通查看、登录钥匙串长期私钥和密码认证回退。
-- 本仓 `scripts/publish.mjs` 公开准确未签名资产文件名供调度方提取，先核对成功 Run 的仓库、平台、提交、尝试次数、版本与未签名资产闭集，并逐件校验自动化清单和字节摘要；Android 在独占本机现场生成正式 APK/AAB，iOS 使用临时钥匙串签名 Runner.app 并生成 IPA。独立调用方交付本仓准确产物与临时签名材料，控制台调度时只从自身安全保管处按声明交付；签名临时现场用后清理。
+- `IOS_KEY` 同样与 CitizenApp 共用并由 Tower Console 加密保管；iOS workflow 使用本仓 GitHub Actions 签名 Secret 在 Runner 内签名。`WALLET_PROFILE` 仍由控制台保管供本机签名入口使用。签名材料不得进入源码或日志；Runner 临时签名现场结束即清理。
+- 本仓 `scripts/publish.mjs` 读取已发布 Release，先核对仓库、平台、提交、尝试次数、版本、资产闭集与字节摘要，再按已授权渠道分发；GitHub workflow 负责 CI 正式签名。
 - 本仓公开签名与发布函数不依赖控制台源码；正式任务仍按全局规则只由塔塔控制台发起，不提供绕过控制台的直接发布命令。
 - 本仓 `scripts/build.mjs` 声明本机签名与移动自动化的同仓 Node 回归；控制台一次编译任务先执行这些回归，再进入所选平台构建。
 - 本机签名接口在长驻控制台中按本仓 `scripts/config.mjs` 与 `scripts/build.mjs` 当前字节摘要重新读取需求和工具声明；保存时与使用时都消费所属最新修订，缺失或身份不符直接失败。
@@ -265,12 +264,12 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 - 本机签名工具以异步子进程执行并等待退出，超时终止本轮进程组；控制台 Worker 可继续处理其它产品任务。正式材料不进入工具日志，只有退出和产物回验结果可用于状态报告。
 - 本机签名所需 Xcode 或 Java、Android SDK 版本从本仓现有 Build 声明读取；控制台只核对已登记且已安装的工具，不在发布准备中安装或替换资源。Android 证书摘要使用 macOS 已有 `shasum -a 256` 核对。
 - iOS 本机签名前核对未签名压缩包的路径闭集并拒绝链接或特殊文件，提取后再次核对真实路径；临时钥匙串加入用户搜索列表前保存原列表，结束时恢复并删除本轮钥匙串。控制台同一时刻只允许一个移动端签名事务占用该共享用户状态。Android 本机版本核对使用所属产品交付的 build number，不继承 GitHub 运行环境。
-- 正式发布只接受本次本机签名回执，上传前重验产物字节、成功 Run 身份及其仍为本平台最新成功自动化，创建准确 Tag/Release 后逐件回读。写入失败尝试撤销本次准确 Tag/Release 并报告未确认回滚；新正式包完整回读后才清理同平台旧成功。商店分发继续只消费已确认正式 Release。
+- 正式发布只接受本次 GitHub workflow 签名回执，逐件重验签名产物、成功 Run 身份及其本平台 tag/commit；创建和发布按 GitHub 返回的 Release ID 回读。写入失败尝试撤销本次准确 Tag/Release 并报告未确认回滚；新正式包完整回读后才清理同平台旧成功。商店分发继续只消费已确认正式 Release。
 - 禁止 `continue-on-error`；单端失败必须使该端 Release 失败，但不得阻断另一端独立成功。
 
 ## Release 全量构建（第 7.4 步）
 
-正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。Android CI 在同一次 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 都写入本轮产品 `BUILD_DIR`；本机只执行 APK 任务。版本与未签名产物仍由本仓自动化生成；签名、正式产物校验和发布由本仓本机接口消费同一成功Run后执行。两端创建 Release 草稿前，工作流调用本仓 `ci-create-release-tag` 显式建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；引用不匹配或创建失败时，不创建 Release。GitHub 草稿可能以 `untagged-*` 地址返回，工作流须从返回地址解析 Release ID；草稿身份、tag、提交、资产均按该 ID 回读，正式发布通过 Release ID 修改 draft 状态，再次按 ID 验收。
+正式自动化固定从干净源码执行全量构建，显式关闭 Rust 增量编译及工具链内置缓存，不读取CI作业缓存且不复用本机编译中间物。Android CI 在同一次 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 都写入本轮产品 `BUILD_DIR`，随后使用本仓 GitHub Actions `APP_KEY` Secret 在 Runner 内签名。签名后从本轮 `$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer` 绝对路径回读并校验 APK 包名与版本，不依赖 Runner 的 `PATH` 搜索。iOS workflow 同样在 Runner 内使用其签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。两端创建 Release 草稿前，工作流调用本仓 `ci-create-release-tag` 显式建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；引用不匹配或创建失败时，不创建 Release。GitHub 草稿可能以 `untagged-*` 地址返回，工作流须从返回地址解析 Release ID；草稿身份、tag、提交、资产均按该 ID 回读，正式发布通过 Release ID 修改 draft 状态，再次按 ID 验收。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
 
@@ -705,9 +704,9 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 ## 配置需求公开接口
 
-本仓 `scripts/config.mjs` 是只读配置需求接口。本机正式签名需要与 CitizenApp 共用的 `APP_KEY`、`IOS_KEY`，以及本产品独有的 `WALLET_PROFILE`，按 `android-signing` 和 `ios-signing` 用途声明。桌面更新密钥和应用商店发布凭据当前没有本仓已实现的消费者，不作为现行需求登记；配置值不得进入源码。实际值迁入控制台和删除旧 GitHub Secrets 属于另行授权的操作。
+本仓 `scripts/config.mjs` 是只读配置需求接口。本机正式签名需要与 CitizenApp 共用的 `APP_KEY`、`IOS_KEY`，以及本产品独有的 `WALLET_PROFILE`，按 `android-signing` 和 `ios-signing` 用途声明。GitHub 正式自动化也在 Runner 内签名，故所需材料保存在本仓 GitHub Actions Secrets，并与 Tower Console Keychain 的本机真源保持一致；轮换时同步更新。桌面更新密钥和应用商店发布凭据当前没有本仓已实现的消费者，不作为现行需求登记；配置值不得进入源码、日志或文档。
 
-本机发布回归的临时目录先解析为真实路径，正式资产读取继续拒绝非规范目录、越界、额外文件和字节变化；测试同时覆盖这些拒绝路径。scripts/build.mjs在本产品完整Build内选择并执行测试；测试工具沿用本产品锁定声明，调度模式由调度方按声明交付路径，缺件失败。自动化仅交付未签名产物，本机正式签名、回执和上传复验保持原流程。
+本机发布回归的临时目录先解析为真实路径，正式资产读取继续拒绝非规范目录、越界、额外文件和字节变化；测试同时覆盖这些拒绝路径。`scripts/build.mjs` 在本产品完整 Build 内选择并执行测试；测试工具沿用本产品锁定声明，调度模式由调度方按声明交付路径，缺件失败。GitHub 自动化交付经 Runner 正式签名的产物并完成 Release 回读。
 
 控制台任务取消信号传入本仓签名和发布接口：本机签名工具终止本轮进程组并等待退出；发布请求立即中止后，使用不受取消信号影响的回查接口核对并撤销本次已确认归属的 Tag/Release。创建回执不明时不删除同名远端资源，并报告未闭合失败；历史清理与本次发布成功回执之间仍按本仓流程验真。
 
