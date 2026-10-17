@@ -3892,6 +3892,21 @@ export async function ciRetainReleases(platform,environment=process.env,{fetchIm
 }
 
 // GitHub 在当前 Runner 内完成编译、正式签名和 Release 资产准备；本机安装入口不参与。
+// CI保存的路径必须确有本平台Cargo宿主库和目标库，不能把空目录当作增量缓存。
+function checkedCargoCacheContents(platform,cache){
+ platformContract(platform);
+ const target=platform==='ios'?'aarch64-apple-ios':'aarch64-linux-android';
+ const suffix=platform==='ios'?'a':'so';
+ for(const file of [join(cache,'release','libcitizenwallet_signer.dylib'),
+  join(cache,target,'release','libcitizenwallet_signer.'+suffix)]){
+  const info=lstatSync(file,{throwIfNoEntry:false});
+  if(!info?.isFile()||info.isSymbolicLink()||info.size===0||realpathSync(file)!==file)
+   fail('GitHub '+platform+' Cargo增量缓存缺少实际原生编译产物');
+ }
+ return cache;
+}
+function verifiedCICargoCache(platform,work){return checkedCargoCacheContents(platform,cargoTargetDirectory(platform,work));}
+
 export async function ciBuild(platform,environment=process.env){
  platformContract(platform);
  const workflow=platform+'.yml',sha=environment.GITHUB_SHA,run=environment.GITHUB_RUN_ID,
@@ -3910,6 +3925,7 @@ export async function ciBuild(platform,environment=process.env){
   const {APP_KEY:_appKey,IOS_KEY:_iosKey,IOS_PROVISIONING_PROFILE:_iosProfile,...buildEnvironment}=environment;
   const env={...buildEnvironment,NODE:process.execPath,PRODUCT_NODE_BIN:process.execPath,
    CITIZENWALLET_AUTOMATION_VERSION:version,
+   CARGO_TARGET_DIR:cargoTargetDirectory(platform,work),
    [product.toUpperCase()+'_WORK_DIR']:work,[product.toUpperCase()+'_BUILD_WORK_DIR']:join(work,'work'),
    [product.toUpperCase()+'_DEPENDENCY_DIR']:join(work,'dependencies'),
    [product.toUpperCase()+'_BUILD_DIR']:buildRoot,[product.toUpperCase()+'_ARTIFACT_DIR']:work,
@@ -3922,6 +3938,7 @@ export async function ciBuild(platform,environment=process.env){
    if(platform==='android')prepareAndroidProjectInputs(work,env);
    await runEmbeddedBuild('wallet',[platform],env,project);
   }
+  verifiedCICargoCache(platform,work);
   const stage=join(work,'sign-stage'),output=join(stage,'build/release');
   mkdirSync(output,{recursive:true});
   if(platform==='android'){
@@ -5116,6 +5133,26 @@ test('本机 Cargo target cache 按平台独立于每轮编译现场',async()=>{
  await withFixedWork('test',work=>{
   assert.equal(workEnvironment({}).CARGO_TARGET_DIR,join(work,'cargo'),'测试任务不读写持久平台缓存');
  });
+});
+
+test('GitHub双平台Cargo缓存必须包含真实宿主库和各自目标库',context=>{
+ const base=realpathSync(mkdtempSync(join(tmpdir(),'wallet-ci-cargo-cache-')));
+ context.after(()=>rmSync(base,{recursive:true,force:true}));
+ for(const platform of ['ios','android']){
+  const cache=join(base,platform),target=platform==='ios'?'aarch64-apple-ios':'aarch64-linux-android';
+  const host=join(cache,'release','libcitizenwallet_signer.dylib');
+  const native=join(cache,target,'release','libcitizenwallet_signer.'+(platform==='ios'?'a':'so'));
+  assert.throws(()=>checkedCargoCacheContents(platform,cache),/缺少实际原生编译产物/u,'空缓存必须拒绝');
+  mkdirSync(dirname(host),{recursive:true});mkdirSync(dirname(native),{recursive:true});
+  writeFileSync(host,'host');
+  assert.throws(()=>checkedCargoCacheContents(platform,cache),/缺少实际原生编译产物/u,'只有宿主库不得通过');
+  writeFileSync(native,'native');
+  assert.equal(checkedCargoCacheContents(platform,cache),cache);
+  writeFileSync(native,'');
+  assert.throws(()=>checkedCargoCacheContents(platform,cache),/缺少实际原生编译产物/u,'零字节目标库必须拒绝');
+  unlinkSync(native);symlinkSync(host,native);
+  assert.throws(()=>checkedCargoCacheContents(platform,cache),/缺少实际原生编译产物/u,'目标库链接必须拒绝');
+ }
 });
 
 test('GitHub平台清理只删本仓main对应Workflow旧Run与旧Cargo缓存',async()=>{
