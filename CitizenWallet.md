@@ -264,12 +264,12 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 - 本机签名工具以异步子进程执行并等待退出，超时终止本轮进程组；控制台 Worker 可继续处理其它产品任务。正式材料不进入工具日志，只有退出和产物回验结果可用于状态报告。
 - 本机签名所需 Xcode 或 Java、Android SDK 版本从本仓现有 Build 声明读取；控制台只核对已登记且已安装的工具，不在发布准备中安装或替换资源。Android 证书摘要使用 macOS 已有 `shasum -a 256` 核对。
 - iOS 本机签名前核对未签名压缩包的路径闭集并拒绝链接或特殊文件，提取后再次核对真实路径；临时钥匙串加入用户搜索列表前保存原列表，结束时恢复并删除本轮钥匙串。控制台同一时刻只允许一个移动端签名事务占用该共享用户状态。Android 本机版本核对使用所属产品交付的 build number，不继承 GitHub 运行环境。
-- 正式发布只接受本次 GitHub workflow 签名回执，逐件重验签名产物、成功 Run 身份及其本平台 tag/commit；创建和发布按 GitHub 返回的 Release ID 回读。写入失败尝试撤销本次准确 Tag/Release 并报告未确认回滚；新正式包完整回读后才清理同平台旧成功。商店分发继续只消费已确认正式 Release。
+- 正式发布只接受本次 GitHub workflow 签名回执，逐件重验签名产物、成功 Run 身份及其本平台 tag/commit；创建和发布按 GitHub 返回的 Release ID 回读。写入失败尝试撤销本次准确 Tag/Release 并报告未确认回滚；新正式包完整回读后，末尾清理 Job 只保留同平台这一条正式 Release，并删除旧 Release 与准确对应的 Tag。商店分发继续只消费已确认正式 Release。
 - 禁止 `continue-on-error`；单端失败必须使该端 Release 失败，但不得阻断另一端独立成功。
 
 ## Release 全量构建（第 7.4 步）
 
-正式自动化按平台在独立 GitHub Runner 执行产品测试、全量原生构建、签名、正式包验真、Tag/Release 创建及回读；Android 在同一 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 写入本轮产品 `BUILD_DIR`，并使用 GitHub Actions `APP_KEY` Secret 签名；iOS 使用对应签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。本机与 GitHub Runner 的 Cargo 编译目标目录按平台落入 `target/cache/cargo/ios` 或 `target/cache/cargo/android`，不属于本轮 `target/build/<平台>` 临时现场；两者缓存互相隔离。GitHub workflow 按平台恢复并保存唯一 Run 键缓存，末尾清理 Job 独立裁剪该平台旧 Cargo cache。创建 Release 前，工作流调用本仓 `ci-create-release-tag` 建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；草稿身份、tag、提交、资产按 Release ID 回读，发布后再次按 ID 验收。
+正式自动化按平台在独立 GitHub Runner 执行产品测试、全量原生构建、签名、正式包验真、Tag/Release 创建及回读；Android 在同一 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 写入本轮产品 `BUILD_DIR`，并使用 GitHub Actions `APP_KEY` Secret 签名；iOS 使用对应签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。本机与 GitHub Runner 的 Cargo 编译目标目录按平台落入 `target/cache/cargo/ios` 或 `target/cache/cargo/android`，不属于本轮 `target/build/<平台>` 临时现场；两者缓存互相隔离。GitHub workflow 按平台恢复并保存唯一 Run 键缓存，末尾清理 Job 独立裁剪该平台旧 Cargo cache。创建 Release 前，工作流调用本仓 `ci-create-release-tag` 建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；草稿身份、tag、提交、资产按 Release ID 回读，发布后再次按 ID 验收。展示标题分别为`公民钱包 · ios-v<版本>`与`公民钱包 · android-v<版本>`，唯一 Tag 仍包含 Run ID 和 attempt，不能把展示标题当作 Tag。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
 
@@ -671,9 +671,11 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 - `.github/workflows/ios.yml` 与 `.github/workflows/android.yml`。
 - 平台产品构建、Tag/Release 验真及清理合同统一由 `scripts/build.mjs` 实现，控制台不复制产品逻辑。
 
-每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行；它只查询本仓 `main` 分支、该平台精确 Workflow 的已完成 `workflow_dispatch` 与旧 `push` Run。Run ID、工作流路径、分支、事件及仓库身份逐项核验；当前活动 Run 和另一结果类别的最新 Run 保留，成功与非成功终态各保留最新一条。删除请求和清理范围的回读失败会明确报错并使 cleanup Job 失败；之前已完成的构建与 Release 事实不被改写，但整个 Workflow 最终状态因此为失败。清理只由未来对应平台 Workflow 执行，不在改造时删除现有历史记录。
+每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行；它只查询本仓 `main` 分支、该平台精确 Workflow 的已完成 `workflow_dispatch` 与旧 `push` Run。Run ID、工作流路径、分支、事件及仓库身份逐项核验；当前活动 Run 和另一结果类别的最新 Run 保留，成功与非成功终态各保留最新一条。正式 Release 只有在本轮发布成功、发布证明、Tag、资产和展示标题均回读准确后，才删除同平台旧 Release 及存在的旧 Tag，每平台只保留本轮最新正式版；发布失败时不清旧正式版。cleanup Job 对 Release 使用最小必要 `contents: write`、对 Run 使用 `actions: write`。删除请求和清理范围的回读失败会明确报错并使 cleanup Job 失败；之前已完成的构建与 Release 事实不被改写，但整个 Workflow 最终状态因此为失败。用户本次单独授权清空已有本机和 GitHub 历史记录，之后的新流程仍按上述规则自动保留。
 
 所属构建、Tag/Release 与 Run/cache 清理回归位于 `scripts/build.mjs`，覆盖平台隔离、活动Run保护、完整分页、删除失败和缓存保留。控制台镜像只读取 `main` 上手动派发且已完成的对应平台 Run，每个平台的成功/失败各保留最新一条；本机活动任务独立显示。真实 GitHub 自动化与 Release 仍需按授权另行启动。
+
+旧 Release 清理先逐项核对发布证明、资产与存在的 Tag 指向；删除时先移除旧 Tag，再移除其 Release。旧草稿缺 Tag 可以单独删 Release；若任一删除请求失败，cleanup 明确失败，保留当前正式 Release，并使残留旧对象可由下一轮同一平台继续识别与清理。
 
 调度方按本仓supplyRequirements和prepareToolSupply取得工具候选；调度模式的获取、提交及执行使用供给方交付的能力；产品配方自行清理自己的临时生成物。缓存复用消费实际路径，运行Node版本/字节、Apple资源签名及工具全树复验不作为本机编译门禁；上游锁与正式应用签名、安装回读继续由各自真实流程执行。
 
