@@ -1,12 +1,18 @@
-name: 公民钱包 · android-v1.0.0
-run-name: 公民钱包 · android-v1.0.0
+name: 公民钱包
+run-name: 公民钱包-v${{ inputs.version }}
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 本平台自动化候选版本
+        required: true
+        type: string
 concurrency:
   group: "${{ github.repository }}-android"
   cancel-in-progress: false
 permissions:
   contents: write
+  actions: read
 jobs:
   release:
     if: github.ref == 'refs/heads/main'
@@ -14,6 +20,7 @@ jobs:
     timeout-minutes: 360
     env:
       GH_TOKEN: "${{ github.token }}"
+      CITIZENWALLET_AUTOMATION_VERSION: "${{ inputs.version }}"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -89,7 +96,7 @@ jobs:
           notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
           assets="$GITHUB_WORKSPACE/target/build/android/release-assets"
           node scripts/build.mjs ci-create-release-tag android
-          release_url="$(gh release create "$tag" "$assets"/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "公民钱包 · android-v$version" --notes-file "$notes" --draft --latest=false)"
+          release_url="$(gh release create "$tag" "$assets"/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "公民钱包-v$version" --notes-file "$notes" --draft --latest=false)"
           release_prefix="https://github.com/$GITHUB_REPOSITORY/releases/tag/"
           [[ "$release_url" == "$release_prefix"* ]]
           release_ref="${release_url#"$release_prefix"}"
@@ -114,6 +121,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: "${{ github.token }}"
+      CITIZENWALLET_AUTOMATION_VERSION: "${{ inputs.version }}"
       CITIZENWALLET_RELEASE_RESULT: "${{ needs.release.result }}"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09

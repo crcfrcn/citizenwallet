@@ -1977,6 +1977,7 @@ async function verifyAndroidSupply(receipt){
 }
 
 // 内嵌测试：正式实现之后，仅由 node --test 直接运行本文件时注册。
+
 if (inlineTestEntry) {
   void (async () => {
 // 使用真实文件事务与受控HTTPS数据，禁止测试下载或安装真实工具。
@@ -2536,7 +2537,7 @@ function workflowPlatformFromRef(environment){
 }
 function checkedWorkflowDisplay(platform,environment){
  return workflowPlatformFromRef(environment)===platform
-  &&environment.GITHUB_WORKFLOW===releaseDisplayTitle(platform,releaseVersion());
+  &&environment.GITHUB_WORKFLOW==='公民钱包';
 }
 export const testRoot=platform=>{
  const local=process.env.TMPDIR?relative(join(root,'target'),resolve(process.env.TMPDIR)).split(sep)[0]:undefined;
@@ -2701,18 +2702,19 @@ export function prepareAndroidProjectInputs(work,env) {
  for(const path of values)if(typeof path!=='string'||!isAbsolute(path)||resolve(path)!==path||/[\x00-\x1f]/u.test(path)||realpathSync(path)!==path||!lstatSync(path).isDirectory())fail('Android工程缺少验真SDK目录');
  const versions=[...readBuildSource(project,'pubspec.yaml').toString('utf8').matchAll(/^version:[ \t]*([0-9]+\.[0-9]+\.[0-9]+)(?:\+([0-9]+))?[ \t]*$/gmu)];
  if(versions.length!==1)fail('Android工程版本声明不唯一或无效');
- const code=env.CITIZENWALLET_CI_BUILD==='true'?env.CITIZENWALLET_CI_BUILD_NUMBER:versions[0][2]||'1';if(!/^[1-9][0-9]*$/u.test(code)||Number(code)>2147483647)fail('Android工程版本编号无效');
+ const ci=env.CITIZENWALLET_CI_BUILD==='true',name=ci?releaseVersion(env):versions[0][1];
+ const code=ci?env.CITIZENWALLET_CI_BUILD_NUMBER:versions[0][2]||'1';if(!/^[1-9][0-9]*$/u.test(code)||Number(code)>2147483647)fail('Android工程版本编号无效');
  const property=value=>value.split('').map(char=>char.charCodeAt(0)>126?'\\u'+char.charCodeAt(0).toString(16).padStart(4,'0'):/[\\:=#!\s]/u.test(char)?'\\'+char:char).join('');
- const content=[['sdk.dir',values[0]],['flutter.sdk',values[1]],['flutter.buildMode','release'],['flutter.versionName',versions[0][1]],['flutter.versionCode',code]].map(([key,value])=>key+'='+property(value)).join('\n')+'\n';
+ const content=[['sdk.dir',values[0]],['flutter.sdk',values[1]],['flutter.buildMode','release'],['flutter.versionName',name],['flutter.versionCode',code]].map(([key,value])=>key+'='+property(value)).join('\n')+'\n';
  const file=join(project,'android/local.properties');
  if(realpathSync(dirname(file))!==dirname(file))fail('Android工程配置经过链接');
  const info=lstatSync(file,{throwIfNoEntry:false});if(info){if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1||readFileSync(file,'utf8')!==content)fail('Android工程配置漂移');}
  else writeFileSync(file,content,{flag:'wx',mode:0o600});return file;
 }
 export const ANALYSIS_OPTIONS_SOURCE="# 本产品独立维护的 Flutter 分析规则。\ninclude: package:flutter_lints/flutter.yaml\n\nanalyzer:\n  exclude:\n    - \"**/*.g.dart\"\n\nlinter:\n  rules:\n    use_build_context_synchronously: true\n";
-export const BUILD_SHELL_SOURCES=Object.freeze({"wallet":"#!/usr/bin/env bash\n# 在本产品target内准确任务工程生成本机优化安装包；本脚本不启动、不安装产品。\n#\n# 用法：node scripts/build.mjs wallet <ios|android>\n#\n# 目标平台是必填参数，不做任何自动探测：探测总要在失败时选一个回落，\n# 而回落的那一端会被当成用户想编的那一端。每个调用方必须明确传入目标平台。\n#\n# 调用方交付本产品target内任务工程；独立准备同样使用本产品target。\nset -euo pipefail\nCITIZENWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nPLATFORM=\"${1:?缺少目标平台，用法：$0 <ios|android>}\"\nPREPARE_ONLY=false\nif [[ \"$PLATFORM\" == prepare-ios || \"$PLATFORM\" == prepare-android ]]; then\n  PREPARE_ONLY=true\n  PLATFORM=\"${PLATFORM#prepare-}\"\nfi\n[[ \"$PLATFORM\" == ios || \"$PLATFORM\" == android ]] \\\n  || { echo \"本机目标平台只接受 ios 或 android：$PLATFORM\" >&2; exit 1; }\n\n# 所有独立入口的工具临时状态归本产品target；宿主已交付的产品工作根继续归当前任务。\nPRODUCT_TEMP_SOURCE=\"$CITIZENWALLET_DIR\"\nPRODUCT_TARGET_TEMP_ROOT=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$PRODUCT_TEMP_SOURCE/scripts/build.mjs\" temporary-root \"${PLATFORM:-${platform:-}}\" 'ios')\" || exit 1\nif [[ -z \"${PRODUCT_WORK_DIR:-}\" && \"${TMPDIR:-}\" != \"$PRODUCT_TEMP_SOURCE/target/\"* ]]; then\n  export TMPDIR=\"$PRODUCT_TARGET_TEMP_ROOT/\"\nfi\nCITIZENWALLET_WORK_DIR=\"${CITIZENWALLET_WORK_DIR:-$PRODUCT_TARGET_TEMP_ROOT}\"\n# 源码根只读；两个端的Flutter、Pods和Gradle状态分别写入当前产品工作目录。\n# 中文注释：检出目录名称由调用方选择；产品身份只取普通 pubspec 文件中的唯一包名。\npython3 - \"$CITIZENWALLET_DIR\" <<'CHECK_SOURCE'\nfrom pathlib import Path\nimport re\nimport sys\nsource = Path(sys.argv[1])\nmanifest = source / 'pubspec.yaml'\nif manifest.is_symlink() or not manifest.is_file():\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nnames = re.findall(r'^name:[ \\t]*([^\\r\\n]+?)[ \\t]*$', manifest.read_text(), re.MULTILINE)\nif names != ['citizenwallet']:\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nCHECK_SOURCE\n# 写入前先绑定本产品、真实平台、当前工作根和准确工程；拒绝链接或其它任务路径。\nCREATE_PROJECT=false\nif [[ \"$PREPARE_ONLY\" == true && -z \"${CITIZENWALLET_PROJECT_ROOT:-}\" ]]; then\n  CREATE_PROJECT=true\n  export CITIZENWALLET_PROJECT_ROOT=\"$CITIZENWALLET_WORK_DIR/source-view\"\nfi\npython3 - \"$CITIZENWALLET_DIR\" \"$PLATFORM\" \"$CITIZENWALLET_WORK_DIR\" \"${CITIZENWALLET_PROJECT_ROOT:-}\" \"$PREPARE_ONLY\" <<'CHECK_PROJECT'\nfrom pathlib import Path\nimport os\nimport re\nimport sys\nsource, platform, work, project, preparing = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5]\nif not work.is_absolute() or work.resolve() != work:\n    raise SystemExit('产品工作目录必须为无链接规范绝对路径')\ntry:\n    parts = work.relative_to(source / 'target').parts\nexcept ValueError:\n    parts = ()\nsession = os.environ.get('NODE_TEST_CONTEXT') and len(parts) in (3, 5) and parts[:2] == ('test', 'sessions') and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', parts[2]) and (len(parts) == 3 or parts[3:] in {('build', 'ios'), ('build', 'android')})\nif parts != ('test',) and parts not in {('build', 'ios'), ('build', 'android')} and not session:\n    raise SystemExit('产品工作目录只允许本产品固定Build根或本轮测试会话')\nexpected = work / 'source-view' / str(source).lstrip('/')\nif not project.is_absolute() or project.resolve() != project or not (project == expected or preparing == 'true' and project == work / 'source-view'):\n    raise SystemExit('平台工程不属于当前任务')\nCHECK_PROJECT\n# 准备入口使用同一target边界；没有交付工程时只创建当前任务的准确空副本。\nif [[ \"$CREATE_PROJECT\" == true ]]; then\n  python3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" <<'CREATE_VIEW'\nfrom pathlib import Path\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\ntarget = Path(sys.argv[2])\nif target.exists() or target.is_symlink():\n    raise SystemExit('CitizenWallet本轮新工程必须为空目标')\nexcluded = {'.git', '.dart_tool', '.gradle', '.symlinks', 'Pods', 'build', 'target', 'node_modules', 'ephemeral', '.DS_Store', 'swiftpm'}\ngenerated = {'local.properties', 'Generated.xcconfig', 'flutter_export_environment.sh', '.flutter-plugins-dependencies', 'GeneratedPluginRegistrant.java', 'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m', 'GeneratedPluginRegistrant.swift'}\ndef visit(src, dst):\n    dst.mkdir(parents=True)\n    for child in sorted(src.iterdir()):\n        if child.name in excluded or child.name in generated:\n            continue\n        output = dst / child.name\n        if child.is_dir() and not child.is_symlink():\n            visit(child, output)\n        else:\n            resolved = child.resolve(strict=True)\n            if not resolved.is_relative_to(source) or not resolved.is_file():\n                raise SystemExit('源码文件链接越界或不是普通文件')\n            shutil.copy2(resolved, output)\nvisit(source, target)\nCREATE_VIEW\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" --input-type=module - \"$CITIZENWALLET_DIR/scripts/build.mjs\" \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" <<'MATERIALIZE_PLATFORM'\nimport {pathToFileURL} from 'node:url';\nconst [entry,source,project]=process.argv.slice(2);\nconst {materializePlatformInputs}=await import(pathToFileURL(entry));\nmaterializePlatformInputs(source,project);\nMATERIALIZE_PLATFORM\nfi\nexport CITIZENWALLET_PROJECT_ROOT=\"${CITIZENWALLET_PROJECT_ROOT:?必须提供本轮CitizenWallet Flutter工程根}\"\n[[ -d \"$CITIZENWALLET_PROJECT_ROOT\" && -f \"$CITIZENWALLET_PROJECT_ROOT/pubspec.yaml\" ]] \\\n  || { echo 'CitizenWallet Flutter 产品目录无效' >&2; exit 1; }\nBUILD_WORK_DIR=\"${CITIZENWALLET_BUILD_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work}\"\nDEPENDENCY_WORK_DIR=\"${CITIZENWALLET_DEPENDENCY_DIR:-$CITIZENWALLET_WORK_DIR/dependencies}\"\nBUILD_DIR=\"${CITIZENWALLET_BUILD_DIR:-$BUILD_WORK_DIR/flutter}\"\nARTIFACT_ROOT=\"${CITIZENWALLET_ARTIFACT_DIR:-$CITIZENWALLET_WORK_DIR}\"\n# Pub始终向工程根写.dart_tool；build-dir不能改变这个位置。先解析真实路径，\n# 拒绝工程根、.dart_tool及Kotlin持久目录链接把生成状态导回产品源码，再允许任何写入。\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$CITIZENWALLET_PROJECT_ROOT/.dart_tool\" \"$CITIZENWALLET_WORK_DIR\" \"$BUILD_WORK_DIR\" \"$BUILD_WORK_DIR/kotlin-project\" \"$DEPENDENCY_WORK_DIR\" \"$BUILD_DIR\" \"$ARTIFACT_ROOT\" <<'CHECK_OUTPUTS'\nfrom pathlib import Path\nimport sys\nwork = Path(sys.argv[1]).resolve()\nfor value in sys.argv[2:]:\n    raw = Path(value)\n    target = raw.resolve()\n    if not raw.is_absolute() or raw != target or not (target == work or work in target.parents):\n        raise SystemExit(f'CitizenWallet可写目录必须属于当前任务且不得经过链接：{value}')\nCHECK_OUTPUTS\n# 固定平台布局只装配到本轮工程；逐层拒绝目录链接，禁止生成物回写源目录。\npython3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\" \"$PREPARE_ONLY\" <<'PREPARE_PLATFORM'\nfrom pathlib import Path\nimport os\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject = Path(sys.argv[2])\nif project.resolve() != project or not any(project.is_relative_to(source / 'target' / scope) for scope in ('build', 'test')):\n    raise SystemExit('平台工程必须属于本产品build或test且不得经过链接')\npairs = [('ios/project/Runner.xcscheme', 'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme'), ('ios/project/Runner.xcworkspacedata', 'ios/Runner.xcworkspace/contents.xcworkspacedata'), ('ios/project/citizenwallet_signer.podspec', 'ios/signer/citizenwallet_signer.podspec'), ('ios/tests/RunnerUITests.xctestplan', 'ios/RunnerUITests/RunnerUITests.xctestplan'), ('ios/tests/WalletUITests.swift', 'ios/RunnerUITests/WalletUITests.swift'), ('ios/source/Runner-Bridging-Header.h', 'ios/Runner/Runner-Bridging-Header.h'), ('ios/source/HardwareSecretvaultPlugin.swift', 'ios/Runner/HardwareSecretvaultPlugin.swift'), ('ios/resources/InfoPlist.xcstrings', 'ios/Runner/InfoPlist.xcstrings'), ('ios/source/AppDelegate.swift', 'ios/Runner/AppDelegate.swift'), ('ios/source/Info.plist', 'ios/Runner/Info.plist'), ('ios/project/Runner.pbxproj', 'ios/Runner.xcodeproj/project.pbxproj'), ('ios/config/Debug.xcconfig', 'ios/Flutter/Debug.xcconfig'), ('ios/config/Release.xcconfig', 'ios/Flutter/Release.xcconfig'), ('ios/config/AppFrameworkInfo.plist', 'ios/Flutter/AppFrameworkInfo.plist'), ('ios/resources/AppIcon.json', 'ios/IconAssets/AppIcon.appiconset/Contents.json'), ('ios/resources/CitizenLaunchLogo.json', 'ios/IconAssets/CitizenLaunchLogo.imageset/Contents.json'), ('ios/project/project.xcworkspacedata', 'ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata'), ('ios/resources/CitizenLaunchScreen.storyboard', 'ios/Runner/Base.lproj/CitizenLaunchScreen.storyboard'), ('ios/resources/Main.storyboard', 'ios/Runner/Base.lproj/Main.storyboard')] if sys.argv[3] == 'ios' else [\n    ('android/gradle-wrapper.properties', 'android/gradle/wrapper/gradle-wrapper.properties'),\n    ('android/settings.gradle.kts', 'android/settings.gradle.kts'),\n    ('android/source/AndroidManifest.xml', 'android/app/src/main/AndroidManifest.xml')]\nif sys.argv[3] == 'android':\n    import re\n    resources = project / 'android/resources'\n    if not resources.is_dir() or resources.is_symlink():\n        raise SystemExit('缺少普通Android资源原件目录')\n    for resource in sorted(resources.iterdir()):\n        match = re.fullmatch(r'(drawable(?:-v21)?|mipmap-anydpi-v26|values(?:-en|-night)?)_([a-z][a-z0-9_]*\\.xml)', resource.name)\n        if not match:\n            raise SystemExit('Android资源原件名称无效：' + resource.name)\n        pairs.append(('android/resources/' + resource.name, 'android/app/res/' + match[1] + '/' + match[2]))\n# 先完成所有输入验真，避免缺少工具时留下半套平台入口。\n# 本轮Xcode工程和Android settings已由准备阶段改写；装配继续核验本轮普通文件。\ninputs = [(project / origin, destination) for origin, destination in pairs]\nfor relative in ('android/gradlew', 'android/gradlew.bat', 'android/gradle'):\n    if (source / relative).exists() or (source / relative).is_symlink():\n        raise SystemExit('产品源码残留Wrapper副本：' + relative)\nif sys.argv[3] == 'android' and sys.argv[4] == 'true':\n    # 远端直接运行Wrapper；原件来自该流程已安装的Flutter，不从产品取得或下载。\n    raw = os.environ.get('FLUTTER_ROOT', '')\n    flutter = Path(raw)\n    if not raw or not flutter.is_absolute() or not flutter.is_dir() or flutter.resolve() != flutter:\n        raise SystemExit('必须提供无链接的Flutter工具根')\n    for name in ('gradlew', 'gradlew.bat', 'gradle/wrapper/gradle-wrapper.jar'):\n        src = flutter / 'bin/cache/artifacts/gradle_wrapper' / name\n        if src.resolve() != src or not src.is_file() or src.stat().st_size == 0:\n            raise SystemExit('Flutter Wrapper原件缺失或为链接：' + name)\n        inputs.append((src, 'android/' + name))\nfor src, destination in inputs:\n    dst = project / destination\n    origin = str(src)\n    if not src.is_file() or src.is_symlink() or src.resolve() != src:\n        raise SystemExit('缺少普通平台输入：' + origin)\n    parent = dst.parent\n    while parent != project:\n        if parent.is_symlink():\n            raise SystemExit('平台目标祖先不得为链接：' + destination)\n        parent = parent.parent\n    if dst.is_symlink():\n        if dst.resolve(strict=True) != src:\n            raise SystemExit('平台入口来源不符：' + destination)\n        dst.unlink()\n    elif dst.exists():\n        if not dst.is_file() or dst.read_bytes() != src.read_bytes():\n            raise SystemExit('平台入口重复或内容漂移：' + destination)\n        continue\n    dst.parent.mkdir(parents=True, exist_ok=True)\n    shutil.copy2(src, dst)\n    if destination == 'android/gradlew':\n        dst.chmod(0o755)\nPREPARE_PLATFORM\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" icons \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\"\nif [[ \"$PREPARE_ONLY\" == true ]]; then\n  printf '%s\\n' \"$CITIZENWALLET_PROJECT_ROOT\"\n  exit 0\nfi\n# CocoaPods 会改写工程锁文件；先确认工程与工作目录均在当前任务target内，再把\n# 指向源码的锁文件链接原子替换为工程普通文件，禁止本机 Build 回写源码。\nif [[ \"$PLATFORM\" == ios ]]; then\n  python3 - \"$CITIZENWALLET_DIR/Podfile.lock\" \"$CITIZENWALLET_PROJECT_ROOT/ios/Podfile.lock\" <<'DETACH_IOS_LOCK'\nfrom pathlib import Path\nimport os\nimport tempfile\nimport sys\n\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject_lock = Path(sys.argv[2])\nif project_lock.is_symlink():\n    if project_lock.resolve(strict=True) != source:\n        raise SystemExit('CitizenWallet iOS工程锁文件链接目标不是本产品源码')\n    fd, temporary = tempfile.mkstemp(prefix='Podfile.lock.', dir=project_lock.parent)\n    try:\n        with os.fdopen(fd, 'wb') as output:\n            output.write(source.read_bytes())\n        os.replace(temporary, project_lock)\n    finally:\n        if os.path.exists(temporary):\n            os.unlink(temporary)\nDETACH_IOS_LOCK\nfi\ncd \"$CITIZENWALLET_PROJECT_ROOT\"\nexport CITIZENWALLET_BUILD_DIR=\"$BUILD_DIR\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$BUILD_WORK_DIR/native/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$BUILD_WORK_DIR/native/ios}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$BUILD_WORK_DIR/cargo}\"\nexport XDG_CONFIG_HOME=\"${XDG_CONFIG_HOME:-$DEPENDENCY_WORK_DIR/flutter-config}\"\nexport PUB_CACHE=\"${PUB_CACHE:-$DEPENDENCY_WORK_DIR/pub}\"\nexport GRADLE_USER_HOME=\"$DEPENDENCY_WORK_DIR/gradle\"\nexport CP_HOME_DIR=\"$DEPENDENCY_WORK_DIR/cocoapods\"\nexport TMPDIR=\"$CITIZENWALLET_WORK_DIR/tmp/\"\nexport FLUTTER_SUPPRESS_ANALYTICS=true COCOAPODS_DISABLE_STATS=true\nexport CITIZENWALLET_GRADLE_INIT_SCRIPT=\"${CITIZENWALLET_GRADLE_INIT_SCRIPT:-$CITIZENWALLET_WORK_DIR/gradle.init.gradle}\"\nexport CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR=\"${CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR:-$BUILD_WORK_DIR/flutter-gradle-plugin}\"\nmkdir -p \"$XDG_CONFIG_HOME\" \"$TMPDIR\" \"$CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\"\n# Flutter Gradle 插件原件只读；其 Kotlin 会话与编译状态必须写入本轮工作目录。\nprintf '%s\\n' \\\n  'gradle.beforeProject { project ->' \\\n  '    def source = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_ROOT\")' \\\n  '    def output = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\")' \\\n  '    if (source && output && project.rootDir.canonicalPath == new File(source).canonicalPath) {' \\\n  '        def suffix = project.path == \":\" ? \"root\" : project.path.substring(1).replace(\":\", \"/\")' \\\n  '        project.layout.buildDirectory.set(new File(output, suffix))' \\\n  '        project.extensions.extraProperties.set(\"kotlin.project.persistent.dir\", new File(output, suffix + \"/kotlin-project\").path)' \\\n  '    }' \\\n  '}' >\"$CITIZENWALLET_GRADLE_INIT_SCRIPT\"\n# Flutter只接受相对产品根的build-dir配置；把本轮绝对目录换算为相对路径，\n# 不能写死为产品源码下的cache/build，也不能在产品根生成build。\nFLUTTER_BUILD_RELATIVE=\"$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' \"$BUILD_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\")\"\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n\nPUB_GET_ARGS=(--enforce-lockfile)\nGRADLE_ARGS=(--no-daemon)\ncase \"${CITIZENWALLET_PUB_OFFLINE:-false}\" in\n  true|false) ;;\n  *) echo 'CITIZENWALLET_PUB_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\nPUB_OFFLINE=\"${CITIZENWALLET_PUB_OFFLINE:-false}\"\ncase \"${CITIZENWALLET_OFFLINE:-false}\" in\n  true) PUB_OFFLINE=true; GRADLE_ARGS+=(--offline); export CARGO_NET_OFFLINE=true ;;\n  false) ;;\n  *) echo 'CITIZENWALLET_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\n# 任务级Pub预装只约束Pub；原整体离线开关仍同时约束Pub、Gradle和Cargo。\nif [[ \"$PUB_OFFLINE\" == true ]]; then PUB_GET_ARGS+=(--offline); fi\n\n# Flutter 版本及依赖配置由产品工程自行决定。\n\n# Flutter在缓存工程生成配置和插件清单；Gradle只从公民钱包真实android根启动，\n# 项目缓存、依赖缓存、编译物和临时文件继续使用当前Android任务缓存。\n# Kotlin持久状态不受--project-cache-dir控制，必须另传官方工程属性避免源码生成.kotlin。\nbuild_android_release() {\n  local properties flutter_command flutter_sdk android_sdk gradle_bin\n  local flutter_version dart_defines link_target java_home expected_gradle_version actual_gradle_version\n  local gradle_tasks=(assembleRelease)\n  gradle_bin=\"${CITIZENWALLET_GRADLE_BIN:?Android Build必须提供绝对Gradle工具路径}\"\n  [[ \"$gradle_bin\" == /* && -f \"$gradle_bin\" && -x \"$gradle_bin\" ]] \\\n    || { echo \"Android Gradle工具无效：$gradle_bin\" >&2; return 1; }\n  properties=\"$CITIZENWALLET_PROJECT_ROOT/android/local.properties\"\n  flutter_command=\"$(command -v flutter)\"\n  while [[ -L \"$flutter_command\" ]]; do\n    link_target=\"$(readlink \"$flutter_command\")\"\n    [[ \"$link_target\" == /* ]] || link_target=\"$(cd \"$(dirname \"$flutter_command\")\" && pwd -P)/$link_target\"\n    flutter_command=\"$link_target\"\n  done\n  flutter_sdk=\"$(cd \"$(dirname \"$flutter_command\")/..\" && pwd -P)\"\n  android_sdk=\"${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}\"\n  # JDK选择属于CitizenWallet产品流程：保留调用方选择；本机未传入时使用\n  # Android Studio随包JBR。Gradle自行报告工具错误，不增加外部前置门禁。\n  java_home=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"\n  # Wrapper属性原文归本仓平台输入清单；本轮工程恢复后与调用方Gradle工具准确对照。\n  expected_gradle_version=\"$(sed -nE 's@^distributionUrl=.*gradle-([0-9][0-9.]*)-bin\\.zip$@\\1@p' \\\n    \"$CITIZENWALLET_PROJECT_ROOT/android/gradle/wrapper/gradle-wrapper.properties\")\"\n  [[ -n \"$expected_gradle_version\" ]] || { echo 'Android Gradle版本声明无效' >&2; return 1; }\n  actual_gradle_version=\"$(JAVA_HOME=\"$java_home\" \"$gradle_bin\" --version | sed -n 's/^Gradle //p' | head -n 1)\"\n  [[ \"$actual_gradle_version\" == \"$expected_gradle_version\" ]] \\\n    || { echo 'Android Gradle工具版本与钱包锁定版本不一致' >&2; return 1; }\n  # 完整prepare已写入验真SDK与原始版本，资源解析和编译消费同一普通配置。\n  [[ -f \"$properties\" && ! -L \"$properties\" ]] \\\n    || { echo 'Android工程缺少完整prepare交付的local.properties' >&2; return 1; }\n  flutter_version=\"$(flutter --version --machine)\"\n  dart_defines=\"$(printf '%s' \"$flutter_version\" | python3 -c '\nimport base64, json, sys\nvalue = json.load(sys.stdin)\nfields = (\n    (\"FLUTTER_VERSION\", \"frameworkVersion\"),\n    (\"FLUTTER_CHANNEL\", \"channel\"),\n    (\"FLUTTER_GIT_URL\", \"repositoryUrl\"),\n    (\"FLUTTER_FRAMEWORK_REVISION\", \"frameworkRevision\"),\n    (\"FLUTTER_ENGINE_REVISION\", \"engineRevision\"),\n    (\"FLUTTER_DART_VERSION\", \"dartSdkVersion\"),\n)\nprint(\",\".join(base64.b64encode(f\"{name}={value[key]}\".encode()).decode() for name, key in fields))\n')\"\n  if [[ \"${CITIZENWALLET_CI_BUILD:-false}\" == true ]]; then\n    # CI在同一Gradle任务图生成APK与AAB，二者都归属本轮产品BUILD_DIR。\n    gradle_tasks+=(bundleRelease)\n  fi\n  (\n    cd \"$CITIZENWALLET_PROJECT_ROOT/android\"\n    # 调用方提供同一已验真 Gradle 工具，任务目录只承载依赖和编译状态，不再下载工具分发包。\n    ANDROID_HOME=\"$android_sdk\" ANDROID_SDK_ROOT=\"$android_sdk\" JAVA_HOME=\"$java_home\" PATH=\"$java_home/bin:$PATH\" \\\n    CITIZENWALLET_FLUTTER_GRADLE_ROOT=\"$flutter_sdk/packages/flutter_tools/gradle\" \\\n    FLUTTER_ROOT=\"$flutter_sdk\" \"$gradle_bin\" \"${GRADLE_ARGS[@]}\" --stacktrace --no-problems-report \\\n      --init-script \"$CITIZENWALLET_GRADLE_INIT_SCRIPT\" \\\n      --project-cache-dir \"$BUILD_WORK_DIR/gradle-project\" \\\n      -Pkotlin.project.persistent.dir=\"$BUILD_WORK_DIR/kotlin-project\" \\\n      -Ptarget-platform=android-arm64 \\\n      -Ptarget=lib/main.dart \\\n      -Pbase-application-name=android.app.Application \\\n      -Pdart-defines=\"$dart_defines\" \\\n      -Pdart-obfuscation=false \\\n      -Ptrack-widget-creation=true \\\n      -Ptree-shake-icons=true \\\n      \"${gradle_tasks[@]}\"\n  )\n}\n\n# 仅清理当前工作目录中的候选包，不触碰源码或另一端。\nclean_platform_build_outputs() {\n  case \"$PLATFORM\" in\n    ios) rm -rf \"$BUILD_DIR/ios/iphoneos/Runner.app\" ;;\n    android) rm -f \"$BUILD_DIR/app/outputs/flutter-apk/\"*.apk ;;\n  esac\n  mkdir -p \"$BUILD_DIR\"\n}\n\n# 仅选择 Xcode 报告的一台可用 iOS 真机；不在无设备或多设备时回落模拟器。\nrun_ios_ui_tests() {\n  local xcodebuild_bin destinations device_id\n  xcodebuild_bin=\"${CITIZENWALLET_XCODEBUILD_BIN:?iOS Build必须提供绝对Xcode工具路径}\"\n  [[ \"$xcodebuild_bin\" == /* && -f \"$xcodebuild_bin\" && -x \"$xcodebuild_bin\" ]] \\\n    || { echo 'iOS Xcode工具无效' >&2; return 1; }\n  destinations=\"$(\"$xcodebuild_bin\" -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release -showdestinations)\"\n  device_id=\"$(printf '%s\\n' \"$destinations\" | python3 -c '\nimport re, sys\navailable = sys.stdin.read().split(\"Ineligible destinations\", 1)[0]\nids = re.findall(r\"\\{\\s*platform:iOS,\\s*arch:arm64,\\s*id:([0-9A-Fa-f-]+),\", available)\nif len(ids) != 1 or not re.fullmatch(r\"[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{16,}\", ids[0]):\n    raise SystemExit(\"iOS UI测试需要唯一可用真机\")\nprint(ids[0])\n')\"\n  # 测试计划关闭自动屏幕采集，避免触发钱包既有录屏保护；Release 测试应用与编译物均留在调用方工作根。\n  \"$xcodebuild_bin\" test \\\n    -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release \\\n    -destination \"platform=iOS,id=$device_id\" \\\n    -only-testing:RunnerUITests -parallel-testing-enabled NO \\\n    -collect-test-diagnostics never \\\n    -derivedDataPath \"$BUILD_WORK_DIR/xcode-ui\" \\\n    -resultBundlePath \"$BUILD_WORK_DIR/ios-ui-tests.xcresult\"\n}\n\n\n# 已跟踪的 pallet_registry.dart 是构建输入；本机编译不得回写共享源码索引。\n\necho \"==> 清理 ${PLATFORM} 平台构建产物...\"\nclean_platform_build_outputs\necho \"==> 获取依赖...\"\nflutter pub get \"${PUB_GET_ARGS[@]}\"\n# 本机钱包 Build 与 CI 使用同一套单元和组件测试。先在本轮target Cargo 目录\n# 编译宿主 FFI 动态库，再运行 Flutter 测试；测试失败立即阻止后续平台编译与安装。\necho \"==> 编译宿主签名库并运行钱包测试...\"\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native host\n# 测试缓存留在当前任务工程视图，避免相对路径重复拼接越界。\nflutter config --build-dir=test-build >/dev/null\nflutter test --no-pub\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n# Isar 与 QR 生成文件已经纳入仓库。本机四端编译只消费同一份源码，禁止两个平台在\n# 构建过程中同时运行 build_runner 改写源文件。\n\n# sr25519 原生签名库(schnorrkel)。签名、派生、验签全走它，缺库会在运行时才炸，\n# 所以必须先于 flutter build 产出；实现来自 citizenwallet/signing/sr25519.rs，\n# 由公民钱包独立维护。\necho \"==> 编译原生签名库（${PLATFORM}）...\"\n# 使用所属产品构建入口的绝对路径，工作目录切换后仍定位同一实现。\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native \"$PLATFORM\"\n\n# 本脚本编译并运行既有测试；完整Build由产品入口继续签名验真、安装和回读。\n# `--release`只是本机优化配置，不表示或触发正式Release流程。\necho \"==> 编译本机优化安装包...\"\nif [[ \"$PLATFORM\" == ios ]]; then\n  if [[ \"${CITIZENWALLET_CI_BUILD:-false}\" == true ]]; then\n    flutter build ios --release --no-codesign --build-number=\"${CITIZENWALLET_CI_BUILD_NUMBER:?}\"\n  else\n    flutter build ios --release\n    echo \"==> 在唯一真机运行 Release UI 测试...\"\n    run_ios_ui_tests\n  fi\n  IOS_APP=\"$BUILD_DIR/ios/iphoneos/Runner.app\"\n  if [[ \"${CITIZENWALLET_CI_BUILD:-false}\" != true ]]; then\n    \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-ios-package \"$IOS_APP\"\n  fi\n  echo \"\"\n  echo \"==> iOS Release编译和真机测试完成，继续签名验真、安装及回读。\"\nelif [[ \"$PLATFORM\" == android ]]; then\n  build_android_release\n  ANDROID_APK=\"$BUILD_DIR/app/outputs/flutter-apk/app-release.apk\"\n  [[ -f \"$ANDROID_APK\" ]] || {\n    echo \"Android 本机无私钥 APK 不存在\" >&2\n    exit 1\n  }\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-android-package \"$ANDROID_APK\"\n  # 未签名APK仅留在本轮工作根；产品完整入口随后使用已有身份签名、安装和回读。\n  mkdir -p \"$ARTIFACT_ROOT\"\n  cp \"$ANDROID_APK\" \"$ARTIFACT_ROOT/android.apk\"\n  echo \"==> Android未签名APK编译完成，继续使用已有身份签名、安装及回读。\"\nfi\n","native":"#!/usr/bin/env bash\n# 编译 CitizenWallet 冷钱包原生密码学库，放到 Flutter 能自动打包的位置。\n#\n# sr25519签名实现只属于citizenwallet/signing/sr25519.rs。\n# 本库是冷端FFI外壳，永久离线且不需要链。\n#\n# 前置条件：当前Rust编译器已具备目标平台标准库；本脚本只读检查，不自动安装。\n#\n# 用法：\n#   node scripts/build.mjs native            # 编译所有平台\n#   node scripts/build.mjs native android    # 仅 Android\n#   node scripts/build.mjs native ios        # 仅 iOS\n#   node scripts/build.mjs native macos      # 仅 macOS（flutter test 用）\nset -euo pipefail\n\nWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nRUST_DIR=\"$WALLET_DIR/signing\"\nLIB_NAME=\"libcitizenwallet_signer\"\nTARGET=\"${1:-all}\"\n\n# 宿主与平台库同属本轮产品工作根；独立调用也使用本产品声明的平台target。\n# 复用公开工作根校验，禁止旧“整棵源码外”规则误拒绝已验真的target任务。\nCITIZENWALLET_WORK_DIR=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" --input-type=module - \"$WALLET_DIR/scripts/build.mjs\" \"${CITIZENWALLET_WORK_DIR:-${PRODUCT_WORK_DIR:-}}\" \"$TARGET\" \"${PLATFORM:-${platform:-}}\" <<'CHECK_WORK'\nimport {pathToFileURL} from 'node:url';\nimport {dirname,join,relative,sep} from 'node:path';\nconst [entry,provided,target,explicit]=process.argv.slice(2);\nconst {checkWork,productTarget,temporaryRoot}=await import(pathToFileURL(entry));\nconst requested=target==='android'||target==='verify-android-package'?'android':target==='ios'||target==='verify-ios-package'?'ios':undefined;\nconst platform=explicit||requested||'ios';\nif(requested&&requested!==platform)throw Error('原生目标与当前任务平台不符');\nconst work=provided?checkWork(provided):temporaryRoot(platform,'tmp');\nif(!work.startsWith(productTarget(platform)+sep))throw Error('原生工作根与当前任务平台不符');\nprocess.stdout.write(work+'\\n');\nCHECK_WORK\n)\" || exit 1\nCITIZENWALLET_NATIVE_WORK_DIR=\"${CITIZENWALLET_NATIVE_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work/native}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/cargo-target}\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/ios}\"\n# 原生库与临时状态只写当前任务；Cargo仅可复用本产品同平台固定缓存。\nexport TMPDIR=\"${TMPDIR:-$CITIZENWALLET_WORK_DIR/tmp/}\"\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_NATIVE_WORK_DIR\" \"$CARGO_TARGET_DIR\" \"$CITIZENWALLET_NATIVE_ANDROID_DIR\" \"$CITIZENWALLET_NATIVE_IOS_DIR\" \"$TMPDIR\" \"$WALLET_DIR\" <<'CHECK_TARGET'\nfrom pathlib import Path\nimport sys\nwork, source = Path(sys.argv[1]), Path(sys.argv[7])\nif source.resolve() != source or work.resolve() != work:\n    raise SystemExit('产品源码根或原生工作根经过链接')\nplatform = work.name if work.parent == source / 'target/build' and work.name in ('ios', 'android') else None\ncache = source / 'target/cache/cargo' / platform if platform else None\nfor index, value in enumerate(sys.argv[2:7]):\n    target = Path(value)\n    in_work = target != work and target.is_relative_to(work)\n    same_platform_cache = index == 1 and cache is not None and target == cache\n    if not target.is_absolute() or target.resolve() != target or not (in_work or same_platform_cache):\n        raise SystemExit('原生产物与临时目录必须属于当前任务；Cargo仅允许本平台固定缓存且不得经过链接：' + value)\nCHECK_TARGET\nmkdir -p \"$TMPDIR\"\n\nensure_target() {\n  local target=\"$1\" target_lib\n  # 只检查当前Rust编译器已有的目标库；缺失即停止，构建不得自动安装工具。\n  target_lib=\"$(rustc --print target-libdir --target \"$target\")\" || return 1\n  [[ \"$target_lib\" == /* && -d \"$target_lib\" ]] \\\n    || { echo \"错误: Rust目标库目录无效：$target\" >&2; return 1; }\n  local core_libraries=(\"$target_lib\"/libcore-*.rlib)\n  local std_libraries=(\"$target_lib\"/libstd-*.rlib)\n  [[ -f \"${core_libraries[0]}\" && -f \"${std_libraries[0]}\" ]] \\\n    || { echo \"错误: 当前Rust缺少已安装目标库：${target}；构建停止\" >&2; return 1; }\n}\n\n# 4个sr25519 C符号必须齐全，禁止交付额外用途钥符号，否则 Dart 侧 lookupFunction 会在运行时才失败。\n# 注意平台差异：ELF 用 -D，Mach-O 用 -g，用错标志会误判为 0。\nverify_symbols() {\n  local lib=\"$1\"\n  local nm_flag=\"$2\"\n  local nm_bin\n  nm_bin=\"$(command -v llvm-nm || true)\"\n  if [ -z \"$nm_bin\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    nm_bin=\"$(ls \"$sdk_home\"/ndk/*/toolchains/llvm/prebuilt/*/bin/llvm-nm 2>/dev/null | tail -1 || true)\"\n  fi\n  if [ -z \"$nm_bin\" ]; then\n    echo \"错误: 未找到 llvm-nm，不能验证原生库导出符号。\"\n    return 1\n  fi\n  local signer_count removed_export_count\n  signer_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'citizen_sr25519' || true)\"\n  removed_export_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'account_crypto_' || true)\"\n  if [ \"$signer_count\" != \"4\" ] || [ \"$removed_export_count\" != \"0\" ]; then\n    echo \"错误: $lib 符号不完整（citizen_sr25519_*=$signer_count/4, 禁用导出=$removed_export_count/0）\"\n    return 1\n  fi\n  echo \"    符号检查通过：citizen_sr25519_*=4, 禁用导出=0\"\n}\n\nverify_android_package() {\n  local package=\"$1\" expected=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a/$LIB_NAME.so\" entry temporary packaged\n  [[ -f \"$package\" ]] || { echo \"错误: Android 包不存在：$package\"; return 1; }\n  [[ -f \"$expected\" ]] || { echo \"错误: Android 原生库不存在：$expected\"; return 1; }\n  case \"$package\" in\n    *.apk) entry=\"lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *.aab) entry=\"base/lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *) echo \"错误: 只支持校验 APK/AAB：$package\"; return 1 ;;\n  esac\n  # 中文注释：Android 打包会剥离调试段，不能按原文件字节比对；从最终包提取后验证\n  # ELF 架构和真实导出符号，缺失、错 ABI 或错误库都会在上传前失败。\n  temporary=\"$(mktemp -d)\"\n  packaged=\"$temporary/$LIB_NAME.so\"\n  unzip -p \"$package\" \"$entry\" > \"$packaged\" || { rm -rf \"$temporary\"; return 1; }\n  [[ -s \"$packaged\" ]] || { rm -rf \"$temporary\"; echo \"错误: Android 包内原生库为空：$entry\"; return 1; }\n  file \"$packaged\" | grep -Eq 'ARM aarch64|ARM64' || {\n    rm -rf \"$temporary\"; echo \"错误: Android 包内原生库不是 arm64：$entry\"; return 1;\n  }\n  verify_symbols \"$packaged\" -D || { rm -rf \"$temporary\"; return 1; }\n  rm -rf \"$temporary\"\n  if unzip -Z1 \"$package\" | grep -E \"(^|/)lib/(armeabi-v7a|x86|x86_64)/$LIB_NAME\\\\.so$\"; then\n    echo \"错误: Android 包含未支持 ABI 的原生库。\"; return 1\n  fi\n  echo \"Android 包原生库门禁通过：$entry\"\n}\n\nverify_ios_package() {\n  local app_bundle=\"$1\" executable nm_bin symbols\n  executable=\"$app_bundle/Runner\"\n  [[ -f \"$executable\" ]] || { echo \"错误: iOS Runner 不存在：$executable\"; return 1; }\n  [[ \"$(lipo -archs \"$executable\")\" = \"arm64\" ]] || {\n    echo \"错误: iOS 真机包必须且只能包含 arm64：$(lipo -archs \"$executable\")\"; return 1;\n  }\n  nm_bin=\"$(xcrun --find llvm-nm)\"\n  symbols=\"$(\"$nm_bin\" -gU \"$executable\" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' || true)\"\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^citizen_sr25519_' || true)\" = \"4\" ]] || {\n    echo \"错误: iOS Runner 的 citizen_sr25519_* 符号不完整。\"; return 1;\n  }\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^account_crypto_' || true)\" = \"0\" ]] || {\n    echo \"错误: iOS Runner包含禁用的用途钥导出。\"; return 1;\n  }\n  echo \"iOS 包原生库门禁通过：arm64与4个sr25519 FFI符号完整，禁用导出为零\"\n}\n\nbuild_android() {\n  echo \"\"\n  echo \"=== 编译 Android (arm64-v8a) ===\"\n  ensure_target aarch64-linux-android\n\n  local ndk_home=\"${ANDROID_NDK_HOME:-}\"\n  if [ -z \"$ndk_home\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    ndk_home=\"$(ls -d \"$sdk_home/ndk/\"* 2>/dev/null | sort -V | tail -1 || true)\"\n  fi\n  if [ -z \"$ndk_home\" ] || [ ! -d \"$ndk_home\" ]; then\n    echo \"错误: 未找到 Android NDK。请设置 ANDROID_NDK_HOME 或通过 Android Studio 安装 NDK。\"\n    return 1\n  fi\n  echo \"使用 NDK: $ndk_home\"\n\n  local toolchain=\"\"\n  case \"$(uname -s)\" in\n    Darwin)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-x86_64\"\n      if [ ! -d \"$toolchain\" ]; then\n        toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-aarch64\"\n      fi\n      ;;\n    Linux)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/linux-x86_64\"\n      ;;\n    *)\n      echo \"错误: 当前系统不支持自动定位 Android NDK toolchain: $(uname -s)\"\n      return 1\n      ;;\n  esac\n  if [ ! -d \"$toolchain\" ]; then\n    echo \"错误: 未找到 Android NDK toolchain: $toolchain\"\n    return 1\n  fi\n\n  export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export CC_aarch64_linux_android=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export AR_aarch64_linux_android=\"$toolchain/bin/llvm-ar\"\n\n  cd \"$RUST_DIR\"\n  cargo build --release --target aarch64-linux-android\n\n  # CitizenWallet Android 唯一支持 arm64-v8a；禁止重新生成任何 32 位或 x86 ABI。\n  local arm64_dest=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a\"\n  mkdir -p \"$arm64_dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-linux-android/release/$LIB_NAME.so\" \"$arm64_dest/\"\n  echo \"Android arm64-v8a: $arm64_dest/$LIB_NAME.so ($(wc -c < \"$arm64_dest/$LIB_NAME.so\" | tr -d ' ') bytes)\"\n  verify_symbols \"$arm64_dest/$LIB_NAME.so\" -D\n}\n\nbuild_ios() {\n  echo \"\"\n  echo \"=== 编译 iOS (arm64 真机) ===\"\n  ensure_target aarch64-apple-ios\n\n  # 宿主测试继承macOS SDK；真机目标必须切到同一已供给Xcode的iphoneos SDK。\n  # xcrun只读定位已安装SDK，不下载，不改变全流程或宿主的SDKROOT。\n  local ios_sdk\n  ios_sdk=\"$(\"${XCRUN:-xcrun}\" --sdk iphoneos --show-sdk-path)\" || return 1\n  [[ \"$ios_sdk\" == /* && -d \"$ios_sdk\" ]] \\\n    || { echo \"错误: 已供给Xcode缺少iOS SDK\" >&2; return 1; }\n  cd \"$RUST_DIR\"\n  # 真机Cargo明确消费资源回执的Clang，不从PATH寻找cc或其它版本。\n  local ios_clang=\"${CC:?缺少已验真Xcode的Clang入口}\"\n  [[ \"$ios_clang\" == /* && -f \"$ios_clang\" && -x \"$ios_clang\" && ! -L \"$ios_clang\" ]] \\\n    || { echo \"错误: 缺少已供给Clang规范绝对入口\" >&2; return 1; }\n  SDKROOT=\"$ios_sdk\" CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=\"$ios_clang\" \\\n    CC_aarch64_apple_ios=\"$ios_clang\" cargo build --release --target aarch64-apple-ios\n\n  # iOS 用**静态库**而非 dylib：裸 .dylib 需嵌入 + 单独签名，且 App Store 要求\n  # 动态库必须包在 .framework 里；静态库直接链进 App 二进制，无这些坑。\n  # 符号经 podspec 的 -force_load 保留，Dart 侧用 DynamicLibrary.process() 取。\n  local dest=\"${CITIZENWALLET_NATIVE_IOS_DIR:?缺少CitizenWallet iOS原生库目录}\"\n  mkdir -p \"$dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-apple-ios/release/$LIB_NAME.a\" \"$dest/\"\n  echo \"iOS arm64: $dest/$LIB_NAME.a ($(wc -c < \"$dest/$LIB_NAME.a\" | tr -d ' ') bytes)\"\n  verify_symbols \"$dest/$LIB_NAME.a\" \"\"\n}\n\nbuild_host() {\n  echo \"\"\n  echo \"=== 编译宿主平台动态库 (flutter test 用) ===\"\n  cd \"$RUST_DIR\"\n  # host 调试库给 Dart FFI / flutter test 直接 dlopen；release profile 已设\n  # strip=false，本机 dyld 不会报 LINKEDIT 对齐错误。\n  cargo build --release\n\n  # 宿主扩展名：macOS 产 .dylib，Linux 产 .so；Dart 侧 native_sr25519.dart 按同一规则取。\n  local host_ext\n  case \"$(uname -s)\" in\n    Darwin) host_ext=dylib ;;\n    *)      host_ext=so ;;\n  esac\n  local host_lib=\"$CARGO_TARGET_DIR/release/$LIB_NAME.$host_ext\"\n  echo \"宿主库: $host_lib ($(wc -c < \"$host_lib\" | tr -d ' ') bytes)\"\n  verify_symbols \"$host_lib\" -g\n}\n\ncase \"$TARGET\" in\n  android) build_android ;;\n  ios)     build_ios ;;\n  host|macos|linux) build_host ;;\n  verify-android-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-android-package <apk|aab>\"; exit 1; }\n    verify_android_package \"$2\"\n    exit 0\n    ;;\n  verify-ios-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-ios-package <Runner.app>\"; exit 1; }\n    verify_ios_package \"$2\"\n    exit 0\n    ;;\n  all)\n    build_android\n    build_ios\n    build_host\n    ;;\n  *)\n    echo \"用法: $0 [android|ios|macos|all|verify-android-package|verify-ios-package]\"\n    exit 1\n    ;;\nesac\n\necho \"\"\necho \"=== 编译完成 ===\"\necho \"flutter build / flutter run 会自动把 native library 打包进 App。\"\n"});
+export const BUILD_SHELL_SOURCES=Object.freeze({"wallet":"#!/usr/bin/env bash\n# 在本产品target内准确任务工程生成本机优化安装包；本脚本不启动、不安装产品。\n#\n# 用法：node scripts/build.mjs wallet <ios|android>\n#\n# 目标平台是必填参数，不做任何自动探测：探测总要在失败时选一个回落，\n# 而回落的那一端会被当成用户想编的那一端。每个调用方必须明确传入目标平台。\n#\n# 调用方交付本产品target内任务工程；独立准备同样使用本产品target。\nset -euo pipefail\nCITIZENWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nPLATFORM=\"${1:?缺少目标平台，用法：$0 <ios|android>}\"\nPREPARE_ONLY=false\nif [[ \"$PLATFORM\" == prepare-ios || \"$PLATFORM\" == prepare-android ]]; then\n  PREPARE_ONLY=true\n  PLATFORM=\"${PLATFORM#prepare-}\"\nfi\n[[ \"$PLATFORM\" == ios || \"$PLATFORM\" == android ]] \\\n  || { echo \"本机目标平台只接受 ios 或 android：$PLATFORM\" >&2; exit 1; }\n\n# 所有独立入口的工具临时状态归本产品target；宿主已交付的产品工作根继续归当前任务。\nPRODUCT_TEMP_SOURCE=\"$CITIZENWALLET_DIR\"\nPRODUCT_TARGET_TEMP_ROOT=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$PRODUCT_TEMP_SOURCE/scripts/build.mjs\" temporary-root \"${PLATFORM:-${platform:-}}\" 'ios')\" || exit 1\nif [[ -z \"${PRODUCT_WORK_DIR:-}\" && \"${TMPDIR:-}\" != \"$PRODUCT_TEMP_SOURCE/target/\"* ]]; then\n  export TMPDIR=\"$PRODUCT_TARGET_TEMP_ROOT/\"\nfi\nCITIZENWALLET_WORK_DIR=\"${CITIZENWALLET_WORK_DIR:-$PRODUCT_TARGET_TEMP_ROOT}\"\n# 源码根只读；两个端的Flutter、Pods和Gradle状态分别写入当前产品工作目录。\n# 中文注释：检出目录名称由调用方选择；产品身份只取普通 pubspec 文件中的唯一包名。\npython3 - \"$CITIZENWALLET_DIR\" <<'CHECK_SOURCE'\nfrom pathlib import Path\nimport re\nimport sys\nsource = Path(sys.argv[1])\nmanifest = source / 'pubspec.yaml'\nif manifest.is_symlink() or not manifest.is_file():\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nnames = re.findall(r'^name:[ \\t]*([^\\r\\n]+?)[ \\t]*$', manifest.read_text(), re.MULTILINE)\nif names != ['citizenwallet']:\n    raise SystemExit('citizenwallet本机Build源码身份无效')\nCHECK_SOURCE\n# 写入前先绑定本产品、真实平台、当前工作根和准确工程；拒绝链接或其它任务路径。\nCREATE_PROJECT=false\nif [[ \"$PREPARE_ONLY\" == true && -z \"${CITIZENWALLET_PROJECT_ROOT:-}\" ]]; then\n  CREATE_PROJECT=true\n  export CITIZENWALLET_PROJECT_ROOT=\"$CITIZENWALLET_WORK_DIR/source-view\"\nfi\npython3 - \"$CITIZENWALLET_DIR\" \"$PLATFORM\" \"$CITIZENWALLET_WORK_DIR\" \"${CITIZENWALLET_PROJECT_ROOT:-}\" \"$PREPARE_ONLY\" <<'CHECK_PROJECT'\nfrom pathlib import Path\nimport os\nimport re\nimport sys\nsource, platform, work, project, preparing = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5]\nif not work.is_absolute() or work.resolve() != work:\n    raise SystemExit('产品工作目录必须为无链接规范绝对路径')\ntry:\n    parts = work.relative_to(source / 'target').parts\nexcept ValueError:\n    parts = ()\nsession = os.environ.get('NODE_TEST_CONTEXT') and len(parts) in (3, 5) and parts[:2] == ('test', 'sessions') and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', parts[2]) and (len(parts) == 3 or parts[3:] in {('build', 'ios'), ('build', 'android')})\nif parts != ('test',) and parts not in {('build', 'ios'), ('build', 'android')} and not session:\n    raise SystemExit('产品工作目录只允许本产品固定Build根或本轮测试会话')\nexpected = work / 'source-view' / str(source).lstrip('/')\nif not project.is_absolute() or project.resolve() != project or not (project == expected or preparing == 'true' and project == work / 'source-view'):\n    raise SystemExit('平台工程不属于当前任务')\nCHECK_PROJECT\n# 准备入口使用同一target边界；没有交付工程时只创建当前任务的准确空副本。\nif [[ \"$CREATE_PROJECT\" == true ]]; then\n  python3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" <<'CREATE_VIEW'\nfrom pathlib import Path\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\ntarget = Path(sys.argv[2])\nif target.exists() or target.is_symlink():\n    raise SystemExit('CitizenWallet本轮新工程必须为空目标')\nexcluded = {'.git', '.dart_tool', '.gradle', '.symlinks', 'Pods', 'build', 'target', 'node_modules', 'ephemeral', '.DS_Store', 'swiftpm'}\ngenerated = {'local.properties', 'Generated.xcconfig', 'flutter_export_environment.sh', '.flutter-plugins-dependencies', 'GeneratedPluginRegistrant.java', 'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m', 'GeneratedPluginRegistrant.swift'}\ndef visit(src, dst):\n    dst.mkdir(parents=True)\n    for child in sorted(src.iterdir()):\n        if child.name in excluded or child.name in generated:\n            continue\n        output = dst / child.name\n        if child.is_dir() and not child.is_symlink():\n            visit(child, output)\n        else:\n            resolved = child.resolve(strict=True)\n            if not resolved.is_relative_to(source) or not resolved.is_file():\n                raise SystemExit('源码文件链接越界或不是普通文件')\n            shutil.copy2(resolved, output)\nvisit(source, target)\nCREATE_VIEW\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" --input-type=module - \"$CITIZENWALLET_DIR/scripts/build.mjs\" \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" <<'MATERIALIZE_PLATFORM'\nimport {pathToFileURL} from 'node:url';\nconst [entry,source,project]=process.argv.slice(2);\nconst {materializePlatformInputs}=await import(pathToFileURL(entry));\nmaterializePlatformInputs(source,project);\nMATERIALIZE_PLATFORM\nfi\nexport CITIZENWALLET_PROJECT_ROOT=\"${CITIZENWALLET_PROJECT_ROOT:?必须提供本轮CitizenWallet Flutter工程根}\"\n[[ -d \"$CITIZENWALLET_PROJECT_ROOT\" && -f \"$CITIZENWALLET_PROJECT_ROOT/pubspec.yaml\" ]] \\\n  || { echo 'CitizenWallet Flutter 产品目录无效' >&2; exit 1; }\nBUILD_WORK_DIR=\"${CITIZENWALLET_BUILD_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work}\"\nDEPENDENCY_WORK_DIR=\"${CITIZENWALLET_DEPENDENCY_DIR:-$CITIZENWALLET_WORK_DIR/dependencies}\"\nBUILD_DIR=\"${CITIZENWALLET_BUILD_DIR:-$BUILD_WORK_DIR/flutter}\"\nARTIFACT_ROOT=\"${CITIZENWALLET_ARTIFACT_DIR:-$CITIZENWALLET_WORK_DIR}\"\n# Pub始终向工程根写.dart_tool；build-dir不能改变这个位置。先解析真实路径，\n# 拒绝工程根、.dart_tool及Kotlin持久目录链接把生成状态导回产品源码，再允许任何写入。\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$CITIZENWALLET_PROJECT_ROOT/.dart_tool\" \"$CITIZENWALLET_WORK_DIR\" \"$BUILD_WORK_DIR\" \"$BUILD_WORK_DIR/kotlin-project\" \"$DEPENDENCY_WORK_DIR\" \"$BUILD_DIR\" \"$ARTIFACT_ROOT\" <<'CHECK_OUTPUTS'\nfrom pathlib import Path\nimport sys\nwork = Path(sys.argv[1]).resolve()\nfor value in sys.argv[2:]:\n    raw = Path(value)\n    target = raw.resolve()\n    if not raw.is_absolute() or raw != target or not (target == work or work in target.parents):\n        raise SystemExit(f'CitizenWallet可写目录必须属于当前任务且不得经过链接：{value}')\nCHECK_OUTPUTS\n# 固定平台布局只装配到本轮工程；逐层拒绝目录链接，禁止生成物回写源目录。\npython3 - \"$CITIZENWALLET_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\" \"$PREPARE_ONLY\" <<'PREPARE_PLATFORM'\nfrom pathlib import Path\nimport os\nimport shutil\nimport sys\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject = Path(sys.argv[2])\nif project.resolve() != project or not any(project.is_relative_to(source / 'target' / scope) for scope in ('build', 'test')):\n    raise SystemExit('平台工程必须属于本产品build或test且不得经过链接')\npairs = [('ios/project/Runner.xcscheme', 'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme'), ('ios/project/Runner.xcworkspacedata', 'ios/Runner.xcworkspace/contents.xcworkspacedata'), ('ios/project/citizenwallet_signer.podspec', 'ios/signer/citizenwallet_signer.podspec'), ('ios/tests/RunnerUITests.xctestplan', 'ios/RunnerUITests/RunnerUITests.xctestplan'), ('ios/tests/WalletUITests.swift', 'ios/RunnerUITests/WalletUITests.swift'), ('ios/source/Runner-Bridging-Header.h', 'ios/Runner/Runner-Bridging-Header.h'), ('ios/source/HardwareSecretvaultPlugin.swift', 'ios/Runner/HardwareSecretvaultPlugin.swift'), ('ios/resources/InfoPlist.xcstrings', 'ios/Runner/InfoPlist.xcstrings'), ('ios/source/AppDelegate.swift', 'ios/Runner/AppDelegate.swift'), ('ios/source/Info.plist', 'ios/Runner/Info.plist'), ('ios/project/Runner.pbxproj', 'ios/Runner.xcodeproj/project.pbxproj'), ('ios/config/Debug.xcconfig', 'ios/Flutter/Debug.xcconfig'), ('ios/config/Release.xcconfig', 'ios/Flutter/Release.xcconfig'), ('ios/config/AppFrameworkInfo.plist', 'ios/Flutter/AppFrameworkInfo.plist'), ('ios/resources/AppIcon.json', 'ios/IconAssets/AppIcon.appiconset/Contents.json'), ('ios/resources/CitizenLaunchLogo.json', 'ios/IconAssets/CitizenLaunchLogo.imageset/Contents.json'), ('ios/project/project.xcworkspacedata', 'ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata'), ('ios/resources/CitizenLaunchScreen.storyboard', 'ios/Runner/Base.lproj/CitizenLaunchScreen.storyboard'), ('ios/resources/Main.storyboard', 'ios/Runner/Base.lproj/Main.storyboard')] if sys.argv[3] == 'ios' else [\n    ('android/gradle-wrapper.properties', 'android/gradle/wrapper/gradle-wrapper.properties'),\n    ('android/settings.gradle.kts', 'android/settings.gradle.kts'),\n    ('android/source/AndroidManifest.xml', 'android/app/src/main/AndroidManifest.xml')]\nif sys.argv[3] == 'android':\n    import re\n    resources = project / 'android/resources'\n    if not resources.is_dir() or resources.is_symlink():\n        raise SystemExit('缺少普通Android资源原件目录')\n    for resource in sorted(resources.iterdir()):\n        match = re.fullmatch(r'(drawable(?:-v21)?|mipmap-anydpi-v26|values(?:-en|-night)?)_([a-z][a-z0-9_]*\\.xml)', resource.name)\n        if not match:\n            raise SystemExit('Android资源原件名称无效：' + resource.name)\n        pairs.append(('android/resources/' + resource.name, 'android/app/res/' + match[1] + '/' + match[2]))\n# 先完成所有输入验真，避免缺少工具时留下半套平台入口。\n# 本轮Xcode工程和Android settings已由准备阶段改写；装配继续核验本轮普通文件。\ninputs = [(project / origin, destination) for origin, destination in pairs]\nfor relative in ('android/gradlew', 'android/gradlew.bat', 'android/gradle'):\n    if (source / relative).exists() or (source / relative).is_symlink():\n        raise SystemExit('产品源码残留Wrapper副本：' + relative)\nif sys.argv[3] == 'android' and sys.argv[4] == 'true':\n    # 远端直接运行Wrapper；原件来自该流程已安装的Flutter，不从产品取得或下载。\n    raw = os.environ.get('FLUTTER_ROOT', '')\n    flutter = Path(raw)\n    if not raw or not flutter.is_absolute() or not flutter.is_dir() or flutter.resolve() != flutter:\n        raise SystemExit('必须提供无链接的Flutter工具根')\n    for name in ('gradlew', 'gradlew.bat', 'gradle/wrapper/gradle-wrapper.jar'):\n        src = flutter / 'bin/cache/artifacts/gradle_wrapper' / name\n        if src.resolve() != src or not src.is_file() or src.stat().st_size == 0:\n            raise SystemExit('Flutter Wrapper原件缺失或为链接：' + name)\n        inputs.append((src, 'android/' + name))\nfor src, destination in inputs:\n    dst = project / destination\n    origin = str(src)\n    if not src.is_file() or src.is_symlink() or src.resolve() != src:\n        raise SystemExit('缺少普通平台输入：' + origin)\n    parent = dst.parent\n    while parent != project:\n        if parent.is_symlink():\n            raise SystemExit('平台目标祖先不得为链接：' + destination)\n        parent = parent.parent\n    if dst.is_symlink():\n        if dst.resolve(strict=True) != src:\n            raise SystemExit('平台入口来源不符：' + destination)\n        dst.unlink()\n    elif dst.exists():\n        if not dst.is_file() or dst.read_bytes() != src.read_bytes():\n            raise SystemExit('平台入口重复或内容漂移：' + destination)\n        continue\n    dst.parent.mkdir(parents=True, exist_ok=True)\n    shutil.copy2(src, dst)\n    if destination == 'android/gradlew':\n        dst.chmod(0o755)\nPREPARE_PLATFORM\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" icons \"$CITIZENWALLET_PROJECT_ROOT\" \"$PLATFORM\"\nif [[ \"$PREPARE_ONLY\" == true ]]; then\n  printf '%s\\n' \"$CITIZENWALLET_PROJECT_ROOT\"\n  exit 0\nfi\n# CocoaPods 会改写工程锁文件；先确认工程与工作目录均在当前任务target内，再把\n# 指向源码的锁文件链接原子替换为工程普通文件，禁止本机 Build 回写源码。\nif [[ \"$PLATFORM\" == ios ]]; then\n  python3 - \"$CITIZENWALLET_DIR/Podfile.lock\" \"$CITIZENWALLET_PROJECT_ROOT/ios/Podfile.lock\" <<'DETACH_IOS_LOCK'\nfrom pathlib import Path\nimport os\nimport tempfile\nimport sys\n\nsource = Path(sys.argv[1]).resolve(strict=True)\nproject_lock = Path(sys.argv[2])\nif project_lock.is_symlink():\n    if project_lock.resolve(strict=True) != source:\n        raise SystemExit('CitizenWallet iOS工程锁文件链接目标不是本产品源码')\n    fd, temporary = tempfile.mkstemp(prefix='Podfile.lock.', dir=project_lock.parent)\n    try:\n        with os.fdopen(fd, 'wb') as output:\n            output.write(source.read_bytes())\n        os.replace(temporary, project_lock)\n    finally:\n        if os.path.exists(temporary):\n            os.unlink(temporary)\nDETACH_IOS_LOCK\nfi\ncd \"$CITIZENWALLET_PROJECT_ROOT\"\nexport CITIZENWALLET_BUILD_DIR=\"$BUILD_DIR\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$BUILD_WORK_DIR/native/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$BUILD_WORK_DIR/native/ios}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$BUILD_WORK_DIR/cargo}\"\nexport XDG_CONFIG_HOME=\"${XDG_CONFIG_HOME:-$DEPENDENCY_WORK_DIR/flutter-config}\"\nexport PUB_CACHE=\"${PUB_CACHE:-$DEPENDENCY_WORK_DIR/pub}\"\nexport GRADLE_USER_HOME=\"$DEPENDENCY_WORK_DIR/gradle\"\nexport CP_HOME_DIR=\"$DEPENDENCY_WORK_DIR/cocoapods\"\nexport TMPDIR=\"$CITIZENWALLET_WORK_DIR/tmp/\"\nexport FLUTTER_SUPPRESS_ANALYTICS=true COCOAPODS_DISABLE_STATS=true\nexport CITIZENWALLET_GRADLE_INIT_SCRIPT=\"${CITIZENWALLET_GRADLE_INIT_SCRIPT:-$CITIZENWALLET_WORK_DIR/gradle.init.gradle}\"\nexport CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR=\"${CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR:-$BUILD_WORK_DIR/flutter-gradle-plugin}\"\nmkdir -p \"$XDG_CONFIG_HOME\" \"$TMPDIR\" \"$CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\"\n# Flutter Gradle 插件原件只读；其 Kotlin 会话与编译状态必须写入本轮工作目录。\nprintf '%s\\n' \\\n  'gradle.beforeProject { project ->' \\\n  '    def source = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_ROOT\")' \\\n  '    def output = System.getenv(\"CITIZENWALLET_FLUTTER_GRADLE_BUILD_DIR\")' \\\n  '    if (source && output && project.rootDir.canonicalPath == new File(source).canonicalPath) {' \\\n  '        def suffix = project.path == \":\" ? \"root\" : project.path.substring(1).replace(\":\", \"/\")' \\\n  '        project.layout.buildDirectory.set(new File(output, suffix))' \\\n  '        project.extensions.extraProperties.set(\"kotlin.project.persistent.dir\", new File(output, suffix + \"/kotlin-project\").path)' \\\n  '    }' \\\n  '}' >\"$CITIZENWALLET_GRADLE_INIT_SCRIPT\"\n# Flutter只接受相对产品根的build-dir配置；把本轮绝对目录换算为相对路径，\n# 不能写死为产品源码下的cache/build，也不能在产品根生成build。\nFLUTTER_BUILD_RELATIVE=\"$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' \"$BUILD_DIR\" \"$CITIZENWALLET_PROJECT_ROOT\")\"\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n\nPUB_GET_ARGS=(--enforce-lockfile)\nGRADLE_ARGS=(--no-daemon)\ncase \"${CITIZENWALLET_PUB_OFFLINE:-false}\" in\n  true|false) ;;\n  *) echo 'CITIZENWALLET_PUB_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\nPUB_OFFLINE=\"${CITIZENWALLET_PUB_OFFLINE:-false}\"\ncase \"${CITIZENWALLET_OFFLINE:-false}\" in\n  true) PUB_OFFLINE=true; GRADLE_ARGS+=(--offline); export CARGO_NET_OFFLINE=true ;;\n  false) ;;\n  *) echo 'CITIZENWALLET_OFFLINE只接受true或false' >&2; exit 1 ;;\nesac\n# 任务级Pub预装只约束Pub；原整体离线开关仍同时约束Pub、Gradle和Cargo。\nif [[ \"$PUB_OFFLINE\" == true ]]; then PUB_GET_ARGS+=(--offline); fi\n\n# Flutter 版本及依赖配置由产品工程自行决定。\n\n# Flutter在缓存工程生成配置和插件清单；Gradle只从公民钱包真实android根启动，\n# 项目缓存、依赖缓存、编译物和临时文件继续使用当前Android任务缓存。\n# Kotlin持久状态不受--project-cache-dir控制，必须另传官方工程属性避免源码生成.kotlin。\nbuild_android_release() {\n  local properties flutter_command flutter_sdk android_sdk gradle_bin\n  local flutter_version dart_defines link_target java_home expected_gradle_version actual_gradle_version\n  local gradle_tasks=(assembleRelease)\n  gradle_bin=\"${CITIZENWALLET_GRADLE_BIN:?Android Build必须提供绝对Gradle工具路径}\"\n  [[ \"$gradle_bin\" == /* && -f \"$gradle_bin\" && -x \"$gradle_bin\" ]] \\\n    || { echo \"Android Gradle工具无效：$gradle_bin\" >&2; return 1; }\n  properties=\"$CITIZENWALLET_PROJECT_ROOT/android/local.properties\"\n  flutter_command=\"$(command -v flutter)\"\n  while [[ -L \"$flutter_command\" ]]; do\n    link_target=\"$(readlink \"$flutter_command\")\"\n    [[ \"$link_target\" == /* ]] || link_target=\"$(cd \"$(dirname \"$flutter_command\")\" && pwd -P)/$link_target\"\n    flutter_command=\"$link_target\"\n  done\n  flutter_sdk=\"$(cd \"$(dirname \"$flutter_command\")/..\" && pwd -P)\"\n  android_sdk=\"${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}\"\n  # JDK选择属于CitizenWallet产品流程：保留调用方选择；本机未传入时使用\n  # Android Studio随包JBR。Gradle自行报告工具错误，不增加外部前置门禁。\n  java_home=\"${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}\"\n  # Wrapper属性原文归本仓平台输入清单；本轮工程恢复后与调用方Gradle工具准确对照。\n  expected_gradle_version=\"$(sed -nE 's@^distributionUrl=.*gradle-([0-9][0-9.]*)-bin\\.zip$@\\1@p' \\\n    \"$CITIZENWALLET_PROJECT_ROOT/android/gradle/wrapper/gradle-wrapper.properties\")\"\n  [[ -n \"$expected_gradle_version\" ]] || { echo 'Android Gradle版本声明无效' >&2; return 1; }\n  actual_gradle_version=\"$(JAVA_HOME=\"$java_home\" \"$gradle_bin\" --version | sed -n 's/^Gradle //p' | head -n 1)\"\n  [[ \"$actual_gradle_version\" == \"$expected_gradle_version\" ]] \\\n    || { echo 'Android Gradle工具版本与钱包锁定版本不一致' >&2; return 1; }\n  # 完整prepare已写入验真SDK与原始版本，资源解析和编译消费同一普通配置。\n  [[ -f \"$properties\" && ! -L \"$properties\" ]] \\\n    || { echo 'Android工程缺少完整prepare交付的local.properties' >&2; return 1; }\n  flutter_version=\"$(flutter --version --machine)\"\n  dart_defines=\"$(printf '%s' \"$flutter_version\" | python3 -c '\nimport base64, json, sys\nvalue = json.load(sys.stdin)\nfields = (\n    (\"FLUTTER_VERSION\", \"frameworkVersion\"),\n    (\"FLUTTER_CHANNEL\", \"channel\"),\n    (\"FLUTTER_GIT_URL\", \"repositoryUrl\"),\n    (\"FLUTTER_FRAMEWORK_REVISION\", \"frameworkRevision\"),\n    (\"FLUTTER_ENGINE_REVISION\", \"engineRevision\"),\n    (\"FLUTTER_DART_VERSION\", \"dartSdkVersion\"),\n)\nprint(\",\".join(base64.b64encode(f\"{name}={value[key]}\".encode()).decode() for name, key in fields))\n')\"\n  if [[ \"${CITIZENWALLET_CI_BUILD:-false}\" == true ]]; then\n    # CI在同一Gradle任务图生成APK与AAB，二者都归属本轮产品BUILD_DIR。\n    gradle_tasks+=(bundleRelease)\n  fi\n  (\n    cd \"$CITIZENWALLET_PROJECT_ROOT/android\"\n    # 调用方提供同一已验真 Gradle 工具，任务目录只承载依赖和编译状态，不再下载工具分发包。\n    ANDROID_HOME=\"$android_sdk\" ANDROID_SDK_ROOT=\"$android_sdk\" JAVA_HOME=\"$java_home\" PATH=\"$java_home/bin:$PATH\" \\\n    CITIZENWALLET_FLUTTER_GRADLE_ROOT=\"$flutter_sdk/packages/flutter_tools/gradle\" \\\n    FLUTTER_ROOT=\"$flutter_sdk\" \"$gradle_bin\" \"${GRADLE_ARGS[@]}\" --stacktrace --no-problems-report \\\n      --init-script \"$CITIZENWALLET_GRADLE_INIT_SCRIPT\" \\\n      --project-cache-dir \"$BUILD_WORK_DIR/gradle-project\" \\\n      -Pkotlin.project.persistent.dir=\"$BUILD_WORK_DIR/kotlin-project\" \\\n      -Ptarget-platform=android-arm64 \\\n      -Ptarget=lib/main.dart \\\n      -Pbase-application-name=android.app.Application \\\n      -Pdart-defines=\"$dart_defines\" \\\n      -Pdart-obfuscation=false \\\n      -Ptrack-widget-creation=true \\\n      -Ptree-shake-icons=true \\\n      \"${gradle_tasks[@]}\"\n  )\n}\n\n# 仅清理当前工作目录中的候选包，不触碰源码或另一端。\nclean_platform_build_outputs() {\n  case \"$PLATFORM\" in\n    ios) rm -rf \"$BUILD_DIR/ios/iphoneos/Runner.app\" ;;\n    android) rm -f \"$BUILD_DIR/app/outputs/flutter-apk/\"*.apk ;;\n  esac\n  mkdir -p \"$BUILD_DIR\"\n}\n\n# 仅选择 Xcode 报告的一台可用 iOS 真机；不在无设备或多设备时回落模拟器。\nrun_ios_ui_tests() {\n  local xcodebuild_bin destinations device_id\n  xcodebuild_bin=\"${CITIZENWALLET_XCODEBUILD_BIN:?iOS Build必须提供绝对Xcode工具路径}\"\n  [[ \"$xcodebuild_bin\" == /* && -f \"$xcodebuild_bin\" && -x \"$xcodebuild_bin\" ]] \\\n    || { echo 'iOS Xcode工具无效' >&2; return 1; }\n  destinations=\"$(\"$xcodebuild_bin\" -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release -showdestinations)\"\n  device_id=\"$(printf '%s\\n' \"$destinations\" | python3 -c '\nimport re, sys\navailable = sys.stdin.read().split(\"Ineligible destinations\", 1)[0]\nids = re.findall(r\"\\{\\s*platform:iOS,\\s*arch:arm64,\\s*id:([0-9A-Fa-f-]+),\", available)\nif len(ids) != 1 or not re.fullmatch(r\"[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{16,}\", ids[0]):\n    raise SystemExit(\"iOS UI测试需要唯一可用真机\")\nprint(ids[0])\n')\"\n  # 测试计划关闭自动屏幕采集，避免触发钱包既有录屏保护；Release 测试应用与编译物均留在调用方工作根。\n  \"$xcodebuild_bin\" test \\\n    -workspace \"$CITIZENWALLET_PROJECT_ROOT/ios/Runner.xcworkspace\" \\\n    -scheme Runner -configuration Release \\\n    -destination \"platform=iOS,id=$device_id\" \\\n    -only-testing:RunnerUITests -parallel-testing-enabled NO \\\n    -collect-test-diagnostics never \\\n    -derivedDataPath \"$BUILD_WORK_DIR/xcode-ui\" \\\n    -resultBundlePath \"$BUILD_WORK_DIR/ios-ui-tests.xcresult\"\n}\n\n\n# 已跟踪的 pallet_registry.dart 是构建输入；本机编译不得回写共享源码索引。\n\necho \"==> 清理 ${PLATFORM} 平台构建产物...\"\nclean_platform_build_outputs\necho \"==> 获取依赖...\"\nflutter pub get \"${PUB_GET_ARGS[@]}\"\n# 本机钱包 Build 与 CI 使用同一套单元和组件测试。先在本轮target Cargo 目录\n# 编译宿主 FFI 动态库，再运行 Flutter 测试；测试失败立即阻止后续平台编译与安装。\necho \"==> 编译宿主签名库并运行钱包测试...\"\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native host\n# 测试缓存留在当前任务工程视图，避免相对路径重复拼接越界。\nflutter config --build-dir=test-build >/dev/null\nflutter test --no-pub\nflutter config --build-dir=\"$FLUTTER_BUILD_RELATIVE\" >/dev/null\n# Isar 与 QR 生成文件已经纳入仓库。本机四端编译只消费同一份源码，禁止两个平台在\n# 构建过程中同时运行 build_runner 改写源文件。\n\n# sr25519 原生签名库(schnorrkel)。签名、派生、验签全走它，缺库会在运行时才炸，\n# 所以必须先于 flutter build 产出；实现来自 citizenwallet/signing/sr25519.rs，\n# 由公民钱包独立维护。\necho \"==> 编译原生签名库（${PLATFORM}）...\"\n# 使用所属产品构建入口的绝对路径，工作目录切换后仍定位同一实现。\n\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native \"$PLATFORM\"\n\n# 本脚本编译并运行既有测试；完整Build由产品入口继续签名验真、安装和回读。\n# `--release`只是本机优化配置，不表示或触发正式Release流程。\necho \"==> 编译本机优化安装包...\"\nif [[ \"$PLATFORM\" == ios ]]; then\n  if [[ \"${CITIZENWALLET_CI_BUILD:-false}\" == true ]]; then\n    flutter build ios --release --no-codesign --build-name=\"${CITIZENWALLET_AUTOMATION_VERSION:?}\" --build-number=\"${CITIZENWALLET_CI_BUILD_NUMBER:?}\"\n  else\n    flutter build ios --release\n    echo \"==> 在唯一真机运行 Release UI 测试...\"\n    run_ios_ui_tests\n  fi\n  IOS_APP=\"$BUILD_DIR/ios/iphoneos/Runner.app\"\n  if [[ \"${CITIZENWALLET_CI_BUILD:-false}\" != true ]]; then\n    \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-ios-package \"$IOS_APP\"\n  fi\n  echo \"\"\n  echo \"==> iOS Release编译和真机测试完成，继续签名验真、安装及回读。\"\nelif [[ \"$PLATFORM\" == android ]]; then\n  build_android_release\n  ANDROID_APK=\"$BUILD_DIR/app/outputs/flutter-apk/app-release.apk\"\n  [[ -f \"$ANDROID_APK\" ]] || {\n    echo \"Android 本机无私钥 APK 不存在\" >&2\n    exit 1\n  }\n  \"${PRODUCT_NODE_BIN:-${NODE:-node}}\" \"$CITIZENWALLET_DIR/scripts/build.mjs\" native verify-android-package \"$ANDROID_APK\"\n  # 未签名APK仅留在本轮工作根；产品完整入口随后使用已有身份签名、安装和回读。\n  mkdir -p \"$ARTIFACT_ROOT\"\n  cp \"$ANDROID_APK\" \"$ARTIFACT_ROOT/android.apk\"\n  echo \"==> Android未签名APK编译完成，继续使用已有身份签名、安装及回读。\"\nfi\n","native":"#!/usr/bin/env bash\n# 编译 CitizenWallet 冷钱包原生密码学库，放到 Flutter 能自动打包的位置。\n#\n# sr25519签名实现只属于citizenwallet/signing/sr25519.rs。\n# 本库是冷端FFI外壳，永久离线且不需要链。\n#\n# 前置条件：当前Rust编译器已具备目标平台标准库；本脚本只读检查，不自动安装。\n#\n# 用法：\n#   node scripts/build.mjs native            # 编译所有平台\n#   node scripts/build.mjs native android    # 仅 Android\n#   node scripts/build.mjs native ios        # 仅 iOS\n#   node scripts/build.mjs native macos      # 仅 macOS（flutter test 用）\nset -euo pipefail\n\nWALLET_DIR=\"${CITIZENWALLET_SOURCE_ROOT:?缺少所属产品源码根}\"\nRUST_DIR=\"$WALLET_DIR/signing\"\nLIB_NAME=\"libcitizenwallet_signer\"\nTARGET=\"${1:-all}\"\n\n# 宿主与平台库同属本轮产品工作根；独立调用也使用本产品声明的平台target。\n# 复用公开工作根校验，禁止旧“整棵源码外”规则误拒绝已验真的target任务。\nCITIZENWALLET_WORK_DIR=\"$(\"${PRODUCT_NODE_BIN:-${NODE:-node}}\" --input-type=module - \"$WALLET_DIR/scripts/build.mjs\" \"${CITIZENWALLET_WORK_DIR:-${PRODUCT_WORK_DIR:-}}\" \"$TARGET\" \"${PLATFORM:-${platform:-}}\" <<'CHECK_WORK'\nimport {pathToFileURL} from 'node:url';\nimport {dirname,join,relative,sep} from 'node:path';\nconst [entry,provided,target,explicit]=process.argv.slice(2);\nconst {checkWork,productTarget,temporaryRoot}=await import(pathToFileURL(entry));\nconst requested=target==='android'||target==='verify-android-package'?'android':target==='ios'||target==='verify-ios-package'?'ios':undefined;\nconst platform=explicit||requested||'ios';\nif(requested&&requested!==platform)throw Error('原生目标与当前任务平台不符');\nconst work=provided?checkWork(provided):temporaryRoot(platform,'tmp');\nif(!work.startsWith(productTarget(platform)+sep))throw Error('原生工作根与当前任务平台不符');\nprocess.stdout.write(work+'\\n');\nCHECK_WORK\n)\" || exit 1\nCITIZENWALLET_NATIVE_WORK_DIR=\"${CITIZENWALLET_NATIVE_WORK_DIR:-$CITIZENWALLET_WORK_DIR/work/native}\"\nexport CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/cargo-target}\"\nexport CITIZENWALLET_NATIVE_ANDROID_DIR=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/android}\"\nexport CITIZENWALLET_NATIVE_IOS_DIR=\"${CITIZENWALLET_NATIVE_IOS_DIR:-$CITIZENWALLET_NATIVE_WORK_DIR/ios}\"\n# 原生库与临时状态只写当前任务；Cargo仅可复用本产品同平台固定缓存。\nexport TMPDIR=\"${TMPDIR:-$CITIZENWALLET_WORK_DIR/tmp/}\"\npython3 - \"$CITIZENWALLET_WORK_DIR\" \"$CITIZENWALLET_NATIVE_WORK_DIR\" \"$CARGO_TARGET_DIR\" \"$CITIZENWALLET_NATIVE_ANDROID_DIR\" \"$CITIZENWALLET_NATIVE_IOS_DIR\" \"$TMPDIR\" \"$WALLET_DIR\" <<'CHECK_TARGET'\nfrom pathlib import Path\nimport sys\nwork, source = Path(sys.argv[1]), Path(sys.argv[7])\nif source.resolve() != source or work.resolve() != work:\n    raise SystemExit('产品源码根或原生工作根经过链接')\nplatform = work.name if work.parent == source / 'target/build' and work.name in ('ios', 'android') else None\ncache = source / 'target/cache/cargo' / platform if platform else None\nfor index, value in enumerate(sys.argv[2:7]):\n    target = Path(value)\n    in_work = target != work and target.is_relative_to(work)\n    same_platform_cache = index == 1 and cache is not None and target == cache\n    if not target.is_absolute() or target.resolve() != target or not (in_work or same_platform_cache):\n        raise SystemExit('原生产物与临时目录必须属于当前任务；Cargo仅允许本平台固定缓存且不得经过链接：' + value)\nCHECK_TARGET\nmkdir -p \"$TMPDIR\"\n\nensure_target() {\n  local target=\"$1\" target_lib\n  # 只检查当前Rust编译器已有的目标库；缺失即停止，构建不得自动安装工具。\n  target_lib=\"$(rustc --print target-libdir --target \"$target\")\" || return 1\n  [[ \"$target_lib\" == /* && -d \"$target_lib\" ]] \\\n    || { echo \"错误: Rust目标库目录无效：$target\" >&2; return 1; }\n  local core_libraries=(\"$target_lib\"/libcore-*.rlib)\n  local std_libraries=(\"$target_lib\"/libstd-*.rlib)\n  [[ -f \"${core_libraries[0]}\" && -f \"${std_libraries[0]}\" ]] \\\n    || { echo \"错误: 当前Rust缺少已安装目标库：${target}；构建停止\" >&2; return 1; }\n}\n\n# 4个sr25519 C符号必须齐全，禁止交付额外用途钥符号，否则 Dart 侧 lookupFunction 会在运行时才失败。\n# 注意平台差异：ELF 用 -D，Mach-O 用 -g，用错标志会误判为 0。\nverify_symbols() {\n  local lib=\"$1\"\n  local nm_flag=\"$2\"\n  local nm_bin\n  nm_bin=\"$(command -v llvm-nm || true)\"\n  if [ -z \"$nm_bin\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    nm_bin=\"$(ls \"$sdk_home\"/ndk/*/toolchains/llvm/prebuilt/*/bin/llvm-nm 2>/dev/null | tail -1 || true)\"\n  fi\n  if [ -z \"$nm_bin\" ]; then\n    echo \"错误: 未找到 llvm-nm，不能验证原生库导出符号。\"\n    return 1\n  fi\n  local signer_count removed_export_count\n  signer_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'citizen_sr25519' || true)\"\n  removed_export_count=\"$(\"$nm_bin\" \"$nm_flag\" \"$lib\" 2>/dev/null | grep -c 'account_crypto_' || true)\"\n  if [ \"$signer_count\" != \"4\" ] || [ \"$removed_export_count\" != \"0\" ]; then\n    echo \"错误: $lib 符号不完整（citizen_sr25519_*=$signer_count/4, 禁用导出=$removed_export_count/0）\"\n    return 1\n  fi\n  echo \"    符号检查通过：citizen_sr25519_*=4, 禁用导出=0\"\n}\n\nverify_android_package() {\n  local package=\"$1\" expected=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a/$LIB_NAME.so\" entry temporary packaged\n  [[ -f \"$package\" ]] || { echo \"错误: Android 包不存在：$package\"; return 1; }\n  [[ -f \"$expected\" ]] || { echo \"错误: Android 原生库不存在：$expected\"; return 1; }\n  case \"$package\" in\n    *.apk) entry=\"lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *.aab) entry=\"base/lib/arm64-v8a/$LIB_NAME.so\" ;;\n    *) echo \"错误: 只支持校验 APK/AAB：$package\"; return 1 ;;\n  esac\n  # 中文注释：Android 打包会剥离调试段，不能按原文件字节比对；从最终包提取后验证\n  # ELF 架构和真实导出符号，缺失、错 ABI 或错误库都会在上传前失败。\n  temporary=\"$(mktemp -d)\"\n  packaged=\"$temporary/$LIB_NAME.so\"\n  unzip -p \"$package\" \"$entry\" > \"$packaged\" || { rm -rf \"$temporary\"; return 1; }\n  [[ -s \"$packaged\" ]] || { rm -rf \"$temporary\"; echo \"错误: Android 包内原生库为空：$entry\"; return 1; }\n  file \"$packaged\" | grep -Eq 'ARM aarch64|ARM64' || {\n    rm -rf \"$temporary\"; echo \"错误: Android 包内原生库不是 arm64：$entry\"; return 1;\n  }\n  verify_symbols \"$packaged\" -D || { rm -rf \"$temporary\"; return 1; }\n  rm -rf \"$temporary\"\n  if unzip -Z1 \"$package\" | grep -E \"(^|/)lib/(armeabi-v7a|x86|x86_64)/$LIB_NAME\\\\.so$\"; then\n    echo \"错误: Android 包含未支持 ABI 的原生库。\"; return 1\n  fi\n  echo \"Android 包原生库门禁通过：$entry\"\n}\n\nverify_ios_package() {\n  local app_bundle=\"$1\" executable nm_bin symbols\n  executable=\"$app_bundle/Runner\"\n  [[ -f \"$executable\" ]] || { echo \"错误: iOS Runner 不存在：$executable\"; return 1; }\n  [[ \"$(lipo -archs \"$executable\")\" = \"arm64\" ]] || {\n    echo \"错误: iOS 真机包必须且只能包含 arm64：$(lipo -archs \"$executable\")\"; return 1;\n  }\n  nm_bin=\"$(xcrun --find llvm-nm)\"\n  symbols=\"$(\"$nm_bin\" -gU \"$executable\" 2>/dev/null | awk '{print $NF}' | sed 's/^_//' || true)\"\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^citizen_sr25519_' || true)\" = \"4\" ]] || {\n    echo \"错误: iOS Runner 的 citizen_sr25519_* 符号不完整。\"; return 1;\n  }\n  [[ \"$(printf '%s\\n' \"$symbols\" | grep -c '^account_crypto_' || true)\" = \"0\" ]] || {\n    echo \"错误: iOS Runner包含禁用的用途钥导出。\"; return 1;\n  }\n  echo \"iOS 包原生库门禁通过：arm64与4个sr25519 FFI符号完整，禁用导出为零\"\n}\n\nbuild_android() {\n  echo \"\"\n  echo \"=== 编译 Android (arm64-v8a) ===\"\n  ensure_target aarch64-linux-android\n\n  local ndk_home=\"${ANDROID_NDK_HOME:-}\"\n  if [ -z \"$ndk_home\" ]; then\n    local sdk_home=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\"\n    ndk_home=\"$(ls -d \"$sdk_home/ndk/\"* 2>/dev/null | sort -V | tail -1 || true)\"\n  fi\n  if [ -z \"$ndk_home\" ] || [ ! -d \"$ndk_home\" ]; then\n    echo \"错误: 未找到 Android NDK。请设置 ANDROID_NDK_HOME 或通过 Android Studio 安装 NDK。\"\n    return 1\n  fi\n  echo \"使用 NDK: $ndk_home\"\n\n  local toolchain=\"\"\n  case \"$(uname -s)\" in\n    Darwin)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-x86_64\"\n      if [ ! -d \"$toolchain\" ]; then\n        toolchain=\"$ndk_home/toolchains/llvm/prebuilt/darwin-aarch64\"\n      fi\n      ;;\n    Linux)\n      toolchain=\"$ndk_home/toolchains/llvm/prebuilt/linux-x86_64\"\n      ;;\n    *)\n      echo \"错误: 当前系统不支持自动定位 Android NDK toolchain: $(uname -s)\"\n      return 1\n      ;;\n  esac\n  if [ ! -d \"$toolchain\" ]; then\n    echo \"错误: 未找到 Android NDK toolchain: $toolchain\"\n    return 1\n  fi\n\n  export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export CC_aarch64_linux_android=\"$toolchain/bin/aarch64-linux-android24-clang\"\n  export AR_aarch64_linux_android=\"$toolchain/bin/llvm-ar\"\n\n  cd \"$RUST_DIR\"\n  cargo build --release --target aarch64-linux-android\n\n  # CitizenWallet Android 唯一支持 arm64-v8a；禁止重新生成任何 32 位或 x86 ABI。\n  local arm64_dest=\"${CITIZENWALLET_NATIVE_ANDROID_DIR:?缺少CitizenWallet Android原生库目录}/arm64-v8a\"\n  mkdir -p \"$arm64_dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-linux-android/release/$LIB_NAME.so\" \"$arm64_dest/\"\n  echo \"Android arm64-v8a: $arm64_dest/$LIB_NAME.so ($(wc -c < \"$arm64_dest/$LIB_NAME.so\" | tr -d ' ') bytes)\"\n  verify_symbols \"$arm64_dest/$LIB_NAME.so\" -D\n}\n\nbuild_ios() {\n  echo \"\"\n  echo \"=== 编译 iOS (arm64 真机) ===\"\n  ensure_target aarch64-apple-ios\n\n  # 宿主测试继承macOS SDK；真机目标必须切到同一已供给Xcode的iphoneos SDK。\n  # xcrun只读定位已安装SDK，不下载，不改变全流程或宿主的SDKROOT。\n  local ios_sdk\n  ios_sdk=\"$(\"${XCRUN:-xcrun}\" --sdk iphoneos --show-sdk-path)\" || return 1\n  [[ \"$ios_sdk\" == /* && -d \"$ios_sdk\" ]] \\\n    || { echo \"错误: 已供给Xcode缺少iOS SDK\" >&2; return 1; }\n  cd \"$RUST_DIR\"\n  # 真机Cargo明确消费资源回执的Clang，不从PATH寻找cc或其它版本。\n  local ios_clang=\"${CC:?缺少已验真Xcode的Clang入口}\"\n  [[ \"$ios_clang\" == /* && -f \"$ios_clang\" && -x \"$ios_clang\" && ! -L \"$ios_clang\" ]] \\\n    || { echo \"错误: 缺少已供给Clang规范绝对入口\" >&2; return 1; }\n  SDKROOT=\"$ios_sdk\" CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=\"$ios_clang\" \\\n    CC_aarch64_apple_ios=\"$ios_clang\" cargo build --release --target aarch64-apple-ios\n\n  # iOS 用**静态库**而非 dylib：裸 .dylib 需嵌入 + 单独签名，且 App Store 要求\n  # 动态库必须包在 .framework 里；静态库直接链进 App 二进制，无这些坑。\n  # 符号经 podspec 的 -force_load 保留，Dart 侧用 DynamicLibrary.process() 取。\n  local dest=\"${CITIZENWALLET_NATIVE_IOS_DIR:?缺少CitizenWallet iOS原生库目录}\"\n  mkdir -p \"$dest\"\n  cp \"$CARGO_TARGET_DIR/aarch64-apple-ios/release/$LIB_NAME.a\" \"$dest/\"\n  echo \"iOS arm64: $dest/$LIB_NAME.a ($(wc -c < \"$dest/$LIB_NAME.a\" | tr -d ' ') bytes)\"\n  verify_symbols \"$dest/$LIB_NAME.a\" \"\"\n}\n\nbuild_host() {\n  echo \"\"\n  echo \"=== 编译宿主平台动态库 (flutter test 用) ===\"\n  cd \"$RUST_DIR\"\n  # host 调试库给 Dart FFI / flutter test 直接 dlopen；release profile 已设\n  # strip=false，本机 dyld 不会报 LINKEDIT 对齐错误。\n  cargo build --release\n\n  # 宿主扩展名：macOS 产 .dylib，Linux 产 .so；Dart 侧 native_sr25519.dart 按同一规则取。\n  local host_ext\n  case \"$(uname -s)\" in\n    Darwin) host_ext=dylib ;;\n    *)      host_ext=so ;;\n  esac\n  local host_lib=\"$CARGO_TARGET_DIR/release/$LIB_NAME.$host_ext\"\n  echo \"宿主库: $host_lib ($(wc -c < \"$host_lib\" | tr -d ' ') bytes)\"\n  verify_symbols \"$host_lib\" -g\n}\n\ncase \"$TARGET\" in\n  android) build_android ;;\n  ios)     build_ios ;;\n  host|macos|linux) build_host ;;\n  verify-android-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-android-package <apk|aab>\"; exit 1; }\n    verify_android_package \"$2\"\n    exit 0\n    ;;\n  verify-ios-package)\n    [[ \"$#\" -eq 2 ]] || { echo \"用法: $0 verify-ios-package <Runner.app>\"; exit 1; }\n    verify_ios_package \"$2\"\n    exit 0\n    ;;\n  all)\n    build_android\n    build_ios\n    build_host\n    ;;\n  *)\n    echo \"用法: $0 [android|ios|macos|all|verify-android-package|verify-ios-package]\"\n    exit 1\n    ;;\nesac\n\necho \"\"\necho \"=== 编译完成 ===\"\necho \"flutter build / flutter run 会自动把 native library 打包进 App。\"\n"});
 
-export const CI_SIGNING_STEPS=Object.freeze({"android":"cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\numask 077\nwork=\"$RUNNER_TEMP/citizenwallet-android-signing\"\npublish=\"build/release\"\nrm -rf \"$work\" \"$publish\"\nmkdir -p \"$work\" \"$publish\"\ntrap 'rm -rf \"$work\"' EXIT\npython3 - \"$work\" <<'PY'\nimport base64, os, pathlib, re, sys\nroot = pathlib.Path(sys.argv[1])\nfields = {}\nfor raw in os.environ.get(\"APP_KEY\", \"\").splitlines():\n    line = raw.strip()\n    if not line or line.startswith(\"#\"):\n        continue\n    name, sep, value = line.partition(\"=\")\n    if not sep or name.strip() in fields or not value.strip():\n        raise SystemExit(\"APP_KEY 行格式无效\")\n    fields[name.strip()] = value.strip()\nif set(fields) - {\"keystore\", \"password\", \"alias\", \"keyPassword\"}:\n    raise SystemExit(\"APP_KEY 包含未登记字段\")\nalias = fields.get(\"alias\", \"upload\")\nif not re.fullmatch(r\"[A-Za-z0-9._-]{1,128}\", alias):\n    raise SystemExit(\"APP_KEY alias 无效\")\ntry:\n    key = base64.b64decode(fields[\"keystore\"], validate=True)\n    password = fields[\"password\"]\nexcept (KeyError, ValueError) as exc:\n    raise SystemExit(\"APP_KEY 缺少有效签名材料\") from exc\nif not 1024 <= len(key) <= 32 * 1024 * 1024:\n    raise SystemExit(\"APP_KEY keystore 大小无效\")\n(root / \"release.keystore\").write_bytes(key)\n(root / \"password\").write_text(password)\n(root / \"key-password\").write_text(fields.get(\"keyPassword\", password))\n(root / \"alias\").write_text(alias)\nPY\nGMB_ANDROID_STORE_PASSWORD=\"$(cat \"$work/password\")\"\nGMB_ANDROID_KEY_PASSWORD=\"$(cat \"$work/key-password\")\"\nexport GMB_ANDROID_STORE_PASSWORD GMB_ANDROID_KEY_PASSWORD\nalias=\"$(cat \"$work/alias\")\"\napksigner=\"$ANDROID_HOME/build-tools/36.0.0/apksigner\"\ntest -x \"$apksigner\"\napkanalyzer=\"$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer\"\ntest -x \"$apkanalyzer\"\n\"$apksigner\" sign --ks \"$work/release.keystore\" \\\n  --ks-pass env:GMB_ANDROID_STORE_PASSWORD --key-pass env:GMB_ANDROID_KEY_PASSWORD \\\n  --v4-signing-enabled false \\\n  --ks-key-alias \"$alias\" --out \"$publish/citizenwallet.apk\" \\\n  build/app/outputs/flutter-apk/app-release.apk\ncp build/app/outputs/bundle/release/app-release.aab \"$publish/citizenwallet.aab\"\njarsigner -keystore \"$work/release.keystore\" \\\n  -storepass:env GMB_ANDROID_STORE_PASSWORD -keypass:env GMB_ANDROID_KEY_PASSWORD \\\n  \"$publish/citizenwallet.aab\" \"$alias\"\n\"$apksigner\" verify --verbose --print-certs \"$publish/citizenwallet.apk\" \\\n  | tee \"$work/apk-verification.txt\"\ngrep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' \"$work/apk-verification.txt\"\n# Android 上传证书按平台规范可以自签名；只验证包完整性，再从三处回读同一证书。\njarsigner -verify \"$publish/citizenwallet.aab\"\napk_certificate_sha256=\"$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \"$work/apk-verification.txt\")\"\nkey_certificate_sha256=\"$(keytool -exportcert -alias \"$alias\" \\\n  -keystore \"$work/release.keystore\" -storepass:env GMB_ANDROID_STORE_PASSWORD -rfc \\\n  | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')\"\naab_certificate_sha256=\"$(keytool -printcert -jarfile \"$publish/citizenwallet.aab\" -rfc \\\n  | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')\"\n[[ \"$apk_certificate_sha256\" =~ ^[0-9a-f]{64}$ ]]\ntest \"$apk_certificate_sha256\" = \"$key_certificate_sha256\"\ntest \"$apk_certificate_sha256\" = \"$aab_certificate_sha256\"\ntest \"$(\"$apkanalyzer\" manifest application-id \"$publish/citizenwallet.apk\")\" = com.crcfrcn.citizenwallet\ntest \"$(\"$apkanalyzer\" manifest version-code \"$publish/citizenwallet.apk\")\" = \"$CITIZENWALLET_BUILD_NUMBER\"","ios":"cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\numask 077\nwork=\"$RUNNER_TEMP/citizenwallet-ios-signing\"\npublish=\"build/release\"\nrm -rf \"$work\" \"$publish\"\nmkdir -p \"$work\" \"$publish\"\nkeychain=\"$work/release.keychain-db\"\nkeychain_password=\"$(openssl rand -hex 32)\"\n# 本机钥匙串搜索列表属共享用户状态；先保存，结束时恢复。\noriginal_keychains=()\nwhile IFS= read -r line; do\n  [[ \"$line\" =~ ^[[:space:]]*\\\"([^\\\"]+)\\\"$ ]] || exit 1\n  original_keychains+=(\"${BASH_REMATCH[1]}\")\ndone < <(security list-keychains -d user)\n(( ${#original_keychains[@]} > 0 )) || exit 1\ncleanup() {\n  security list-keychains -d user -s \"${original_keychains[@]}\" >/dev/null 2>&1 || true\n  security delete-keychain \"$keychain\" >/dev/null 2>&1 || true\n  rm -rf \"$work\"\n}\ntrap cleanup EXIT\npython3 - \"$work\" <<'PY'\nimport base64, os, pathlib, re, sys\nroot = pathlib.Path(sys.argv[1])\nfields = {}\nfor raw in os.environ.get(\"IOS_KEY\", \"\").splitlines():\n    line = raw.strip()\n    if not line or line.startswith(\"#\"):\n        continue\n    name, sep, value = line.partition(\"=\")\n    if not sep or name.strip() in fields or not value.strip():\n        raise SystemExit(\"IOS_KEY 行格式无效\")\n    fields[name.strip()] = value.strip()\nif set(fields) != {\"pkcs12\", \"password\", \"certificate_sha1\"}:\n    raise SystemExit(\"IOS_KEY 字段集合无效\")\nif not re.fullmatch(r\"[0-9A-F]{40}\", fields[\"certificate_sha1\"]):\n    raise SystemExit(\"Apple Distribution 证书摘要无效\")\ntry:\n    pkcs12 = base64.b64decode(fields[\"pkcs12\"], validate=True)\n    profile = base64.b64decode(os.environ.get(\"IOS_PROVISIONING_PROFILE\", \"\"), validate=True)\nexcept ValueError as exc:\n    raise SystemExit(\"Apple Distribution 或 provisioning profile Base64 无效\") from exc\nif not 1024 <= len(pkcs12) <= 32 * 1024 * 1024 or not 1024 <= len(profile) <= 1024 * 1024:\n    raise SystemExit(\"Apple Distribution 签名材料大小无效\")\n(root / \"distribution.p12\").write_bytes(pkcs12)\n(root / \"password\").write_text(fields[\"password\"])\n(root / \"certificate-sha1\").write_text(fields[\"certificate_sha1\"])\n(root / \"profile.mobileprovision\").write_bytes(profile)\nPY\nsecurity create-keychain -p \"$keychain_password\" \"$keychain\"\nsecurity set-keychain-settings -lut 21600 \"$keychain\"\nsecurity unlock-keychain -p \"$keychain_password\" \"$keychain\"\n# 中文注释：codesign 查找 identity 依赖用户钥匙串搜索列表；仅传 --keychain\n# 不能保证干净 runner 能从证书继续定位到同钥匙串中的私钥。\nsecurity list-keychains -d user -s \"$keychain\" \"${original_keychains[@]}\"\nsecurity import \"$work/distribution.p12\" -k \"$keychain\" -P \"$(cat \"$work/password\")\" -T /usr/bin/codesign\nsecurity set-key-partition-list -S apple-tool:,apple:,codesign: -s -k \"$keychain_password\" \"$keychain\" >/dev/null\ncertificate_sha1=\"$(cat \"$work/certificate-sha1\")\"\nsecurity find-certificate -a -Z \"$keychain\" | grep -F \"SHA-1 hash: $certificate_sha1\"\nsecurity find-identity -v -p codesigning \"$keychain\" | grep -Fq \"$certificate_sha1\"\n# 中文注释：干净 runner 的钥匙串不保证预装描述文件 CMS 签发链；LibreSSL\n# 直接验证 CMS 密码学签名并解出载荷，再用正式证书摘要锁定唯一配对。\n/usr/bin/openssl smime -verify -inform DER -in \"$work/profile.mobileprovision\" \\\n  -noverify -out \"$work/profile.plist\" >/dev/null\nprofile_certificate_sha1=\"$(\n  plutil -extract DeveloperCertificates.0 raw -o - \"$work/profile.plist\" \\\n    | base64 -D | shasum -a 1 | awk '{print toupper($1)}'\n)\"\ntest \"$profile_certificate_sha1\" = \"$certificate_sha1\"\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' \"$work/profile.plist\")\" = MHYMVRN6FC\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' \"$work/profile.plist\")\" = MHYMVRN6FC.ios.citizenwallet\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:get-task-allow' \"$work/profile.plist\")\" = false\nplutil -extract Entitlements xml1 -o \"$work/entitlements.plist\" \"$work/profile.plist\"\napp=\"build/ios/iphoneos/Runner.app\"\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$app/Info.plist\")\" = ios.citizenwallet\ncp \"$work/profile.mobileprovision\" \"$app/embedded.mobileprovision\"\nfind \"$app\" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' item; do\n  codesign --force --sign \"$certificate_sha1\" --keychain \"$keychain\" --timestamp=none \"$item\"\ndone\nfind \"$app\" -type d \\( -name '*.framework' -o -name '*.appex' \\) -print0 \\\n  | while IFS= read -r -d '' item; do\n      codesign --force --sign \"$certificate_sha1\" --keychain \"$keychain\" --timestamp=none \"$item\"\n    done\ncodesign --force --sign \"$certificate_sha1\" --keychain \"$keychain\" --timestamp=none \\\n  --generate-entitlement-der --entitlements \"$work/entitlements.plist\" \"$app\"\ncodesign --verify --deep --strict \"$app\"\ncodesign -dv --verbose=4 \"$app\" 2> \"$work/codesign.txt\"\ngrep -F 'TeamIdentifier=MHYMVRN6FC' \"$work/codesign.txt\"\nmkdir -p \"$work/package/Payload\"\ncp -R \"$app\" \"$work/package/Payload/Runner.app\"\n(cd \"$work/package\" && ditto -c -k --sequesterRsrc --keepParent Payload \"$CITIZENWALLET_PROJECT_ROOT/$publish/citizenwallet.ipa\")\nunzip -Z1 \"$publish/citizenwallet.ipa\" | grep -Fx 'Payload/Runner.app/Info.plist'"});
+export const CI_SIGNING_STEPS=Object.freeze({"android":"cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\numask 077\nwork=\"$RUNNER_TEMP/citizenwallet-android-signing\"\npublish=\"build/release\"\nrm -rf \"$work\" \"$publish\"\nmkdir -p \"$work\" \"$publish\"\ntrap 'rm -rf \"$work\"' EXIT\npython3 - \"$work\" <<'PY'\nimport base64, os, pathlib, re, sys\nroot = pathlib.Path(sys.argv[1])\nfields = {}\nfor raw in os.environ.get(\"APP_KEY\", \"\").splitlines():\n    line = raw.strip()\n    if not line or line.startswith(\"#\"):\n        continue\n    name, sep, value = line.partition(\"=\")\n    if not sep or name.strip() in fields or not value.strip():\n        raise SystemExit(\"APP_KEY 行格式无效\")\n    fields[name.strip()] = value.strip()\nif set(fields) - {\"keystore\", \"password\", \"alias\", \"keyPassword\"}:\n    raise SystemExit(\"APP_KEY 包含未登记字段\")\nalias = fields.get(\"alias\", \"upload\")\nif not re.fullmatch(r\"[A-Za-z0-9._-]{1,128}\", alias):\n    raise SystemExit(\"APP_KEY alias 无效\")\ntry:\n    key = base64.b64decode(fields[\"keystore\"], validate=True)\n    password = fields[\"password\"]\nexcept (KeyError, ValueError) as exc:\n    raise SystemExit(\"APP_KEY 缺少有效签名材料\") from exc\nif not 1024 <= len(key) <= 32 * 1024 * 1024:\n    raise SystemExit(\"APP_KEY keystore 大小无效\")\n(root / \"release.keystore\").write_bytes(key)\n(root / \"password\").write_text(password)\n(root / \"key-password\").write_text(fields.get(\"keyPassword\", password))\n(root / \"alias\").write_text(alias)\nPY\nGMB_ANDROID_STORE_PASSWORD=\"$(cat \"$work/password\")\"\nGMB_ANDROID_KEY_PASSWORD=\"$(cat \"$work/key-password\")\"\nexport GMB_ANDROID_STORE_PASSWORD GMB_ANDROID_KEY_PASSWORD\nalias=\"$(cat \"$work/alias\")\"\napksigner=\"$ANDROID_HOME/build-tools/36.0.0/apksigner\"\ntest -x \"$apksigner\"\napkanalyzer=\"$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer\"\ntest -x \"$apkanalyzer\"\n\"$apksigner\" sign --ks \"$work/release.keystore\" \\\n  --ks-pass env:GMB_ANDROID_STORE_PASSWORD --key-pass env:GMB_ANDROID_KEY_PASSWORD \\\n  --v4-signing-enabled false \\\n  --ks-key-alias \"$alias\" --out \"$publish/citizenwallet.apk\" \\\n  build/app/outputs/flutter-apk/app-release.apk\ncp build/app/outputs/bundle/release/app-release.aab \"$publish/citizenwallet.aab\"\njarsigner -keystore \"$work/release.keystore\" \\\n  -storepass:env GMB_ANDROID_STORE_PASSWORD -keypass:env GMB_ANDROID_KEY_PASSWORD \\\n  \"$publish/citizenwallet.aab\" \"$alias\"\n\"$apksigner\" verify --verbose --print-certs \"$publish/citizenwallet.apk\" \\\n  | tee \"$work/apk-verification.txt\"\ngrep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' \"$work/apk-verification.txt\"\n# Android 上传证书按平台规范可以自签名；只验证包完整性，再从三处回读同一证书。\njarsigner -verify \"$publish/citizenwallet.aab\"\napk_certificate_sha256=\"$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \"$work/apk-verification.txt\")\"\nkey_certificate_sha256=\"$(keytool -exportcert -alias \"$alias\" \\\n  -keystore \"$work/release.keystore\" -storepass:env GMB_ANDROID_STORE_PASSWORD -rfc \\\n  | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')\"\naab_certificate_sha256=\"$(keytool -printcert -jarfile \"$publish/citizenwallet.aab\" -rfc \\\n  | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')\"\n[[ \"$apk_certificate_sha256\" =~ ^[0-9a-f]{64}$ ]]\ntest \"$apk_certificate_sha256\" = \"$key_certificate_sha256\"\ntest \"$apk_certificate_sha256\" = \"$aab_certificate_sha256\"\ntest \"$(\"$apkanalyzer\" manifest application-id \"$publish/citizenwallet.apk\")\" = com.crcfrcn.citizenwallet\ntest \"$(\"$apkanalyzer\" manifest version-name \"$publish/citizenwallet.apk\")\" = \"$CITIZENWALLET_AUTOMATION_VERSION\"\ntest \"$(\"$apkanalyzer\" manifest version-code \"$publish/citizenwallet.apk\")\" = \"$CITIZENWALLET_BUILD_NUMBER\"","ios":"cd \"$CITIZENWALLET_PROJECT_ROOT\"\nset -euo pipefail\numask 077\nwork=\"$RUNNER_TEMP/citizenwallet-ios-signing\"\npublish=\"build/release\"\nrm -rf \"$work\" \"$publish\"\nmkdir -p \"$work\" \"$publish\"\nkeychain=\"$work/release.keychain-db\"\nkeychain_password=\"$(openssl rand -hex 32)\"\n# 本机钥匙串搜索列表属共享用户状态；先保存，结束时恢复。\noriginal_keychains=()\nwhile IFS= read -r line; do\n  [[ \"$line\" =~ ^[[:space:]]*\\\"([^\\\"]+)\\\"$ ]] || exit 1\n  original_keychains+=(\"${BASH_REMATCH[1]}\")\ndone < <(security list-keychains -d user)\n(( ${#original_keychains[@]} > 0 )) || exit 1\ncleanup() {\n  security list-keychains -d user -s \"${original_keychains[@]}\" >/dev/null 2>&1 || true\n  security delete-keychain \"$keychain\" >/dev/null 2>&1 || true\n  rm -rf \"$work\"\n}\ntrap cleanup EXIT\npython3 - \"$work\" <<'PY'\nimport base64, os, pathlib, re, sys\nroot = pathlib.Path(sys.argv[1])\nfields = {}\nfor raw in os.environ.get(\"IOS_KEY\", \"\").splitlines():\n    line = raw.strip()\n    if not line or line.startswith(\"#\"):\n        continue\n    name, sep, value = line.partition(\"=\")\n    if not sep or name.strip() in fields or not value.strip():\n        raise SystemExit(\"IOS_KEY 行格式无效\")\n    fields[name.strip()] = value.strip()\nif set(fields) != {\"pkcs12\", \"password\", \"certificate_sha1\"}:\n    raise SystemExit(\"IOS_KEY 字段集合无效\")\nif not re.fullmatch(r\"[0-9A-F]{40}\", fields[\"certificate_sha1\"]):\n    raise SystemExit(\"Apple Distribution 证书摘要无效\")\ntry:\n    pkcs12 = base64.b64decode(fields[\"pkcs12\"], validate=True)\n    profile = base64.b64decode(os.environ.get(\"IOS_PROVISIONING_PROFILE\", \"\"), validate=True)\nexcept ValueError as exc:\n    raise SystemExit(\"Apple Distribution 或 provisioning profile Base64 无效\") from exc\nif not 1024 <= len(pkcs12) <= 32 * 1024 * 1024 or not 1024 <= len(profile) <= 1024 * 1024:\n    raise SystemExit(\"Apple Distribution 签名材料大小无效\")\n(root / \"distribution.p12\").write_bytes(pkcs12)\n(root / \"password\").write_text(fields[\"password\"])\n(root / \"certificate-sha1\").write_text(fields[\"certificate_sha1\"])\n(root / \"profile.mobileprovision\").write_bytes(profile)\nPY\nsecurity create-keychain -p \"$keychain_password\" \"$keychain\"\nsecurity set-keychain-settings -lut 21600 \"$keychain\"\nsecurity unlock-keychain -p \"$keychain_password\" \"$keychain\"\n# 中文注释：codesign 查找 identity 依赖用户钥匙串搜索列表；仅传 --keychain\n# 不能保证干净 runner 能从证书继续定位到同钥匙串中的私钥。\nsecurity list-keychains -d user -s \"$keychain\" \"${original_keychains[@]}\"\nsecurity import \"$work/distribution.p12\" -k \"$keychain\" -P \"$(cat \"$work/password\")\" -T /usr/bin/codesign\nsecurity set-key-partition-list -S apple-tool:,apple:,codesign: -s -k \"$keychain_password\" \"$keychain\" >/dev/null\ncertificate_sha1=\"$(cat \"$work/certificate-sha1\")\"\nsecurity find-certificate -a -Z \"$keychain\" | grep -F \"SHA-1 hash: $certificate_sha1\"\nsecurity find-identity -v -p codesigning \"$keychain\" | grep -Fq \"$certificate_sha1\"\n# 中文注释：干净 runner 的钥匙串不保证预装描述文件 CMS 签发链；LibreSSL\n# 直接验证 CMS 密码学签名并解出载荷，再用正式证书摘要锁定唯一配对。\n/usr/bin/openssl smime -verify -inform DER -in \"$work/profile.mobileprovision\" \\\n  -noverify -out \"$work/profile.plist\" >/dev/null\nprofile_certificate_sha1=\"$(\n  plutil -extract DeveloperCertificates.0 raw -o - \"$work/profile.plist\" \\\n    | base64 -D | shasum -a 1 | awk '{print toupper($1)}'\n)\"\ntest \"$profile_certificate_sha1\" = \"$certificate_sha1\"\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' \"$work/profile.plist\")\" = MHYMVRN6FC\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' \"$work/profile.plist\")\" = MHYMVRN6FC.ios.citizenwallet\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:get-task-allow' \"$work/profile.plist\")\" = false\nplutil -extract Entitlements xml1 -o \"$work/entitlements.plist\" \"$work/profile.plist\"\napp=\"build/ios/iphoneos/Runner.app\"\ntest \"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$app/Info.plist\")\" = ios.citizenwallet\ncp \"$work/profile.mobileprovision\" \"$app/embedded.mobileprovision\"\nfind \"$app\" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' item; do\n  codesign --force --sign \"$certificate_sha1\" --keychain \"$keychain\" --timestamp=none \"$item\"\ndone\nfind \"$app\" -type d \\( -name '*.framework' -o -name '*.appex' \\) -print0 \\\n  | while IFS= read -r -d '' item; do\n      codesign --force --sign \"$certificate_sha1\" --keychain \"$keychain\" --timestamp=none \"$item\"\n    done\ncodesign --force --sign \"$certificate_sha1\" --keychain \"$keychain\" --timestamp=none \\\n  --generate-entitlement-der --entitlements \"$work/entitlements.plist\" \"$app\"\ncodesign --verify --deep --strict \"$app\"\ncodesign -dv --verbose=4 \"$app\" 2> \"$work/codesign.txt\"\ngrep -F 'TeamIdentifier=MHYMVRN6FC' \"$work/codesign.txt\"\nmkdir -p \"$work/package/Payload\"\ncp -R \"$app\" \"$work/package/Payload/Runner.app\"\n(cd \"$work/package\" && ditto -c -k --sequesterRsrc --keepParent Payload \"$CITIZENWALLET_PROJECT_ROOT/$publish/citizenwallet.ipa\")\nunzip -Z1 \"$publish/citizenwallet.ipa\" | grep -Fx 'Payload/Runner.app/Info.plist'"});
 
 export async function runEmbeddedBuild(command,args,environment=process.env,cwd=process.cwd(),options={}) {
  if(!Object.hasOwn(BUILD_SHELL_SOURCES,command))fail('未知构建子步骤');
@@ -3646,15 +3648,16 @@ export async function ciPrepareFlutter(platform,environment=process.env){
 
 const GITHUB_API='https://api.github.com/repos/crcfrcn/'+product;
 const GITHUB_API_HEADERS=token=>({Accept:'application/vnd.github+json',Authorization:'Bearer '+token,'X-GitHub-Api-Version':'2026-03-10'});
-function releaseVersion(){
- const matches=[...readFileSync(join(root,'pubspec.yaml'),'utf8').matchAll(/^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\+[1-9][0-9]*\s*$/gmu)];
- if(matches.length!==1)fail('移动产品版本真源无效');
- return matches[0][1];
+function releaseVersion(environment=process.env){
+ const value=environment.CITIZENWALLET_AUTOMATION_VERSION;
+ if(typeof value!=='string'||!/^0\.0\.[1-9][0-9]*$/u.test(value)||!Number.isSafeInteger(Number(value.slice(4))))
+  fail('公民钱包自动化候选版本无效');
+ return value;
 }
 function releaseDisplayTitle(platform,version){
  platformContract(platform);
- if(!/^[0-9]+\.[0-9]+\.[0-9]+$/u.test(version||''))fail('移动Release展示版本无效');
- return '公民钱包 · '+platform+'-v'+version;
+ if(!/^0\.0\.[1-9][0-9]*$/u.test(version||''))fail('移动Release展示版本无效');
+ return '公民钱包-v'+version;
 }
 function completedRunOrder(left,right){return left.run_number-right.run_number||left.run_attempt-right.run_attempt||left.id-right.id;}
 async function githubPages(url,property,token,fetchImpl){
@@ -3668,6 +3671,72 @@ async function githubPages(url,property,token,fetchImpl){
   if(items.length<100)return values;
  }
  fail('GitHub清理分页超过上限');
+}
+// 平台版本仅从本仓 main 手动派发、最终成功的 Run 得出；旧 Release 可按保留规则删除。
+async function automationCandidateVersion(platform,token,{currentRunId=null,fetchImpl=fetch}={}){
+ platformContract(platform);
+ const runs=await githubPages(GITHUB_API+'/actions/workflows/'+platform+'.yml/runs?branch=main&event=workflow_dispatch',
+  'workflow_runs',token,fetchImpl),owned=[];
+ for(const run of runs){
+  if(run?.path!=='.github/workflows/'+platform+'.yml'||run?.head_branch!=='main'
+   ||run?.event!=='workflow_dispatch'||run?.repository?.full_name!=='crcfrcn/'+product)continue;
+  if(!Number.isSafeInteger(run.id)||run.id<1||!Number.isSafeInteger(run.run_number)||run.run_number<1
+   ||!Number.isSafeInteger(run.run_attempt)||run.run_attempt<1
+   ||!/^[0-9a-f]{40}$/u.test(run.head_sha??'')
+   ||run.html_url!=='https://github.com/crcfrcn/'+product+'/actions/runs/'+run.id)
+   fail('公民钱包平台 Run 身份无效');
+  if(run.id!==currentRunId&&run.status!=='completed')fail('同平台已有活动 Run，禁止重复派发');
+  if(run.status==='completed'){
+   if(typeof run.conclusion!=='string'||!run.conclusion)fail('公民钱包平台 Run 终态无效');
+   owned.push(run);
+  }
+ }
+ // GitHub rerun 会覆写列表中同一 Run 的最新结论；旧成功 attempt 不能被误当作从未成功。
+ for(const run of owned.filter(value=>value.conclusion!=='success'&&value.run_attempt>1)){
+  if(run.run_attempt>20)fail('公民钱包历史 Run 尝试数超限，拒绝推断版本');
+  for(let attempt=1;attempt<run.run_attempt;attempt++){
+   const response=await fetchImpl(GITHUB_API+'/actions/runs/'+run.id+'/attempts/'+attempt,
+    {redirect:'error',headers:GITHUB_API_HEADERS(token)});
+   if(!response.ok)fail('公民钱包旧 Run attempt 回读失败：HTTP '+response.status);
+   const prior=await response.json();
+   if(prior?.id!==run.id||prior.run_attempt!==attempt||prior.path!==run.path
+    ||prior.event!=='workflow_dispatch'||prior.head_branch!=='main'
+    ||prior.repository?.full_name!=='crcfrcn/'+product||prior.head_sha!==run.head_sha)
+    fail('公民钱包旧 Run attempt 身份无效');
+   if(prior.status!=='completed'||typeof prior.conclusion!=='string'||!prior.conclusion)
+    fail('公民钱包旧 Run attempt 终态无效');
+   if(prior.conclusion!=='success')continue;
+   const jobs=await githubPages(GITHUB_API+'/actions/runs/'+run.id+'/attempts/'+attempt+'/jobs',
+    'jobs',token,fetchImpl);
+   for(const name of ['release','cleanup'])if(jobs.filter(job=>job?.name===name
+    &&job.status==='completed'&&job.conclusion==='success').length!==1)
+    fail('公民钱包旧成功 attempt 的 Job 证明不完整，拒绝推断版本');
+   fail('公民钱包成功 Run 被重试覆盖，版本历史需恢复');
+  }
+ }
+ if(owned.filter(run=>run.conclusion==='success').length>1
+  ||owned.filter(run=>run.conclusion!=='success').length>1)
+  fail('本平台旧 Run 清理未收口，禁止派发新任务');
+ owned.sort(completedRunOrder);const latest=owned.filter(run=>run.conclusion==='success').at(-1);
+ if(!latest)return '0.0.1';
+ const match=/^公民钱包-v0\.0\.([1-9][0-9]*)$/u.exec(latest.display_title??'');
+ if(!match||!Number.isSafeInteger(Number(match[1]))||Number(match[1])>=Number.MAX_SAFE_INTEGER)
+  fail('最新成功 Run 缺少准确平台版本证明');
+ const jobs=await githubPages(GITHUB_API+'/actions/runs/'+latest.id+'/jobs','jobs',token,fetchImpl);
+ for(const name of ['release','cleanup']){
+  const rows=jobs.filter(job=>job?.name===name);
+  if(rows.length!==1||rows[0].status!=='completed'||rows[0].conclusion!=='success')
+   fail('最新成功 Run 的 '+name+' Job 证明无效');
+ }
+ return '0.0.'+(Number(match[1])+1);
+}
+async function checkedRunnerCandidate(platform,environment,{fetchImpl=fetch}={}){
+ const token=environment.GH_TOKEN||environment.GITHUB_TOKEN,run=Number(environment.GITHUB_RUN_ID);
+ if(!token||!Number.isSafeInteger(run)||run<1)fail('公民钱包 Runner 版本核对缺少身份');
+ const version=releaseVersion(environment);
+ if(version!==await automationCandidateVersion(platform,token,{currentRunId:run,fetchImpl}))
+  fail('公民钱包 Runner 候选版本与平台成功历史不符');
+ return version;
 }
 function checkedCleanupRun(run,platform,event){
  return run&&Number.isSafeInteger(run.id)&&run.id>0&&Number.isSafeInteger(run.run_number)&&run.run_number>0
@@ -3726,20 +3795,15 @@ export async function ciCleanup(platform,environment=process.env,{fetchImpl=fetc
   ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
   ||!checkedWorkflowDisplay(platform,environment)||!/^[1-9][0-9]*$/u.test(runId||'')
   ||!['success','failure','cancelled','skipped'].includes(upstream)||!token)fail('GitHub清理身份或上游结果无效');
- // 缓存与Run记录独立维护；缓存清理失败时先停止，避免把历史成功Run删掉后让当前Run因清理失败而转为失败。
+ // 当前 Run 还未形成最终结论；至少保留旧成功和旧失败各一条，终态后再由产品清同结果旧项。
  const cache=await cleanupCargoCaches(platform,token,fetchImpl),candidate=upstream==='success'?'success':'failure';
  const runs=(await listCleanupRuns(platform,token,fetchImpl)).filter(run=>String(run.id)!==runId);
  const latest={success:runs.filter(run=>cleanupRunState(run)==='success').at(-1),
   failure:runs.filter(run=>cleanupRunState(run)==='failure').at(-1)};
- const opposite=candidate==='success'?'failure':'success';
- const oppositeStale=runs.filter(run=>cleanupRunState(run)===opposite&&run.id!==latest[opposite]?.id);
- const candidateRows=runs.filter(run=>cleanupRunState(run)===candidate),candidateStale=candidateRows.slice(0,-1),candidateLatest=candidateRows.at(-1);
+ const stale=runs.filter(run=>run.id!==latest[cleanupRunState(run)]?.id);
  const remove=async values=>{for(const run of values)await deleteCompletedRun(run,token,fetchImpl);await verifyRunsDeleted(platform,values,token,fetchImpl);};
- await remove(oppositeStale);
- // 保留候选结果类别的旧最新Run，直到其他易失败的清理与回读都通过；最后删除该条旧Run。
- await remove(candidateStale);
- if(candidateLatest)await deleteCompletedRun(candidateLatest,token,fetchImpl);
- return {platform,candidate,cache,runs_deleted:[...oppositeStale,...candidateStale,...(candidateLatest?[candidateLatest]:[])].map(run=>run.id)};
+ await remove(stale);
+ return {platform,candidate,cache,runs_deleted:stale.map(run=>run.id)};
 }
 
 // Release 展示记录与 Actions Run 分别保留；只识别本仓发布证明，当前正式包确认后才删旧项。
@@ -3783,7 +3847,7 @@ export async function ciRetainReleases(platform,environment=process.env,{fetchIm
   ||!['success','failure','cancelled','skipped'].includes(environment.CITIZENWALLET_RELEASE_RESULT))
   fail('GitHub Release 清理身份无效');
  if(environment.CITIZENWALLET_RELEASE_RESULT!=='success')return {platform,skipped:true,deleted:[],deleted_tags:[]};
- const version=releaseVersion(),currentTag=product+'-'+platform+'-v'+version+'-r'+run+'-a'+attempt;
+ const version=releaseVersion(environment),currentTag=product+'-'+platform+'-v'+version+'-r'+run+'-a'+attempt;
  const rows=await githubPages(GITHUB_API+'/releases','',token,fetchImpl),owned=[];
  for(const release of rows){const proof=checkedPlatformRelease(release,platform);if(proof)owned.push({release,proof});}
  const current=owned.filter(value=>value.release.tag_name===currentTag);
@@ -3839,12 +3903,13 @@ export async function ciBuild(platform,environment=process.env){
   fail('GitHub移动编译身份无效');
  const head=spawnSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'});
  if(head.status!==0||head.stdout.trim()!==sha)fail('GitHub源码提交不匹配');
- const version=releaseVersion(),names=platform==='ios'?[product+'.ipa']:[product+'.apk',product+'.aab'];
+ const version=await checkedRunnerCandidate(platform,environment),names=platform==='ios'?[product+'.ipa']:[product+'.apk',product+'.aab'];
  return withFixedWork('build/'+platform,async work=>{
   const project=join(work,'source-view',root.replace(/^\/+/u,'')),buildRoot=join(work,'work/flutter');
   mkdirSync(join(work,'work'),{recursive:true});mkdirSync(join(work,'dependencies'),{recursive:true});
   const {APP_KEY:_appKey,IOS_KEY:_iosKey,IOS_PROVISIONING_PROFILE:_iosProfile,...buildEnvironment}=environment;
   const env={...buildEnvironment,NODE:process.execPath,PRODUCT_NODE_BIN:process.execPath,
+   CITIZENWALLET_AUTOMATION_VERSION:version,
    [product.toUpperCase()+'_WORK_DIR']:work,[product.toUpperCase()+'_BUILD_WORK_DIR']:join(work,'work'),
    [product.toUpperCase()+'_DEPENDENCY_DIR']:join(work,'dependencies'),
    [product.toUpperCase()+'_BUILD_DIR']:buildRoot,[product.toUpperCase()+'_ARTIFACT_DIR']:work,
@@ -3873,6 +3938,8 @@ export async function ciBuild(platform,environment=process.env){
    if(!existsSync(app)||!lstatSync(app).isDirectory())fail('GitHub iOS未签名候选缺失');
    const plist=spawnSync('/usr/libexec/PlistBuddy',['-c','Print :CFBundleVersion',join(app,'Info.plist')],{encoding:'utf8'});
    if(plist.status!==0||plist.stdout.trim()!==number)fail('GitHub iOS构建编号不匹配');
+   const shortVersion=spawnSync('/usr/libexec/PlistBuddy',['-c','Print :CFBundleShortVersionString',join(app,'Info.plist')],{encoding:'utf8'});
+   if(shortVersion.status!==0||shortVersion.stdout.trim()!==version)fail('GitHub iOS候选版本不匹配');
    const destination=join(stage,'build/ios/iphoneos/Runner.app');
    mkdirSync(dirname(destination),{recursive:true});
    const {cpSync}=await import('node:fs');cpSync(app,destination,{recursive:true});
@@ -3915,7 +3982,8 @@ export async function ciVerifyRelease(platform,phase,releaseId,environment=proce
  if(typeof releaseId!=='string'||! /^[1-9][0-9]*$/u.test(releaseId))fail('GitHub移动Release ID无效');
  const work=fixedWork('build/'+platform);checkFixedWork(work);
  const plan=JSON.parse(readFileSync(join(work,'release-plan.json'),'utf8')),token=environment.GH_TOKEN||environment.GITHUB_TOKEN;
- if(!token||plan.product_id!==product||plan.platform!==platform||plan.source_sha!==environment.GITHUB_SHA)fail('GitHub移动Release计划无效');
+ if(!token||plan.product_id!==product||plan.platform!==platform||plan.source_sha!==environment.GITHUB_SHA
+  ||plan.version!==releaseVersion(environment))fail('GitHub移动Release计划无效');
  const base='https://api.github.com/repos/crcfrcn/'+product,headers={Accept:'application/vnd.github+json',Authorization:'Bearer '+token};
  const response=await fetchImpl(base+'/releases/'+releaseId,
   {redirect:'error',headers});
@@ -3981,7 +4049,7 @@ async function ciCreateReleaseTag(platform,environment=process.env,{fetchImpl=fe
  const work=fixedWork('build/'+platform);checkFixedWork(work);
  const plan=JSON.parse(readFileSync(join(work,'release-plan.json'),'utf8'));
  const token=environment.GH_TOKEN||environment.GITHUB_TOKEN;
- if(plan.platform!==platform||plan.source_sha!==environment.GITHUB_SHA)fail('GitHub移动Tag计划来源无效');
+ if(plan.platform!==platform||plan.source_sha!==environment.GITHUB_SHA||plan.version!==releaseVersion(environment))fail('GitHub移动Tag计划来源无效');
  return ensureReleaseTagReference(plan,token,{fetchImpl});
 }
 
@@ -4334,7 +4402,8 @@ test('GitHub Android签名使用SDK绝对路径回读包名和版本',async()=>{
  assert.match(signing,/apkanalyzer="\$ANDROID_HOME\/cmdline-tools\/latest\/bin\/apkanalyzer"/u);
  assert.match(signing,/test -x "\$apkanalyzer"/u);
  assert.match(signing,/"\$apkanalyzer" manifest application-id/u);
- assert.match(signing,/"\$apkanalyzer" manifest version-code/u);
+  assert.match(signing,/"\$apkanalyzer" manifest version-name "\$publish\/citizenwallet\.apk"\)" = "\$CITIZENWALLET_AUTOMATION_VERSION"/u);
+  assert.match(signing,/"\$apkanalyzer" manifest version-code "\$publish\/citizenwallet\.apk"\)" = "\$CITIZENWALLET_BUILD_NUMBER"/u);
  assert.doesNotMatch(signing,/\$\(apkanalyzer manifest/u);
 });
 test('Android多USB、包路径、证书和开发材料异常由产品拒绝',async()=>{
@@ -5050,8 +5119,8 @@ test('本机 Cargo target cache 按平台独立于每轮编译现场',async()=>{
 });
 
 test('GitHub平台清理只删本仓main对应Workflow旧Run与旧Cargo缓存',async()=>{
- const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+ const env={GITHUB_ACTIONS:'true',CITIZENWALLET_AUTOMATION_VERSION:'0.0.1',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'公民钱包',
   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_RUN_ID:'99',
   CITIZENWALLET_RELEASE_RESULT:'success',GH_TOKEN:'synthetic'};
  const make=(id,run_number,conclusion,event,path='.github/workflows/ios.yml',branch='main',status='completed')=>({
@@ -5078,8 +5147,8 @@ test('GitHub平台清理只删本仓main对应Workflow旧Run与旧Cargo缓存',a
   throw Error('Unexpected cleanup request');
  };
  const result=await ciCleanup('ios',env,{fetchImpl});
- assert.deepEqual(deletedCaches,[10]);assert.deepEqual(deletedRuns,[3,1,2]);
- assert.deepEqual(result.runs_deleted,[3,1,2]);assert.equal(result.candidate,'success');
+ assert.deepEqual(deletedCaches,[10]);assert.deepEqual(deletedRuns,[1,3]);
+ assert.deepEqual(result.runs_deleted,[1,3]);assert.equal(result.candidate,'success');
  assert.ok(runs.some(value=>value.id===4),'最新失败Run必须保留');
  assert.ok(runs.some(value=>value.id===99),'当前活动Run必须保留');
  assert.ok(runs.some(value=>value.id===7),'Android Workflow记录必须保留');
@@ -5088,8 +5157,8 @@ test('GitHub平台清理只删本仓main对应Workflow旧Run与旧Cargo缓存',a
 });
 
 test('GitHub清理失败明确失败且在缓存清理失败时不删Run',async()=>{
- const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('android',releaseVersion()),
+ const env={GITHUB_ACTIONS:'true',CITIZENWALLET_AUTOMATION_VERSION:'0.0.1',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'公民钱包',
   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/android.yml@refs/heads/main',GITHUB_RUN_ID:'100',
   CITIZENWALLET_RELEASE_RESULT:'failure',GH_TOKEN:'synthetic'};let runDeletes=0;
  const fetchImpl=async(url,options={})=>{
@@ -5105,13 +5174,13 @@ test('GitHub清理失败明确失败且在缓存清理失败时不删Run',async(
 });
 
 test('GitHub Run删除请求失败会明确失败而不回报清理成功',async()=>{
- const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+ const env={GITHUB_ACTIONS:'true',CITIZENWALLET_AUTOMATION_VERSION:'0.0.1',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'公民钱包',
   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_RUN_ID:'101',
   CITIZENWALLET_RELEASE_RESULT:'failure',GH_TOKEN:'synthetic'};
  const make=(id,run_number,conclusion)=>({id,run_number,run_attempt:1,conclusion,event:'workflow_dispatch',
   path:'.github/workflows/ios.yml',head_branch:'main',status:'completed',repository:{full_name:'crcfrcn/citizenwallet'}});
- const runs=[make(10,10,'success'),make(11,11,'failure')];let deleteStatus=503;
+ const runs=[make(10,10,'success'),make(11,11,'failure'),make(9,9,'failure')];let deleteStatus=503;
  const fetchImpl=async(url,options={})=>{
   const address=new URL(url);
   if(address.pathname.endsWith('/actions/caches'))return Response.json({actions_caches:[]});
@@ -5119,12 +5188,12 @@ test('GitHub Run删除请求失败会明确失败而不回报清理成功',async
   if(address.pathname.includes('/actions/workflows/'))return Response.json({workflow_runs:runs.filter(value=>value.event===address.searchParams.get('event'))});
   throw Error('Unexpected cleanup request');
  };
- await assert.rejects(ciCleanup('ios',env,{fetchImpl}),/删除旧Run失败：11，HTTP 503/u);
+ await assert.rejects(ciCleanup('ios',env,{fetchImpl}),/删除旧Run失败：9，HTTP 503/u);
  deleteStatus=204;
 });
 
 test('GitHub Release 每平台只留本轮正式版并清理旧草稿及准确Tag',async()=>{
- const version='1.0.0',sha='a'.repeat(40),otherSha='b'.repeat(40),digest='c'.repeat(64);
+ const version='0.0.1',sha='a'.repeat(40),otherSha='b'.repeat(40),digest='c'.repeat(64);
  const make=(platform,id,runId,sourceSha,{draft=false,title}={})=>{
   const tag='citizenwallet-'+platform+'-v'+version+'-r'+runId+'-a1';
   const names=platform==='ios'?['citizenwallet.ipa','citizenwallet-release-ios.json']
@@ -5142,8 +5211,8 @@ test('GitHub Release 每平台只留本轮正式版并清理旧草稿及准确Ta
   draft=make('ios',80,80,otherSha,{draft:true}),foreign=make('android',70,70,otherSha);
  const releases=[current,old,draft,foreign],refs=new Map([current,old,foreign].map(value=>
   [value.tag_name,{ref:'refs/tags/'+value.tag_name,object:{type:'commit',sha:value.target_commitish}}]));
- const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+ const env={GITHUB_ACTIONS:'true',CITIZENWALLET_AUTOMATION_VERSION:'0.0.1',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'公民钱包',
   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_RUN_ID:'99',
   GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_NUMBER:'99',GITHUB_SHA:sha,CITIZENWALLET_RELEASE_RESULT:'success',GH_TOKEN:'synthetic'};
  const response=(status,value={})=>({status,ok:status>=200&&status<300,json:async()=>value});
@@ -5226,9 +5295,9 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
   assert.ok(create>=0&&draft>create&&resolveId>draft&&verify>resolveId&&publish>verify&&verifyPublished>publish,
    platform+'必须按Release ID验证草稿、发布并回读');
   assert.ok(workflow.includes('version="$(node -e \'const p=require(process.argv[1]);process.stdout.write(p.version)\' "$plan")'));
-  assert.ok(workflow.includes('--title "公民钱包 · '+platform+'-v$version"'));
-  assert.ok(workflow.startsWith('name: '+releaseDisplayTitle(platform,releaseVersion())+'\n'));
-  assert.ok(workflow.includes('run-name: '+releaseDisplayTitle(platform,releaseVersion())),
+  assert.ok(workflow.includes('--title "公民钱包-v$version"'));
+  assert.ok(workflow.startsWith('name: 公民钱包\n'));
+  assert.ok(workflow.includes('run-name: 公民钱包-v${{ inputs.version }}'),
    platform+'的GitHub Run展示标题必须与当前产品版本的Release标题一致');
   assert.ok(!workflow.includes('--title "citizenwallet · '+platform+' · $tag"'));
  }
@@ -5236,8 +5305,8 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
 
 test('GitHub展示名称不作为平台身份，准确Workflow引用与标题共同核验',async()=>{
  for(const platform of ['ios','android']){
-  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-   GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle(platform,releaseVersion()),
+  const env={GITHUB_ACTIONS:'true',CITIZENWALLET_AUTOMATION_VERSION:'0.0.1',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+   GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'公民钱包',
    GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/'+platform+'.yml@refs/heads/main',
    GITHUB_SHA:'a'.repeat(40),GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_NUMBER:'42'};
   assert.equal(workflowPlatformFromRef(env),platform);
@@ -5259,7 +5328,7 @@ test('iOS与Android独立Workflow各自清Run并维护唯一平台Cargo缓存',(
   const checkoutSHAs=[...workflow.matchAll(/^\s*- uses: actions\/checkout@([a-f0-9]{40})\s*$/gmu)].map(value=>value[1]);
   assert.deepEqual(checkoutSHAs,['fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09','fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'],
    platform+'的cleanup必须复用本平台release已经验收的checkout SHA');
-  assert.ok(workflow.startsWith('name: '+releaseDisplayTitle(platform,releaseVersion())+'\n'));
+  assert.ok(workflow.startsWith('name: 公民钱包\n'));
   assert.ok(workflow.includes('key: citizenwallet-cargo-'+platform+'-${{ github.run_id }}-${{ github.run_attempt }}'));
   assert.ok(workflow.includes('path: target/cache/cargo/'+platform));
   assert.ok(workflow.includes('needs: release')&&workflow.includes('    if: always()'));
@@ -5275,7 +5344,7 @@ test('iOS与Android独立Workflow各自清Run并维护唯一平台Cargo缓存',(
 });
 
 test('Release Tag只创建指向准确提交的轻量Git引用并回读',async()=>{
- const plan={product_id:'citizenwallet',platform:'ios',tag:'citizenwallet-ios-v1.0.0-r123-a1',source_sha:'a'.repeat(40)};
+ const plan={product_id:'citizenwallet',platform:'ios',tag:'citizenwallet-ios-v0.0.1-r123-a1',source_sha:'a'.repeat(40)};
  const expected={ref:'refs/tags/'+plan.tag,object:{type:'commit',sha:plan.source_sha}};
  const response=(status,value={})=>({status,ok:status>=200&&status<300,json:async()=>value});
  const calls=[];
@@ -5295,7 +5364,7 @@ test('Release Tag只创建指向准确提交的轻量Git引用并回读',async()
 });
 
 test('Release Tag已有引用必须相同，创建或回读异常均失败',async()=>{
- const plan={product_id:'citizenwallet',platform:'android',tag:'citizenwallet-android-v1.0.0-r456-a1',source_sha:'b'.repeat(40)};
+ const plan={product_id:'citizenwallet',platform:'android',tag:'citizenwallet-android-v0.0.1-r456-a1',source_sha:'b'.repeat(40)};
  const response=(status,value={})=>({status,ok:status>=200&&status<300,json:async()=>value});
  const correct={ref:'refs/tags/'+plan.tag,object:{type:'commit',sha:plan.source_sha}};
  let calls=0;
@@ -5317,20 +5386,20 @@ test('Release Tag已有引用必须相同，创建或回读异常均失败',asyn
 
 test('移动Release通过GitHub返回的ID校验草稿、发布并回读',async()=>{
  await withFixedWork('build/ios',async work=>{
-  const tag='citizenwallet-ios-v1.0.0-r789-a1',sha='e'.repeat(40),releaseId='987654321';
+  const tag='citizenwallet-ios-v0.0.1-r789-a1',sha='e'.repeat(40),releaseId='987654321';
   const notes=join(work,'release-notes.txt'),assetsDir=join(work,'release-assets');mkdirSync(assetsDir);
   writeFileSync(notes,'release notes\n');
   const bytes=Buffer.from('synthetic ipa'),digest=createHash('sha256').update(bytes).digest('hex');
   writeFileSync(join(assetsDir,'citizenwallet.ipa'),bytes);
-  const plan={schema:1,product_id:'citizenwallet',platform:'ios',tag,version:'1.0.0',source_sha:sha,notes,directory:assetsDir,
+  const plan={schema:1,product_id:'citizenwallet',platform:'ios',tag,version:'0.0.1',source_sha:sha,notes,directory:assetsDir,
    assets:[{name:'citizenwallet.ipa',size:bytes.length,sha256:digest}]};
   writeFileSync(join(work,'release-plan.json'),JSON.stringify(plan)+'\n');
-  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',
-   GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+  const env={GITHUB_ACTIONS:'true',CITIZENWALLET_AUTOMATION_VERSION:'0.0.1',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',
+   GITHUB_WORKFLOW:'公民钱包',
    GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_SHA:sha,GH_TOKEN:'test-token'};
   const tagReference={ref:'refs/tags/'+tag,object:{type:'commit',sha}};
   const asset={name:'citizenwallet.ipa',state:'uploaded',size:bytes.length,digest:'sha256:'+digest};
-  const draft={id:Number(releaseId),tag_name:tag,name:releaseDisplayTitle('ios','1.0.0'),target_commitish:sha,
+  const draft={id:Number(releaseId),tag_name:tag,name:releaseDisplayTitle('ios','0.0.1'),target_commitish:sha,
    prerelease:false,draft:true,published_at:null,
    body:'release notes',assets:[asset]};
   const published={...draft,draft:false,published_at:'2026-10-16T00:00:00Z'};
@@ -5633,4 +5702,490 @@ test('iOS原生目标使用已交付Xcode的iphoneos SDK，查询或缺件失败
 });
 }
   })().catch(error => { console.error(error); process.exitCode = 1; });
+}
+// 塔塔自动化的远端生命周期归本产品；控制台只提供任务宿主和短期凭据。
+const automationWorkflows=Object.freeze({ios:'ios.yml',android:'android.yml'});
+const automationRepository='crcfrcn/citizenwallet';
+const automationTransport=new (await import('node:async_hooks')).AsyncLocalStorage();
+function automationRoute(route,action){
+ const workflow=automationWorkflows[route?.platform];
+ if(!workflow||route.repository!=='citizenwallet'||route.product!=='citizenwallet'
+  ||route.workflow!==workflow||route.canonicalId!==`citizenwallet.${route.platform}.release`
+  ||action&& (action.canonicalId!==route.canonicalId||action.platform!==route.platform
+   ||action.productId!=='citizenwallet'||action.flow!=='release'||action.authorizationLevel!==2))
+  throw Error('公民钱包自动化目标或授权动作不匹配');
+ return workflow;
+}
+async function automationAccess(route,host,actionId,task){
+ if(!host?.security)throw Error('缺少自动化短期授权宿主');
+ const payload={repository:automationRepository,purpose:'workflow',action_id:actionId,platform:route.platform};
+ if(task){payload.run_id=task.id;payload.recovery_run_id=task.id;}
+ const value=await host.security('github.repository.token',{
+  payload_base64:Buffer.from(JSON.stringify(payload)).toString('base64')});
+ const token=Buffer.from(value?.values?.['repository-main:TOKEN']||'','base64').toString('utf8');
+ const expiry=Number(Buffer.from(value?.values?.['repository-main:EXPIRES_AT']||'','base64').toString('utf8'));
+ if(value?.ok!==true||!/^ghs_[^\s\x00-\x1f\x7f]{1,2044}$/u.test(token)
+  ||!Number.isSafeInteger(expiry)||expiry<=Date.now()/1000)throw Error('公民钱包 GitHub 短期授权无效');
+ return token;
+}
+async function automationRequest(path,token,{method='GET',body}={}){
+ if(!/^actions\/(?:workflows\/(?:ios|android)\.yml\/dispatches|runs\/[1-9]\d*(?:\/(?:jobs(?:\?per_page=100&page=[1-9]\d*)?|cancel|force-cancel))?)$/u.test(path))
+  throw Error('公民钱包 GitHub 请求目标无效');
+ const response=await (automationTransport.getStore()?.fetchImpl??fetch)(`https://api.github.com/repos/${automationRepository}/${path}`,{
+  method,redirect:'error',credentials:'omit',headers:{Authorization:`Bearer ${token}`,
+   Accept:'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2026-03-10'},
+  ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(30000)});
+ if(!response.ok)throw Error(`公民钱包 GitHub 请求失败：HTTP ${response.status}`);
+ if(response.status===202||response.status===204)return {};
+ if(!response.body)throw Error('公民钱包 GitHub 回执缺失');
+ let size=0;const chunks=[];
+ for await(const chunk of response.body){size+=chunk.length;if(size>8*1024*1024)throw Error('公民钱包 GitHub 回执超限');chunks.push(chunk);}
+ return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
+}
+function automationCheckedRun(run,route,expected){
+ const workflow=automationRoute(route);
+ if(!Number.isSafeInteger(run?.id)||run.id!==expected||run.path!==`.github/workflows/${workflow}`
+  ||run.event!=='workflow_dispatch'||run.head_branch!=='main'
+  ||run.repository?.full_name!==automationRepository||!/^[0-9a-f]{40}$/u.test(run.head_sha||'')
+  ||run.html_url!==`https://github.com/${automationRepository}/actions/runs/${expected}`)
+  throw Error('公民钱包 GitHub Run 身份不符');
+ return run;
+}
+// 同一产品入口可脱离控制台运行；调用方自行提供已获准的短期令牌。
+export async function dispatchAutomation(platform,token,{accepted,fetchImpl=automationTransport.getStore()?.fetchImpl??fetch}={}){
+ const route={repository:'citizenwallet',product:'citizenwallet',platform,workflow:automationWorkflows[platform],canonicalId:`citizenwallet.${platform}.release`};
+ const workflow=automationRoute(route);
+ if(typeof token!=='string'||!token)throw Error('公民钱包派发参数无效');
+ const version=await automationCandidateVersion(platform,token,{fetchImpl});
+ const value=await automationRequest(`actions/workflows/${workflow}/dispatches`,token,{method:'POST',body:{ref:'main',inputs:{version}}});
+ if(!Number.isSafeInteger(value.workflow_run_id)||value.workflow_run_id<1
+  ||value.html_url!==`https://github.com/${automationRepository}/actions/runs/${value.workflow_run_id}`)
+  throw Error('公民钱包派发未返回准确 Run，禁止再次派发');
+ await accepted?.({...value,version});
+ const run=automationCheckedRun(await automationRequest(`actions/runs/${value.workflow_run_id}`,token),route,value.workflow_run_id);
+ if(run.display_title!==releaseDisplayTitle(platform,version))throw Error('公民钱包派发 Run 候选版本回读不符');
+ return {run,version};
+}
+// 只读取当前 Run 的 Job 与终态日志，日志和下载均有限额，令牌不进入任务输出。
+function automationSafeText(value,token){
+ return String(value??'').split(token).join('[已脱敏]').replace(/gh[sopur]_[A-Za-z0-9_]+/gu,'[已脱敏]').slice(0,4000);
+}
+async function automationJobs(runId,token){
+ const jobs=[];
+ for(let page=1;page<=50;page++){
+  const value=await automationRequest(`actions/runs/${runId}/jobs?per_page=100&page=${page}`,token);
+  if(!Array.isArray(value?.jobs))throw Error('GitHub Job 分页响应无效');
+  jobs.push(...value.jobs);if(value.jobs.length<100)return jobs;
+ }
+ throw Error('GitHub Job 页数超限');
+}
+async function automationLogArchive(bytes){
+ if(!Buffer.isBuffer(bytes)||bytes.length>32*1024*1024)throw Error('GitHub 日志归档超限');
+ const {inflateRawSync}=await import('node:zlib');let end=-1;
+ for(let at=bytes.length-22;at>=Math.max(0,bytes.length-65558);at--){
+  if(bytes.readUInt32LE(at)===0x06054b50){end=at;break;}
+ }
+ if(end<0)throw Error('GitHub 日志 ZIP 结构无效');
+ const count=bytes.readUInt16LE(end+10);let offset=bytes.readUInt32LE(end+16),total=0;
+ if(count>2000)throw Error('GitHub 日志文件数超限');
+ const files=[];
+ for(let index=0;index<count;index++){
+  if(offset+46>bytes.length||bytes.readUInt32LE(offset)!==0x02014b50)throw Error('GitHub 日志目录损坏');
+  const flags=bytes.readUInt16LE(offset+8),method=bytes.readUInt16LE(offset+10),packed=bytes.readUInt32LE(offset+20),size=bytes.readUInt32LE(offset+24);
+  const nameLength=bytes.readUInt16LE(offset+28),extra=bytes.readUInt16LE(offset+30),comment=bytes.readUInt16LE(offset+32),local=bytes.readUInt32LE(offset+42);
+  const name=bytes.subarray(offset+46,offset+46+nameLength).toString('utf8');offset+=46+nameLength+extra+comment;
+  if(flags&1||![0,8].includes(method)||local+30>bytes.length||bytes.readUInt32LE(local)!==0x04034b50)throw Error('GitHub 日志压缩格式无效');
+  total+=size;if(size>32*1024*1024||total>128*1024*1024)throw Error('GitHub 解压日志超限');
+  const start=local+30+bytes.readUInt16LE(local+26)+bytes.readUInt16LE(local+28);
+  if(start+packed>bytes.length)throw Error('GitHub 日志内容越界');
+  const data=method===0?bytes.subarray(start,start+packed):inflateRawSync(bytes.subarray(start,start+packed),{maxOutputLength:size});
+  if(data.length!==size)throw Error('GitHub 日志大小不一致');
+  if(name.endsWith('.txt'))files.push({name,text:data.toString('utf8')});
+ }
+ return files;
+}
+async function automationReadLogs(runId,token){
+ const response=await (automationTransport.getStore()?.fetchImpl??fetch)(`https://api.github.com/repos/${automationRepository}/actions/runs/${runId}/logs`,{
+  redirect:'manual',credentials:'omit',headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json',
+   'X-GitHub-Api-Version':'2026-03-10'},signal:AbortSignal.timeout(30000)});
+ if(response.status===404)return [];
+ let download=response;
+ if(response.status===302){
+  const location=new URL(response.headers.get('location'));
+  if(location.protocol!=='https:'||location.username||location.password)throw Error('GitHub 日志地址无效');
+  download=await (automationTransport.getStore()?.fetchImpl??fetch)(location.href,{redirect:'error',credentials:'omit',signal:AbortSignal.timeout(60000)});
+ }
+ if(!download.ok||!download.body)throw Error('GitHub 日志读取失败');
+ let size=0;const parts=[];
+ for await(const part of download.body){size+=part.length;if(size>32*1024*1024)throw Error('GitHub 日志下载超限');parts.push(part);}
+ return automationLogArchive(Buffer.concat(parts));
+}
+const automationObservers=new WeakSet();
+const automationReconnects=new WeakSet();
+function automationScheduleReconnect(task,route,host){
+ if(!task.active||automationReconnects.has(task))return;
+ automationReconnects.add(task);
+ const timer=setTimeout(async()=>{
+  automationReconnects.delete(task);
+  if(!task.active||!task.recovered)return;
+  try{
+   // 控制台回到所属产品请求上下文领取恢复授权；独立宿主显式声明模式后才直调。
+   if(typeof host.recoverTask==='function')await host.recoverTask(task);
+   else if(host.mode==='independent')await recoverAutomation(task,route,host);
+   else throw Error('自动化恢复宿主入口缺失');
+  }catch(error){
+   if(task.active){host.report(task,'原 Run 重新连接失败：'+error.message);automationScheduleReconnect(task,route,host);}
+  }
+ },120000);timer.unref?.();
+}
+async function retainCompletedAutomationRun(run,route,token,{fetchImpl=automationTransport.getStore()?.fetchImpl??fetch}={}){
+ if(run.status!=='completed'||!['success','failure','cancelled','timed_out','action_required','neutral','skipped'].includes(run.conclusion))
+  throw Error('公民钱包终态 Run 清理身份无效');
+ if(!Number.isSafeInteger(run.run_number)||run.run_number<1||!Number.isSafeInteger(run.run_attempt)||run.run_attempt<1)
+  throw Error('公民钱包终态 Run 编号无效');
+ const state=run.conclusion==='success'?'success':'failure';
+ if(state==='success'){
+  const match=/^公民钱包-v0\.0\.[1-9][0-9]*$/u.exec(run.display_title??'');
+  if(!match)throw Error('公民钱包成功 Run 版本证明无效');
+  const jobs=await githubPages(GITHUB_API+'/actions/runs/'+run.id+'/jobs','jobs',token,fetchImpl);
+  for(const name of ['release','cleanup'])if(jobs.filter(job=>job?.name===name&&job.status==='completed'&&job.conclusion==='success').length!==1)
+   throw Error('公民钱包成功 Run Job 证明无效：'+name);
+ }
+ const history=await listCleanupRuns(route.platform,token,fetchImpl);
+ const present=history.filter(value=>value.id===run.id);
+ if(present.length!==1||present[0].status!=='completed'||present[0].conclusion!==run.conclusion
+  ||present[0].run_attempt!==run.run_attempt||present[0].run_number!==run.run_number
+  ||present[0].head_sha!==run.head_sha||present[0].path!=='.github/workflows/'+route.workflow
+  ||present[0].repository?.full_name!==automationRepository)
+  throw Error('当前终态 Run 列表回读缺失或身份不符，保留旧记录等待重试');
+ if(history.some(value=>cleanupRunState(value)===state&&completedRunOrder(value,run)>0))
+  throw Error('当前 Run 不是本平台最新终态，禁止清理较新记录');
+ const stale=history.filter(value=>value.id!==run.id&&cleanupRunState(value)===state);
+ for(const old of stale)await deleteCompletedRun(old,token,fetchImpl);
+ await verifyRunsDeleted(route.platform,stale,token,fetchImpl);
+ return {platform:route.platform,state,retained:run.id,deleted:stale.map(value=>value.id)};
+}
+async function automationObserve(task,route,host,token){
+ if(automationObservers.has(task))return;automationObservers.add(task);
+ let previous='';const jobStates=new Map();
+ try{while(task.active){
+  const run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
+  if(task.sourceSHA&&task.sourceSHA!==run.head_sha)throw Error('公民钱包 Run 提交身份变化');
+  Object.assign(task,{sourceSHA:run.head_sha,githubRunNumber:run.run_number,githubRunAttempt:run.run_attempt,
+   githubRemoteStatus:run.status});host.changed(task);
+  const status=run.status==='completed'?(run.conclusion==='success'?'成功':'失败'):run.status;
+  if(status!==previous){host.report(task,'GitHub：'+status);previous=status;}
+  for(const job of await automationJobs(run.id,token)){
+   const state=job.status+':'+job.conclusion;
+   if(jobStates.get(job.id)!==state){jobStates.set(job.id,state);
+    host.report(task,automationSafeText(job.name,token)+'：'+(job.conclusion||job.status));}
+  }
+  if(run.status==='completed'){
+   try{for(const file of await automationReadLogs(run.id,token)){
+    host.report(task,'GitHub 日志：'+automationSafeText(file.name,token));
+    for(const line of file.text.split(/\r?\n/u))if(line)host.report(task,automationSafeText(line,token));
+   }}catch{host.report(task,'GitHub 终态已确认；日志下载未完成，可从 Run 链接查看');}
+   try{const retention=await retainCompletedAutomationRun(run,route,token);
+    host.report(task,'本平台同结果旧 Run 清理成功：'+retention.deleted.length+' 条');}
+   catch(error){task.recovered=true;host.report(task,'本平台同结果旧 Run 清理失败，保持原任务待恢复：'+automationSafeText(error.message,token));
+    host.changed(task);automationScheduleReconnect(task,route,host);return;}
+   await host.finish(task,task.cancelRequested||run.conclusion!=='success'?1:0,
+    task.cancelRequested?'任务已取消；塔塔自动化终态：'+run.conclusion:
+     run.conclusion==='success'?'塔塔自动化成功':'塔塔自动化失败：'+run.conclusion);
+   await host.refresh?.(route.repository,host.security);return;
+  }
+  await (automationTransport.getStore()?.pause?.()??new Promise(resolve=>setTimeout(resolve,5000)));
+ }}catch(error){if(task.active){task.recovered=true;host.report(task,'公民钱包原 Run 观察中断：'+error.message);host.changed(task);automationScheduleReconnect(task,route,host);}}
+ finally{automationObservers.delete(task);}
+}
+async function automationCancel(task,route,host){
+ if(task.remoteCancelOperation)return task.remoteCancelOperation;
+ const operation=(async()=>{
+  automationRoute(route);if(!task.active||task.repository!==route.repository||task.platform!==route.platform)throw Error('公民钱包取消目标不匹配');
+  task.cancelRequested=true;host.changed(task);
+  if(!task.githubRunId)return {id:task.id,closed:true};
+  const token=await automationAccess(route,host,task.actionId,task);
+  let run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
+  if(task.sourceSHA&&run.head_sha!==task.sourceSHA)throw Error('公民钱包取消提交身份不符');
+  if(run.status!=='completed')await automationRequest(`actions/runs/${task.githubRunId}/cancel`,token,{method:'POST'});
+  for(let index=0;index<60&&run.status!=='completed';index++){
+   await (automationTransport.getStore()?.pause?.()??new Promise(resolve=>setTimeout(resolve,5000)));run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
+  }
+  if(run.status!=='completed'){
+   await automationRequest(`actions/runs/${task.githubRunId}/force-cancel`,token,{method:'POST'});
+   for(let index=0;index<60&&run.status!=='completed';index++){
+    await (automationTransport.getStore()?.pause?.()??new Promise(resolve=>setTimeout(resolve,5000)));run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
+   }
+  }
+  if(run.status!=='completed')throw Error('公民钱包远端取消未到终态');
+  try{const retention=await retainCompletedAutomationRun(run,route,token);
+   host.report(task,'本平台同结果旧 Run 清理成功：'+retention.deleted.length+' 条');}
+  catch(error){throw Error('本平台同结果旧 Run 清理失败：'+automationSafeText(error.message,token));}
+  if(task.active)await host.finish(task,1,'任务已取消；塔塔自动化终态：'+run.conclusion);
+  return {id:task.id,closed:true};
+ })().catch(error=>{if(task.active){task.recovered=true;host.report(task,'原 Run 取消待恢复：'+error.message);host.changed(task);automationScheduleReconnect(task,route,host);}throw error;});task.remoteCancelOperation=operation;
+ void operation.finally(()=>{if(task.remoteCancelOperation===operation)delete task.remoteCancelOperation;}).catch(()=>{});
+ return operation;
+}
+export async function startAutomation(route,action,host){
+ automationRoute(route,action);
+ const existing=host.listTasks().find(task=>task.active&&task.recovered&&task.githubRunId
+  &&task.repository===route.repository&&task.platform===route.platform);
+ if(existing)return recoverAutomation(existing,route,host);
+ if(host.listTasks().some(task=>task.active&&task.repository===route.repository&&task.platform===route.platform))
+  throw Error('同平台已有活动自动化任务');
+ const token=await automationAccess(route,host,action.id);
+ const task=host.createTask({moduleFile:'citizenwallet.mjs',canonicalId:route.canonicalId,actionId:action.id,
+  title:route.title,moduleId:'citizenwallet'});
+ Object.assign(task,{repository:route.repository,productId:route.product,platform:route.platform,
+  mode:'release',flow:'release',security:host.security,githubRepository:automationRepository,
+  githubWorkflow:route.workflow});
+ task.cancel=()=>automationCancel(task,route,host);task.secrets.push(token);host.created(task);
+ try{
+  // 产品计算平台候选版本；派发回执先持久化 Run ID，回读中断只恢复原 Run。
+  const {run,version}=await dispatchAutomation(route.platform,token,{accepted:value=>{
+   Object.assign(task,{githubRunId:value.workflow_run_id,githubRunUrl:value.html_url,automationVersion:value.version});host.changed(task);
+  }});
+  Object.assign(task,{sourceSHA:run.head_sha,githubRunNumber:run.run_number,githubRunAttempt:run.run_attempt,
+   githubRemoteStatus:run.status});host.changed(task);host.report(task,'GitHub 已接收：'+run.html_url);
+  if(task.cancelRequested)void automationCancel(task,route,host);
+  else void automationObserve(task,route,host,token);
+ }catch(error){if(task.githubRunId){task.recovered=true;host.report(task,'原 Run 回读中断：'+error.message);host.changed(task);automationScheduleReconnect(task,route,host);}
+  else await host.finish(task,1,error.message);}
+ return {id:task.id};
+}
+export async function recoverAutomation(task,route,host){
+ automationRoute(route);
+ if(!task?.active||task.mode!=='release'||task.canonicalId!==route.canonicalId
+  ||task.repository!==route.repository||task.platform!==route.platform
+  ||task.githubRepository!==automationRepository||task.githubWorkflow!==route.workflow
+  ||typeof task.actionId!=='string'||!task.actionId
+  ||!Number.isSafeInteger(task.githubRunId)||task.githubRunId<1
+  ||task.sourceSHA!==undefined&&!/^[0-9a-f]{40}$/u.test(task.sourceSHA))throw Error('公民钱包原 Run 恢复身份无效');
+ // 先恢复原任务的取消入口；读取授权失败时仍可在用户再次取消时请求新的关闭授权。
+ task.security=host.security;task.cancel=()=>automationCancel(task,route,host);
+ task.recovered=true;host.changed(task);
+ const token=await automationAccess(route,host,task.actionId,task);
+ const run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
+ if(task.sourceSHA&&task.sourceSHA!==run.head_sha)throw Error('原 Run 提交身份不符');
+ Object.assign(task,{sourceSHA:run.head_sha,githubRunNumber:run.run_number,
+  githubRunAttempt:run.run_attempt,githubRemoteStatus:run.status});
+ task.secrets.push(token);task.recovered=false;host.changed(task);
+ if(task.cancelRequested)void automationCancel(task,route,host);
+ else void automationObserve(task,route,host,token);
+ return {id:task.id};
+}
+
+// 本产品自动化合成回归：所有网络与授权均由夹具替代，不触发真实流程。
+if(inlineTestEntry){
+ const {test}=await import('node:test'),{default:assert}=await import('node:assert/strict');
+ const platform=Object.keys(automationWorkflows)[0],workflow=automationWorkflows[platform];
+ const route={repository:'citizenwallet',product:'citizenwallet',platform,workflow,canonicalId:`citizenwallet.${platform}.release`,title:'测试自动化'};
+ const action={id:route.canonicalId,canonicalId:route.canonicalId,platform,productId:'citizenwallet',flow:'release',authorizationLevel:2};
+ const token='ghs_fixture',sha='a'.repeat(40),runId=123;
+ const run=(conclusion='success',status='completed')=>({id:runId,run_number:7,run_attempt:1,
+  path:`.github/workflows/${workflow}`,event:'workflow_dispatch',head_branch:'main',head_sha:sha,
+  repository:{full_name:automationRepository},status,conclusion,display_title:'公民钱包-v0.0.1',
+  html_url:`https://github.com/${automationRepository}/actions/runs/${runId}`});
+ const json=value=>Response.json(value),empty=status=>new Response(null,{status});
+ const security=async()=>({ok:true,values:{'repository-main:TOKEN':Buffer.from(token).toString('base64'),
+  'repository-main:EXPIRES_AT':Buffer.from(String(Math.floor(Date.now()/1000)+3600)).toString('base64')}});
+ const makeHost=()=>{let resolve;const finished=new Promise(done=>{resolve=done;}),tasks=[];
+  const host={security,mode:'test',createTask:value=>{const task={...value,id:'123456789',active:true,secrets:[]};tasks.push(task);return task;},
+   listTasks:()=>tasks,created:()=>{},changed:()=>{},report:()=>{},
+   finish:async(task,code,message)=>{task.active=false;task.exitCode=code;task.result=message;resolve({code,message});}};
+  return {host,tasks,finished};};
+ test('双端版本各自递增，首次、失败、活动与错误输入严格隔离',async()=>{
+  const previous={...run(),id:71,run_number:6,html_url:`https://github.com/${automationRepository}/actions/runs/71`,
+   display_title:'公民钱包-v0.0.3'};
+  const failed={...previous,id:72,run_number:7,conclusion:'failure',display_title:'公民钱包-v0.0.4',
+   html_url:`https://github.com/${automationRepository}/actions/runs/72`};
+  const history=async(url)=>{const address=new URL(url);
+   if(address.pathname.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]});
+   if(address.pathname.endsWith('/actions/workflows/ios.yml/runs'))return json({workflow_runs:[previous,failed]});
+   if(address.pathname.endsWith('/actions/workflows/android.yml/runs'))return json({workflow_runs:[]});
+   throw Error('版本历史夹具只接受平台 Runs 与 Jobs');
+  };
+  assert.equal(await automationCandidateVersion('ios',token,{fetchImpl:history}),'0.0.4');
+  assert.equal(await automationCandidateVersion('android',token,{fetchImpl:history}),'0.0.1');
+  const current={...previous,id:73,status:'in_progress',conclusion:null,
+   html_url:`https://github.com/${automationRepository}/actions/runs/73`};
+  await assert.rejects(automationCandidateVersion('ios',token,{fetchImpl:async url=>{
+   if(new URL(url).pathname.endsWith('/jobs'))return history(url);
+   return json({workflow_runs:[previous,current]});}}),/活动 Run/u);
+  const runner={CITIZENWALLET_AUTOMATION_VERSION:'0.0.3',GITHUB_RUN_ID:'73',GH_TOKEN:token};
+  await assert.rejects(checkedRunnerCandidate('ios',runner,{fetchImpl:history}),/候选版本/u);
+  assert.equal(await checkedRunnerCandidate('ios',{...runner,CITIZENWALLET_AUTOMATION_VERSION:'0.0.4'},
+   {fetchImpl:history}),'0.0.4');
+  await assert.rejects(automationCandidateVersion('ios',token,{fetchImpl:async()=>json({workflow_runs:[previous,
+   {...previous,id:70,run_number:5,html_url:`https://github.com/${automationRepository}/actions/runs/70`}]})}),
+   /清理未收口/u);
+  const rerun={...failed,run_attempt:2};
+  const attemptHistory=async(url)=>{const path=new URL(url).pathname;
+   if(path.endsWith('/actions/workflows/ios.yml/runs'))return json({workflow_runs:[previous,rerun]});
+   if(path.endsWith('/attempts/1'))return json({...rerun,run_attempt:1,status:'completed',conclusion:'success'});
+   if(path.endsWith('/attempts/1/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]});
+   throw Error('未登记旧 attempt 回读');
+  };
+  await assert.rejects(automationCandidateVersion('ios',token,{fetchImpl:attemptHistory}),
+   /成功 Run 被重试覆盖/u);
+  const neverSuccessful=async url=>{const path=new URL(url).pathname;
+   if(path.endsWith('/actions/workflows/ios.yml/runs'))return json({workflow_runs:[previous,rerun]});
+   if(path.endsWith('/attempts/1'))return json({...rerun,run_attempt:1,status:'completed',conclusion:'failure'});
+   if(path.endsWith('/actions/runs/71/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]});
+   throw Error('未登记失败 attempt 回读');
+  };
+  assert.equal(await automationCandidateVersion('ios',token,{fetchImpl:neverSuccessful}),'0.0.4');
+  await assert.rejects(automationCandidateVersion('ios',token,{fetchImpl:async url=>
+   new URL(url).pathname.endsWith('/actions/workflows/ios.yml/runs')?json({workflow_runs:[rerun]}):new Response(null,{status:404})}),
+   /旧 Run attempt 回读失败/u);
+ });
+ test('citizenwallet 自动化派发成功与不确定回执禁止重发',async()=>{
+  let dispatches=0;
+  const accepted=async(url,init)=>{const path=new URL(url).pathname;
+   if(path.endsWith('/actions/workflows/'+workflow+'/runs'))
+    return json({workflow_runs:new URL(url).searchParams.get('event')==='push'?[]:dispatches?[run()]:[]});
+   if(path.endsWith('/dispatches')){dispatches++;return json({workflow_run_id:runId,html_url:run().html_url});}
+   if(path.endsWith(`/runs/${runId}`))return json(run());
+   if(path.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]});
+   if(path.endsWith('/logs'))return empty(404);
+   throw Error('未登记网络请求：'+path);
+  };
+  const fixture=makeHost();
+  await automationTransport.run({fetchImpl:accepted},()=>startAutomation(route,action,fixture.host));
+  assert.deepEqual(await fixture.finished,{code:0,message:'塔塔自动化成功'});
+  assert.equal(dispatches,1);assert.equal(fixture.tasks[0].githubRunId,runId);
+  const ambiguous=makeHost();dispatches=0;
+  await automationTransport.run({fetchImpl:async url=>{
+   if(new URL(url).pathname.endsWith('/runs'))return json({workflow_runs:[]});
+   dispatches++;return empty(204);}},
+   ()=>startAutomation(route,action,ambiguous.host));
+  assert.equal((await ambiguous.finished).code,1);assert.equal(dispatches,1);
+  assert.equal(ambiguous.tasks[0].githubRunId,undefined);
+ });
+ test('citizenwallet 自动化拒绝错误仓库、平台和提交身份',()=>{
+  assert.throws(()=>automationRoute({...route,repository:'other'}),/目标/u);
+  assert.throws(()=>automationRoute({...route,platform:'other'}),/目标/u);
+  assert.throws(()=>automationCheckedRun({...run(),head_sha:'bad'},route,runId),/身份/u);
+  assert.throws(()=>automationCheckedRun({...run(),repository:{full_name:'other/repo'}},route,runId),/身份/u);
+ });
+ test('citizenwallet 自动化观察成功和失败终态',async()=>{
+  for(const conclusion of ['success','failure']){
+   const fixture=makeHost();const task=fixture.host.createTask({});
+   Object.assign(task,{githubRunId:runId,sourceSHA:sha});
+   const fetchImpl=async(url)=>{const path=new URL(url).pathname;
+    if(path.endsWith('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
+     new URL(url).searchParams.get('event')==='push'?[]:[run(conclusion)]});
+    if(path.endsWith(`/runs/${runId}`))return json(run(conclusion));
+    if(path.endsWith('/jobs'))return json({jobs:[{id:3,name:'release',status:'completed',conclusion},
+     {id:4,name:'cleanup',status:'completed',conclusion}]});
+    if(path.endsWith('/logs'))return empty(404);
+    throw Error('未登记观察请求');
+   };
+   await automationTransport.run({fetchImpl},()=>automationObserve(task,route,fixture.host,token));
+   assert.equal((await fixture.finished).code,conclusion==='success'?0:1);
+  }
+ });
+ test('citizenwallet 自动化只取消原 Run 并恢复同一 Run',async()=>{
+  const fixture=makeHost();const task=fixture.host.createTask({canonicalId:route.canonicalId,actionId:action.id});
+  Object.assign(task,{repository:route.repository,productId:route.product,platform,mode:'release',flow:'release',
+   githubRepository:automationRepository,githubWorkflow:workflow,githubRunId:runId,sourceSHA:sha});
+  let reads=0,cancels=0;
+  const fetchImpl=async(url,init)=>{const path=new URL(url).pathname;
+   if(path.endsWith('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
+    new URL(url).searchParams.get('event')==='push'?[]:[run('cancelled')]});
+   if(path.endsWith('/cancel')){cancels++;return empty(202);}
+   if(path.endsWith(`/runs/${runId}`))return json(run(reads++===0?null:'cancelled',reads===1?'in_progress':'completed'));
+   if(path.endsWith('/jobs'))return json({jobs:[]});
+   if(path.endsWith('/logs'))return empty(404);
+   throw Error('未登记取消请求');
+  };
+  await automationTransport.run({fetchImpl,pause:async()=>{}},()=>automationCancel(task,route,fixture.host));
+  assert.equal(cancels,1);assert.equal((await fixture.finished).code,1);
+  const recovered=makeHost();const old=recovered.host.createTask({canonicalId:route.canonicalId,actionId:action.id});
+  Object.assign(old,{repository:route.repository,productId:route.product,platform,mode:'release',flow:'release',
+   githubRepository:automationRepository,githubWorkflow:workflow,githubRunId:runId,sourceSHA:sha,recovered:true});
+  let recoveryDispatches=0;
+  const recoveryFetch=async(url,init)=>{const path=new URL(url).pathname;
+   if(path.endsWith('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
+    new URL(url).searchParams.get('event')==='push'?[]:[run()]});
+   if(path.endsWith('/dispatches')){recoveryDispatches++;throw Error('恢复不得派发');}
+   if(path.endsWith(`/runs/${runId}`))return json(run());
+   if(path.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]});
+   if(path.endsWith('/logs'))return empty(404);
+   throw Error('未登记恢复请求');
+  };
+  await automationTransport.run({fetchImpl:recoveryFetch},()=>recoverAutomation(old,route,recovered.host));
+  assert.equal((await recovered.finished).code,0);assert.equal(recoveryDispatches,0);
+  assert.equal(old.githubRunId,runId);
+ });
+ test('Run 最终完成后只清同平台同结果旧记录，失败删除明确报错',async()=>{
+  const old={...run(),id:88,run_number:6,html_url:`https://github.com/${automationRepository}/actions/runs/88`};
+  const rows=[old,run()],deleted=[];
+  const fetchImpl=async(url,options={})=>{const address=new URL(url),path=address.pathname;
+   if(path.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]});
+   if(path.includes('/actions/workflows/'))return json({workflow_runs:address.searchParams.get('event')==='push'?[]:rows});
+   if(path.endsWith('/actions/runs/88')&&options.method==='DELETE'){
+    deleted.push(88);rows.splice(rows.indexOf(old),1);return empty(204);
+   }
+   throw Error('未登记终态清理请求');
+  };
+  assert.deepEqual(await retainCompletedAutomationRun(run(),route,token,{fetchImpl}),
+   {platform,state:'success',retained:runId,deleted:[88]});
+  assert.deepEqual(deleted,[88]);assert.deepEqual(rows.map(value=>value.id),[runId]);
+  const denied=async(url,options={})=>options.method==='DELETE'?empty(403):
+   new URL(url).pathname.endsWith('/jobs')?json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]}):
+    json({workflow_runs:[old,run()]});
+  await assert.rejects(retainCompletedAutomationRun(run(),route,token,{fetchImpl:denied}),/删除旧Run失败/u);
+  for(const historyRows of [[old],[old,{...run(),head_sha:'b'.repeat(40)}]]){
+   let attempted=0;
+   const inconsistent=async(url,options={})=>{const address=new URL(url);
+    if(options.method==='DELETE'){attempted++;throw Error('列表未证明当前 Run，不得删除');}
+    if(address.pathname.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+     {name:'cleanup',status:'completed',conclusion:'success'}]});
+    if(address.pathname.includes('/actions/workflows/'))return json({workflow_runs:
+     address.searchParams.get('event')==='push'?[]:historyRows});
+    throw Error('未登记列表回读请求');
+   };
+   await assert.rejects(retainCompletedAutomationRun(run(),route,token,{fetchImpl:inconsistent}),/列表回读缺失或身份不符/u);
+   assert.equal(attempted,0);
+  }
+ });
+ test('终态清理失败保留观察与取消任务以恢复原 Run',async()=>{
+  const old={...run(),id:88,run_number:6,html_url:`https://github.com/${automationRepository}/actions/runs/88`};
+  const fetchImpl=async(url,options={})=>{const address=new URL(url),path=address.pathname;
+   if(options.method==='DELETE')return empty(403);
+   if(path.endsWith(`/runs/${runId}`))return json(run());
+   if(path.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
+    {name:'cleanup',status:'completed',conclusion:'success'}]});
+   if(path.endsWith('/logs'))return empty(404);
+   if(path.includes('/actions/workflows/'))return json({workflow_runs:address.searchParams.get('event')==='push'?[]:[old,run()]});
+   throw Error('未登记终态恢复请求');
+  };
+  const observed=makeHost(),task=observed.host.createTask({actionId:action.id});
+  Object.assign(task,{githubRunId:runId,sourceSHA:sha,repository:route.repository,platform});
+  await automationTransport.run({fetchImpl},()=>automationObserve(task,route,observed.host,token));
+  assert.equal(task.active,true);assert.equal(task.recovered,true);
+  const cancelling=makeHost(),cancelTask=cancelling.host.createTask({actionId:action.id});
+  Object.assign(cancelTask,{githubRunId:runId,sourceSHA:sha,repository:route.repository,platform});
+  await assert.rejects(automationTransport.run({fetchImpl},()=>automationCancel(cancelTask,route,cancelling.host)),/清理失败/u);
+  assert.equal(cancelTask.active,true);assert.equal(cancelTask.recovered,true);
+ });
+ test('citizenwallet 过期令牌保留原 Run 的取消入口',async()=>{
+  const fixture=makeHost();const task=fixture.host.createTask({canonicalId:route.canonicalId,actionId:action.id});
+  Object.assign(task,{repository:route.repository,productId:route.product,platform,mode:'release',flow:'release',
+   githubRepository:automationRepository,githubWorkflow:workflow,githubRunId:runId,sourceSHA:sha,recovered:true});
+  fixture.host.security=async()=>({ok:true,values:{'repository-main:TOKEN':Buffer.from(token).toString('base64'),
+   'repository-main:EXPIRES_AT':Buffer.from('1').toString('base64')}});
+  await assert.rejects(()=>recoverAutomation(task,route,fixture.host),/授权/u);
+  assert.equal(task.githubRunId,runId);assert.equal(task.recovered,true);
+  assert.equal(typeof task.cancel,'function');
+ });
 }

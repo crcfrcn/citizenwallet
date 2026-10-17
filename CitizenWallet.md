@@ -269,9 +269,9 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 ## Release 全量构建（第 7.4 步）
 
-GitHub Actions 的 `name`、`run-name` 与正式 Release 展示标题按平台统一为 `公民钱包 · ios-v<版本>`、`公民钱包 · android-v<版本>`。安全身份只按本仓、`main` 和 `GITHUB_WORKFLOW_REF` 的准确平台文件路径核验，展示标题另行与本仓唯一版本核对；不能依赖可见名称的点号拆分识别平台。`run-name` 中的版本字面值由本仓合同测试与 `pubspec.yaml` 唯一版本核对；GitHub 自带 Run 编号仍是独立元数据，不用于标题或版本真源。
+GitHub Actions 的静态 Workflow 名称为`公民钱包`，本轮 Run 名与正式 Release 展示标题均为`公民钱包-v<本平台候选版本>`。iOS、Android 各自读取本平台上一条最终成功的手动 Run 及其 release/cleanup Job 回执计算下一候选版本；没有成功记录时为`v0.0.1`，此后每次成功末位加一，失败或取消不推进。安全身份只按本仓、`main`、准确的`GITHUB_WORKFLOW_REF`、Run ID 和提交核验，不从可见标题猜平台；GitHub 自带 Run 编号不作为软件版本。
 
-正式自动化按平台在独立 GitHub Runner 执行产品测试、全量原生构建、签名、正式包验真、Tag/Release 创建及回读；Android 在同一 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 写入本轮产品 `BUILD_DIR`，并使用 GitHub Actions `APP_KEY` Secret 签名；iOS 使用对应签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。本机与 GitHub Runner 的 Cargo 编译目标目录按平台落入 `target/cache/cargo/ios` 或 `target/cache/cargo/android`，不属于本轮 `target/build/<平台>` 临时现场；两者缓存互相隔离。GitHub workflow 按平台恢复并保存唯一 Run 键缓存，末尾清理 Job 独立裁剪该平台旧 Cargo cache。创建 Release 前，工作流调用本仓 `ci-create-release-tag` 建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；草稿身份、tag、提交、资产按 Release ID 回读，发布后再次按 ID 验收。展示标题分别为`公民钱包 · ios-v<版本>`与`公民钱包 · android-v<版本>`，唯一 Tag 仍包含 Run ID 和 attempt，不能把展示标题当作 Tag。
+正式自动化按平台在独立 GitHub Runner 执行产品测试、全量原生构建、签名、正式包验真、Tag/Release 创建及回读；Android 在同一 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 写入本轮产品 `BUILD_DIR`，并使用 GitHub Actions `APP_KEY` Secret 签名；iOS 使用对应签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。本机与 GitHub Runner 的 Cargo 编译目标目录按平台落入 `target/cache/cargo/ios` 或 `target/cache/cargo/android`，不属于本轮 `target/build/<平台>` 临时现场；两者缓存互相隔离。GitHub workflow 按平台恢复并保存唯一 Run 键缓存，末尾清理 Job 独立裁剪该平台旧 Cargo cache。创建 Release 前，工作流调用本仓 `ci-create-release-tag` 建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；草稿身份、tag、提交、资产按 Release ID 回读，发布后再次按 ID 验收。两个平台展示标题使用同一格式，正式 Tag 仍各自包含平台、Run ID 和 attempt，不能把展示标题当作 Tag。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
 
@@ -673,7 +673,7 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 - `.github/workflows/ios.yml` 与 `.github/workflows/android.yml`。
 - 平台产品构建、Tag/Release 验真及清理合同统一由 `scripts/build.mjs` 实现，控制台不复制产品逻辑。
 
-每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行；它只查询本仓 `main` 分支、该平台精确 Workflow 的已完成 `workflow_dispatch` 与旧 `push` Run。Run ID、工作流路径、分支、事件及仓库身份逐项核验；当前活动 Run 和另一结果类别的最新 Run 保留，成功与非成功终态各保留最新一条。正式 Release 只有在本轮发布成功、发布证明、Tag、资产和展示标题均回读准确后，才删除同平台旧 Release 及存在的旧 Tag，每平台只保留本轮最新正式版；发布失败时不清旧正式版。cleanup Job 对 Release 使用最小必要 `contents: write`、对 Run 使用 `actions: write`。删除请求和清理范围的回读失败会明确报错并使 cleanup Job 失败；之前已完成的构建与 Release 事实不被改写，但整个 Workflow 最终状态因此为失败。用户本次单独授权清空已有本机和 GitHub 历史记录，之后的新流程仍按上述规则自动保留。
+每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行，继续核验并裁剪本平台 Cargo 缓存、旧正式 Release/Tag 及早于最近成功和失败回执的陈旧 Run；本轮 Run 仍在活动时，上一条成功和上一条失败 Run 均保留。iOS、Android 各自只读取本仓 `main` 上准确平台 Workflow 的手动 Run，按 Run ID、attempt、提交、路径、仓库和终态核验。当前 Run 最终成为 `completed/success` 或非成功终态后，产品自己的自动化观察入口才删除本平台同结果类别的旧 Run；清理失败时当前产品任务保持活动并重连原 Run 重试，不能报告清理成功，也不能重新派发。另一平台、另一结果类别的最新 Run 始终受保护。正式 Release 仍须先验明本轮发布证明、Tag、资产和标题，才删除同平台旧 Release；发布失败时不清旧正式版。旧成功 Run 的准确终态与展示版本在新 Run 最终收口前保留，因此失败或取消不使下一候选版本回退。
 
 所属构建、Tag/Release 与 Run/cache 清理回归位于 `scripts/build.mjs`，覆盖平台隔离、活动Run保护、完整分页、删除失败和缓存保留。控制台镜像只读取 `main` 上手动派发且已完成的对应平台 Run，每个平台的成功/失败各保留最新一条；本机活动任务独立显示。真实 GitHub 自动化与 Release 仍需按授权另行启动。
 
@@ -683,7 +683,7 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 本机编译现场由本产品领取和收尾。调度任务编号随本产品领取记录保存；本轮结果消费后，只允许匹配该编号的收尾请求。产品确认自身进程及资源供给后代全部退出后才清场；异常、编号不符或退出未确认时保留现场。控制台只持有调度锁、调用本产品入口并供给资源，不实现产品清理。
 
-软件版本计算使用本目标GitHub运行序号作为单调下界，并与本仓已成功版本比较；失败或历史清理不使版本返回源码初值。版本只在GitHub本次运行内产生，同一Run重试保持运行序号，Tag另绑定准确attempt。
+软件版本只按本平台上一条最终成功且 release/cleanup Job 均成功的手动 Run 展示版本计算；新 Run 派发前给出候选版本，Runner再核对，首次为0.0.1。失败、取消及同一Run重试不推进软件版本；当前 Run 尚未结束时保留上一成功 Run 作为版本依据，最终成功或失败后由产品自动化入口只清同结果类别的旧 Run。
 
 
 ### 当前自动化最后处理
@@ -719,3 +719,6 @@ Run 记录和 Cargo cache 是不同对象，分别清理。本机平台缓存位
 本仓原生 `native` 入口只作为已领取 iOS 或 Android 平台工作根内的子步骤；无平台现场的调用在 Cargo 前拒绝。既有 Build 回归按此边界核对失败且不生成 Cargo trace，独立完整构建仍由本产品 `execute` 入口负责。
 本机编译向控制台领取开发签名材料时，产品宿主通道等待最多150秒，以覆盖原生Touch ID的120秒上限及回传；实际生物识别期限不改变。产物确认仍为30秒，超时断开且任务失败，不复用授权或密钥。
 ADB未授权超时回归先让模拟子进程实际返回一次 `unauthorized`，之后等到既定期限核对提示；该夹具不在最后数毫秒反复启动进程。生产轮询、取消及安装实现保持原样。
+## 塔塔自动化远端任务归属
+
+本产品现有 `scripts/build.mjs` 提供 `startAutomation(route, action, host)`、`recoverAutomation(task, route, host)` 和独立模式的 `dispatchAutomation(platform, token, options)`。产品按本仓平台与 Workflow 白名单派发、回读、观察 Run 与 Job、限额读取终态日志、取消及恢复原 GitHub Run；控制台的 `tata/citizenwallet.mjs` 仅调用这些公开入口，提供任务宿主及短期授权。派发回执中的 Run ID 先写入任务，回读中断后只恢复该 Run，禁止重复派发；控制台宿主通过 `recoverTask(task)` 重进所属产品的恢复授权上下文，显式独立模式才调用产品恢复入口。恢复时先挂接原任务的产品取消入口，再请求观察授权；观察授权失败仍保留取消能力，用户取消时单独领取关闭授权。取消和恢复均重新核验本仓、主分支、Workflow、提交及 Run ID。其他记录、资产和发布能力不在本次迁移范围内。 同文件的合成合同回归覆盖派发成功与不确定回执、错误仓库/平台/SHA、观察两种终态、只取消原 Run、只恢复原 Run 和过期授权保留取消入口。
