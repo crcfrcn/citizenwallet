@@ -269,6 +269,8 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 ## Release 全量构建（第 7.4 步）
 
+GitHub Actions 的 `name`、`run-name` 与正式 Release 展示标题按平台统一为 `公民钱包 · ios-v<版本>`、`公民钱包 · android-v<版本>`。安全身份只按本仓、`main` 和 `GITHUB_WORKFLOW_REF` 的准确平台文件路径核验，展示标题另行与本仓唯一版本核对；不能依赖可见名称的点号拆分识别平台。`run-name` 中的版本字面值由本仓合同测试与 `pubspec.yaml` 唯一版本核对；GitHub 自带 Run 编号仍是独立元数据，不用于标题或版本真源。
+
 正式自动化按平台在独立 GitHub Runner 执行产品测试、全量原生构建、签名、正式包验真、Tag/Release 创建及回读；Android 在同一 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 写入本轮产品 `BUILD_DIR`，并使用 GitHub Actions `APP_KEY` Secret 签名；iOS 使用对应签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。本机与 GitHub Runner 的 Cargo 编译目标目录按平台落入 `target/cache/cargo/ios` 或 `target/cache/cargo/android`，不属于本轮 `target/build/<平台>` 临时现场；两者缓存互相隔离。GitHub workflow 按平台恢复并保存唯一 Run 键缓存，末尾清理 Job 独立裁剪该平台旧 Cargo cache。创建 Release 前，工作流调用本仓 `ci-create-release-tag` 建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；草稿身份、tag、提交、资产按 Release ID 回读，发布后再次按 ID 验收。展示标题分别为`公民钱包 · ios-v<版本>`与`公民钱包 · android-v<版本>`，唯一 Tag 仍包含 Run ID 和 attempt，不能把展示标题当作 Tag。
 
 ## 移动 Release manifest 公开平台身份（GMB 第 2.12 步，2026-09-02）
@@ -666,7 +668,7 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 ## GitHub自动化
 
-本仓自动化只在GitHub的main源码上执行；控制台分别以“自动化 · iOS”和“自动化 · Android”按钮派发准确平台 Workflow。两份平台 Workflow 互不调用，各自包含产品测试、单平台原生编译、正式签名、产物验真及该平台 Release。
+本仓自动化只在GitHub的main源码上执行；控制台按公民钱包产品接入声明分别以“塔塔自动化 · iOS”和“塔塔自动化 · Android”按钮派发准确平台 Workflow。两份平台 Workflow 互不调用，各自包含产品测试、单平台原生编译、正式签名、产物验真及该平台 Release。
 
 - `.github/workflows/ios.yml` 与 `.github/workflows/android.yml`。
 - 平台产品构建、Tag/Release 验真及清理合同统一由 `scripts/build.mjs` 实现，控制台不复制产品逻辑。

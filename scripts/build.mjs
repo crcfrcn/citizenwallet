@@ -2528,17 +2528,26 @@ export function temporaryRoot(platform=Object.keys(contract.platforms)[0],scope=
  return checkFixedWork(expected,{create:true});
 }
 // 测试继承当前平台现场；独立执行没有任务身份时才选产品首个平台。
+// GitHub可见工作流名称会随产品版本变化；平台安全身份只从本仓main的准确Workflow路径解析。
+function workflowPlatformFromRef(environment){
+ const match=/^crcfrcn\/citizenwallet\/\.github\/workflows\/(ios|android)\.yml@refs\/heads\/main$/u
+  .exec(String(environment.GITHUB_WORKFLOW_REF??''));
+ return match?.[1]??null;
+}
+function checkedWorkflowDisplay(platform,environment){
+ return workflowPlatformFromRef(environment)===platform
+  &&environment.GITHUB_WORKFLOW===releaseDisplayTitle(platform,releaseVersion());
+}
 export const testRoot=platform=>{
- const workflow=String(process.env.GITHUB_WORKFLOW||'').split('.');
  const local=process.env.TMPDIR?relative(join(root,'target'),resolve(process.env.TMPDIR)).split(sep)[0]:undefined;
- const inherited=workflow[0]===product&&Object.hasOwn(contract.platforms,workflow[1])?workflow[1]
-  :Object.hasOwn(contract.platforms,local)?local:undefined;
+ const inherited=workflowPlatformFromRef(process.env)
+  ||(Object.hasOwn(contract.platforms,local)?local:undefined);
  return temporaryRoot(platform||inherited||Object.keys(contract.platforms)[0],'test');
 };
 // 远端Runner基础设施仍归GitHub；本产品步骤的可写临时目录归准确平台流程target。
 export function remoteEnvironment(environment=process.env) {
- const [id,platform,...extra]=String(environment.GITHUB_WORKFLOW||'').split('.');
- if(id!==product||extra.length||!Object.hasOwn(contract.platforms,platform))fail('远端临时目录缺少准确产品平台流程身份');
+ const platform=workflowPlatformFromRef(environment);
+ if(!platform||!checkedWorkflowDisplay(platform,environment))fail('远端临时目录缺少准确产品平台流程身份');
  const temporary=temporaryRoot(platform,'build',null);
  return {...environment,RUNNER_TEMP:temporary,TMPDIR:temporary,TMP:temporary,TEMP:temporary};
 }
@@ -3625,7 +3634,7 @@ export function cleanShellPaths(args,environment=process.env){
 // Android Runner 使用本产品锁定的 Flutter 修订；准备阶段不接收签名材料。
 export async function ciPrepareFlutter(platform,environment=process.env){
  if(platform!=='android'||environment.GITHUB_ACTIONS!=='true'
-  ||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product||environment.GITHUB_WORKFLOW!==product+'.android')
+  ||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product||!checkedWorkflowDisplay('android',environment))
   fail('GitHub Flutter 准备身份无效');
  const sdk=environment.FLUTTER_ROOT,temp=environment.RUNNER_TEMP;
  if(typeof sdk!=='string'||typeof temp!=='string'||!isAbsolute(sdk)||!isAbsolute(temp)
@@ -3715,7 +3724,7 @@ export async function ciCleanup(platform,environment=process.env,{fetchImpl=fetc
  const runId=environment.GITHUB_RUN_ID,upstream=environment.CITIZENWALLET_RELEASE_RESULT,token=environment.GH_TOKEN||environment.GITHUB_TOKEN;
  if(environment.GITHUB_ACTIONS!=='true'||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product
   ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
-  ||environment.GITHUB_WORKFLOW!==product+'.'+platform||!/^[1-9][0-9]*$/u.test(runId||'')
+  ||!checkedWorkflowDisplay(platform,environment)||!/^[1-9][0-9]*$/u.test(runId||'')
   ||!['success','failure','cancelled','skipped'].includes(upstream)||!token)fail('GitHub清理身份或上游结果无效');
  // 缓存与Run记录独立维护；缓存清理失败时先停止，避免把历史成功Run删掉后让当前Run因清理失败而转为失败。
  const cache=await cleanupCargoCaches(platform,token,fetchImpl),candidate=upstream==='success'?'success':'failure';
@@ -3768,7 +3777,7 @@ export async function ciRetainReleases(platform,environment=process.env,{fetchIm
   attempt=environment.GITHUB_RUN_ATTEMPT,number=environment.GITHUB_RUN_NUMBER,sha=environment.GITHUB_SHA;
  if(environment.GITHUB_ACTIONS!=='true'||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product
   ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
-  ||environment.GITHUB_WORKFLOW!==product+'.'+platform||!token
+  ||!checkedWorkflowDisplay(platform,environment)||!token
   ||[run,attempt,number].some(value=>!/^[1-9][0-9]*$/u.test(value||'')||!Number.isSafeInteger(Number(value)))
   ||! /^[a-f0-9]{40}$/u.test(sha||'')
   ||!['success','failure','cancelled','skipped'].includes(environment.CITIZENWALLET_RELEASE_RESULT))
@@ -3825,7 +3834,7 @@ export async function ciBuild(platform,environment=process.env){
   attempt=environment.GITHUB_RUN_ATTEMPT,number=environment.GITHUB_RUN_NUMBER;
  if(environment.GITHUB_ACTIONS!=='true'||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product
   ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
-  ||environment.GITHUB_WORKFLOW!==product+'.'+platform||!/^[a-f0-9]{40}$/u.test(sha||'')
+  ||!checkedWorkflowDisplay(platform,environment)||!/^[a-f0-9]{40}$/u.test(sha||'')
   ||[run,attempt,number].some(value=>!/^[1-9][0-9]*$/u.test(value||'')||!Number.isSafeInteger(Number(value))))
   fail('GitHub移动编译身份无效');
  const head=spawnSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'});
@@ -3901,7 +3910,7 @@ export async function ciBuild(platform,environment=process.env){
 }
 export async function ciVerifyRelease(platform,phase,releaseId,environment=process.env,{fetchImpl=fetch}={}){
  if(!['draft','published'].includes(phase)||environment.GITHUB_ACTIONS!=='true'
-  ||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product||environment.GITHUB_WORKFLOW!==product+'.'+platform)
+  ||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product||!checkedWorkflowDisplay(platform,environment))
   fail('GitHub移动Release核验身份无效');
  if(typeof releaseId!=='string'||! /^[1-9][0-9]*$/u.test(releaseId))fail('GitHub移动Release ID无效');
  const work=fixedWork('build/'+platform);checkFixedWork(work);
@@ -3967,7 +3976,7 @@ async function ensureReleaseTagReference(plan,token,{fetchImpl=fetch}={}){
 
 async function ciCreateReleaseTag(platform,environment=process.env,{fetchImpl=fetch}={}){
  if(!['ios','android'].includes(platform)||environment.GITHUB_ACTIONS!=='true'
-  ||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product||environment.GITHUB_WORKFLOW!==product+'.'+platform)
+  ||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product||!checkedWorkflowDisplay(platform,environment))
   fail('GitHub移动Tag创建身份无效');
  const work=fixedWork('build/'+platform);checkFixedWork(work);
  const plan=JSON.parse(readFileSync(join(work,'release-plan.json'),'utf8'));
@@ -5042,7 +5051,8 @@ test('本机 Cargo target cache 按平台独立于每轮编译现场',async()=>{
 
 test('GitHub平台清理只删本仓main对应Workflow旧Run与旧Cargo缓存',async()=>{
  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'citizenwallet.ios',GITHUB_RUN_ID:'99',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+  GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_RUN_ID:'99',
   CITIZENWALLET_RELEASE_RESULT:'success',GH_TOKEN:'synthetic'};
  const make=(id,run_number,conclusion,event,path='.github/workflows/ios.yml',branch='main',status='completed')=>({
   id,run_number,run_attempt:1,conclusion,event,path,head_branch:branch,status,repository:{full_name:'crcfrcn/citizenwallet'}});
@@ -5079,7 +5089,8 @@ test('GitHub平台清理只删本仓main对应Workflow旧Run与旧Cargo缓存',a
 
 test('GitHub清理失败明确失败且在缓存清理失败时不删Run',async()=>{
  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'citizenwallet.android',GITHUB_RUN_ID:'100',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('android',releaseVersion()),
+  GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/android.yml@refs/heads/main',GITHUB_RUN_ID:'100',
   CITIZENWALLET_RELEASE_RESULT:'failure',GH_TOKEN:'synthetic'};let runDeletes=0;
  const fetchImpl=async(url,options={})=>{
   if(String(url).includes('/actions/caches/')&&options.method==='DELETE')return new Response(null,{status:403});
@@ -5095,7 +5106,8 @@ test('GitHub清理失败明确失败且在缓存清理失败时不删Run',async(
 
 test('GitHub Run删除请求失败会明确失败而不回报清理成功',async()=>{
  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'citizenwallet.ios',GITHUB_RUN_ID:'101',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+  GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_RUN_ID:'101',
   CITIZENWALLET_RELEASE_RESULT:'failure',GH_TOKEN:'synthetic'};
  const make=(id,run_number,conclusion)=>({id,run_number,run_attempt:1,conclusion,event:'workflow_dispatch',
   path:'.github/workflows/ios.yml',head_branch:'main',status:'completed',repository:{full_name:'crcfrcn/citizenwallet'}});
@@ -5131,7 +5143,8 @@ test('GitHub Release 每平台只留本轮正式版并清理旧草稿及准确Ta
  const releases=[current,old,draft,foreign],refs=new Map([current,old,foreign].map(value=>
   [value.tag_name,{ref:'refs/tags/'+value.tag_name,object:{type:'commit',sha:value.target_commitish}}]));
  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
-  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'citizenwallet.ios',GITHUB_RUN_ID:'99',
+  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+  GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_RUN_ID:'99',
   GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_NUMBER:'99',GITHUB_SHA:sha,CITIZENWALLET_RELEASE_RESULT:'success',GH_TOKEN:'synthetic'};
  const response=(status,value={})=>({status,ok:status>=200&&status<300,json:async()=>value});
  const deleted=[],deletedTags=[];
@@ -5214,7 +5227,29 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
    platform+'必须按Release ID验证草稿、发布并回读');
   assert.ok(workflow.includes('version="$(node -e \'const p=require(process.argv[1]);process.stdout.write(p.version)\' "$plan")'));
   assert.ok(workflow.includes('--title "公民钱包 · '+platform+'-v$version"'));
+  assert.ok(workflow.startsWith('name: '+releaseDisplayTitle(platform,releaseVersion())+'\n'));
+  assert.ok(workflow.includes('run-name: '+releaseDisplayTitle(platform,releaseVersion())),
+   platform+'的GitHub Run展示标题必须与当前产品版本的Release标题一致');
   assert.ok(!workflow.includes('--title "citizenwallet · '+platform+' · $tag"'));
+ }
+});
+
+test('GitHub展示名称不作为平台身份，准确Workflow引用与标题共同核验',async()=>{
+ for(const platform of ['ios','android']){
+  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+   GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:releaseDisplayTitle(platform,releaseVersion()),
+   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/'+platform+'.yml@refs/heads/main',
+   GITHUB_SHA:'a'.repeat(40),GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_NUMBER:'42'};
+  assert.equal(workflowPlatformFromRef(env),platform);
+  assert.equal(checkedWorkflowDisplay(platform,env),true);
+  for(const change of [
+   {GITHUB_WORKFLOW:'citizenwallet.'+platform},
+   {GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/'+platform+'.yml@refs/heads/other'},
+   {GITHUB_WORKFLOW_REF:'foreign/citizenwallet/.github/workflows/'+platform+'.yml@refs/heads/main'},
+   {GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/'+(platform==='ios'?'android':'ios')+'.yml@refs/heads/main'}]){
+   assert.equal(checkedWorkflowDisplay(platform,{...env,...change}),false);
+   await assert.rejects(ciBuild(platform,{...env,...change}),/GitHub移动编译身份无效/u);
+  }
  }
 });
 
@@ -5224,7 +5259,7 @@ test('iOS与Android独立Workflow各自清Run并维护唯一平台Cargo缓存',(
   const checkoutSHAs=[...workflow.matchAll(/^\s*- uses: actions\/checkout@([a-f0-9]{40})\s*$/gmu)].map(value=>value[1]);
   assert.deepEqual(checkoutSHAs,['fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09','fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'],
    platform+'的cleanup必须复用本平台release已经验收的checkout SHA');
-  assert.ok(workflow.includes('name: citizenwallet.'+platform));
+  assert.ok(workflow.startsWith('name: '+releaseDisplayTitle(platform,releaseVersion())+'\n'));
   assert.ok(workflow.includes('key: citizenwallet-cargo-'+platform+'-${{ github.run_id }}-${{ github.run_attempt }}'));
   assert.ok(workflow.includes('path: target/cache/cargo/'+platform));
   assert.ok(workflow.includes('needs: release')&&workflow.includes('    if: always()'));
@@ -5290,7 +5325,9 @@ test('移动Release通过GitHub返回的ID校验草稿、发布并回读',async(
   const plan={schema:1,product_id:'citizenwallet',platform:'ios',tag,version:'1.0.0',source_sha:sha,notes,directory:assetsDir,
    assets:[{name:'citizenwallet.ipa',size:bytes.length,sha256:digest}]};
   writeFileSync(join(work,'release-plan.json'),JSON.stringify(plan)+'\n');
-  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_WORKFLOW:'citizenwallet.ios',GITHUB_SHA:sha,GH_TOKEN:'test-token'};
+  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',
+   GITHUB_WORKFLOW:releaseDisplayTitle('ios',releaseVersion()),
+   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_SHA:sha,GH_TOKEN:'test-token'};
   const tagReference={ref:'refs/tags/'+tag,object:{type:'commit',sha}};
   const asset={name:'citizenwallet.ipa',state:'uploaded',size:bytes.length,digest:'sha256:'+digest};
   const draft={id:Number(releaseId),tag_name:tag,name:releaseDisplayTitle('ios','1.0.0'),target_commitish:sha,
