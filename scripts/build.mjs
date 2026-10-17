@@ -6,7 +6,6 @@ import {spawn,spawnSync} from 'node:child_process';
 import {inflateSync,deflateSync} from 'node:zlib';
 import {generatePlatformIcons} from '../icons/generate.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
-import {Socket} from 'node:net';
 import {rmSync,rmdirSync,mkdtempSync,constants,fstatSync,readSync,chmodSync,closeSync,openSync,renameSync,readlinkSync,unlinkSync,copyFileSync,existsSync,lstatSync,mkdirSync,readFileSync,readdirSync,realpathSync,symlinkSync,writeFileSync} from 'node:fs';
 import {basename,dirname,isAbsolute,join,parse,relative,resolve,sep} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -497,7 +496,7 @@ if(testSession&&process.argv.length===2&&testFiles().some(file=>join(root,file)=
  }catch(error){process.stderr.write('公民钱包测试会话收尾失败：'+error.message+'\n');process.exitCode=1;}
 });
 
-// 本仓原资源配方与测试归入同一编译入口，供独立执行和控制台供给复用。
+// 本产品拥有测试清单、资源准备和执行顺序。
 const resourceInternals=await (async()=>{
 const {fixedScratch}=targetInternals;
 const {trackWorkProcess, workEnvironment, checkScratchPath}=targetInternals;
@@ -528,7 +527,7 @@ async function rm(path,options) {
  return removeResourcePath(path,options);
 }
 function runResourceProcess(command,args,{signal,maxBuffer=8*1024**2,timeout=3600000,encoding='utf8',quietOutput=false,...options}={}) {
- const supplied=resourceSupplies.getStore();if(supplied&&!supplied.preparingTool){if(typeof supplied.runCommand!=='function')fail('供给未交付执行能力');return supplied.runCommand(command,args,{...options,maxBuffer,timeout,encoding,quietOutput,signal});}
+
 
  signal?.throwIfAborted();
  if(!Number.isSafeInteger(maxBuffer)||maxBuffer<=0||!Number.isSafeInteger(timeout)||timeout<=0)throw Error('资源进程边界参数无效');
@@ -652,7 +651,7 @@ async function resourceWork(work) {
 }
 async function acquireArchive(entry,{store,work,optional,offline=false,fetcher=fetch,signal,maxBytes=4*1024**3}={}){
  const url=checkedURL(entry.url);digestSpec(entry);
- const supplied=resourceSupplies.getStore();if(supplied)return supplied.acquireOriginal(entry,{kind:store===join(supplied.toolRoot,'archives')?'tool':'dependency',offline,signal,maxBytes});
+
  await directory(store,true);const coordinate=hash(JSON.stringify([url,entry.sha256||entry.integrity]));const target=join(store,coordinate+'.blob');
  const check=async path=>{await regular(path);const b=await readFile(path);if(!b.length||b.length>maxBytes)fail('原件大小超限');verifyBytes(b,entry);return path;};
  if(await stat(target))return check(target);
@@ -1539,7 +1538,7 @@ const appleBundleTools = new Set([
 ]);
 async function verifyAppleTools(library,{names=['xcodebuild'],signal,run=exec,environment=process.env}={}){
   const wanted=library.tools.find(tool=>tool.id==='xcode');if(!wanted||!Array.isArray(names)||names.some(name=>!appleBundleTools.has(name)&&!Object.hasOwn(appleSystemTools,name)))fail('Apple工具需求无效');
-  const supplied=resourceSupplies.getStore();if(supplied)return supplied.acquireApple({...supplyRequirements().apple,names});
+
   const env=cleanEnvironment(environment),developerDirectory=(await run('/usr/bin/xcode-select',['-p'],{env,signal})).stdout.trim();await directory(developerDirectory);
   const tools={};for(const name of names){const path=appleSystemTools[name]||(name==='xcodebuild'?join(developerDirectory,'usr/bin/xcodebuild'):(await run('/usr/bin/xcrun',['--find',name],{env:{...env,DEVELOPER_DIR:developerDirectory},signal})).stdout.trim());await regular(path);tools[name]=await realpath(path);}
   return {developerDirectory,version:wanted.version,tools};
@@ -1566,18 +1565,19 @@ async function productFoundation(library,verify,{bootstrap=false,id}={}){
 }
 async function prepareSourceDependencies({library,tool,pending,signal,fetcher,options={}}){const result=new Map();for(const entry of tool.dependencies||[])result.set(entry.name,await acquireArchive(entry,{work:library.work,store:join(library.root,'archives'),optional:options.optionalDependencies,offline:options.offline,signal,fetcher}));return result;}
 async function commitCandidate(pending,target,{signal,verify}={}){
- const supplied=resourceSupplies.getStore();if(supplied){if(typeof supplied.publishCandidate!=='function')fail('供给未交付提交能力');return supplied.publishCandidate(pending,target);}
+
 
  // 下载与编译已完成后才取得短锁；等待可取消，已有对象永不覆盖。
  const lock=target+'.lock';let handle;for(let n=0;n<500;n++){signal?.throwIfAborted();try{handle=await open(lock,'wx',0o600);break;}catch(e){if(e.code!=='EEXIST')throw e;await new Promise(r=>setTimeout(r,20));}}if(!handle)fail('原件提交锁等待超限');
  try{signal?.throwIfAborted();if(await stat(target)){if(verify)await verify(target);}else{const info=await lstat(pending),mode=info.mode&0o777;if(info.isDirectory()&&!(mode&0o200))await chmod(pending,mode|0o200);try{await rename(pending,target);if(info.isDirectory())await chmod(target,mode);}catch(error){if(await stat(pending)&&info.isDirectory())await chmod(pending,mode);throw error;}}}finally{await handle.close();await rm(lock);}
 }
+// 准备产物身份与使用验收由本产品定义，供应端不解释组件布局。
+function toolSupplyKey(tool){const archive=toolArchive(tool);if(tool.id==='node')return archive.sha256;return archive.sha256+'-'+objectRecipe(tool);}
+
+
+
 async function installTool(library,tool,options,visiting=new Set()){
- const supplied=resourceSupplies.getStore();if(supplied&&!supplied.preparingTool){
-  if(library.installed.has(tool.id))return library.installed.get(tool.id);
-  const value=tool.id==='xcode'?await supplied.acquireApple({...supplyRequirements().apple,names:['xcodebuild']}).then(apple=>({path:apple.tools.xcodebuild,version:tool.version})):await supplied.acquireTool(supplyRequirements().tools.find(item=>item.id===tool.id));
-  library.installed.set(tool.id,value);return value;
- }
+
 
  if(library.installed.has(tool.id))return library.installed.get(tool.id);if(visiting.has(tool.id))fail('工具声明循环：'+tool.id);visiting=new Set([...visiting,tool.id]);const archive=toolArchive(tool);
  if(tool.id==='xcode'){const apple=await verifyAppleTools(library,{environment:cleanEnvironment(options.environment),signal:options.signal});const value={path:apple.tools.xcodebuild,version:tool.version};library.installed.set(tool.id,value);return value;}
@@ -1629,7 +1629,7 @@ async function packageOriginal(entry,options){return acquireArchive(entry,{work:
 async function prepareNpm(locks,work,options){const cache=join(work,'npm');await directory(cache,true);const node=options.library.installed.get('node').path,require=createRequire(join(dirname(node),'../lib/node_modules/npm/bin/npm-cli.js')),cacache=require('cacache');for(const lock of locks){const document=JSON.parse(await checkedLock(lock));if(![2,3].includes(document.lockfileVersion)||!document.packages)fail('npm原始锁格式无效');for(const [path,entry]of Object.entries(document.packages)){if(!path||entry.link)continue;if(!entry.resolved||!entry.integrity||!entry.version)fail('npm包未锁定来源');const file=await packageOriginal({url:entry.resolved,integrity:entry.integrity},options);await cacache.put(join(cache,'_cacache'),'make-fetch-happen:request-cache:'+entry.resolved,await readFile(file),{integrity:entry.integrity,metadata:{time:Date.now(),url:entry.resolved,reqHeaders:{},resHeaders:{'content-type':'application/octet-stream'}}});}}return {npmCache:cache};}
 async function preparePub(locks,cache,options){await directory(cache,true);const parse=await parser('yaml',options),files=[];for(const lock of locks){const d=parse(await checkedLock(lock));if(!d.packages)fail('Pub锁格式无效');for(const [name,entry]of Object.entries(d.packages)){if(['sdk','path'].includes(entry.source))continue;if(entry.source==='git'){const d=entry.description;if(!d||d.ref!==d['resolved-ref']||!options.sources?.some(x=>x.name===name&&x.url===d.url&&x.ref===d.ref))fail('Pub Git来源不属于产品固定闭包：'+name);continue;}if(entry.source!=='hosted'||entry.description?.name!==name||!['https://pub.dev','https://pub.dev/'].includes(entry.description.url)||!entry.description.sha256)fail('Pub来源未锁定');const coordinate={ecosystem:'pub',name,version:entry.version,url:'https://pub.dev/api/archives/'+name+'-'+entry.version+'.tar.gz',sha256:entry.description.sha256};files.push({name:name+'-'+entry.version,sha256:coordinate.sha256,file:await packageOriginal(coordinate,options)});}}
  return materializePubCache(files,cache,options);}
-// Pub直接解析64位十六进制摘要，不接受行尾换行；独立与控制台配方共用此本轮物化。
+// 本产品独立拥有此实现，通过自身公开接口执行。
 async function materializePubCache(files,cache,options={}){
  await directory(cache,true); for(const entry of files){const target=join(cache,'hosted/pub.dev',entry.name),proof=join(cache,'hosted-hashes/pub.dev',entry.name+'.sha256');await directory(dirname(target),true);await directory(dirname(proof),true);if(await stat(target)){if(await readFile(proof,'utf8')!==entry.sha256)fail('Pub缓存摘要漂移');}else{await extractArchive(entry.file,target,{signal:options.signal});await writeFile(proof,entry.sha256,{flag:'wx'});}}
  await directory(join(cache,'_temp'),true);return {pubCache:cache};}
@@ -1725,7 +1725,7 @@ async function installAndroidResources(options){const library=options.library,cm
  const sha256=hash(JSON.stringify(packages)),store=join(library.root,'shared');await directory(store,true);const target=join(store,library.supply?'android':'android-'+sha256);const verify=async directory=>{if(!await stat(directory))return null;await directoryCheck(directory);const payload=join(directory,'payload'),receipt=JSON.parse(await readFile(join(directory,'receipt.json'),'utf8'));if(receipt.sha256!==sha256||JSON.stringify(receipt.files)!==JSON.stringify(await inventory(payload)))fail('SDK原件回执不符');for(const item of packages){const text=await readFile(join(payload,...item.path.split(';'),'source.properties'),'utf8');if([...text.matchAll(/^Pkg\.Revision\s*=\s*(\S+)\s*$/gmu)].length!==1||!text.includes('Pkg.Revision='+item.version)&&!new RegExp('^Pkg\\.Revision\\s*=\\s*'+item.version.replaceAll('.','\\.')+'\\s*$','mu').test(text))fail('SDK组件版本不符：'+item.path);}return payload;};
  let payload=await verify(target);if(!payload){if(options.offline)fail('离线缺少SDK闭包');const pending=await fixedScratch(join(await resourceWork(options.library.work),'.android-'));try{payload=join(pending,'payload');await mkdir(payload);for(const item of packages){const at=join(payload,...item.path.split(';'));await directory(dirname(at),true);if(item.source){const file=await acquireOfficialPlatform(item,options),unpacked=join(pending,'unpack');try{await extractArchive(file,unpacked,{signal:options.signal});const names=await readdir(unpacked);if(names.length!==1)fail('额外平台归档根不唯一');await rename(join(unpacked,names[0]),at);await rm(unpacked,{recursive:true});if(await platformTreeDigest(at)!==item.sha256)fail('额外平台发行件树摘要不符');}finally{await rm(file,{force:true});}}else{const file=await packageOriginal(item,options),unpacked=join(pending,'unpack');await extractArchive(file,unpacked,{signal:options.signal});await rename(item.root==='.'?unpacked:join(unpacked,item.root),at);if(await stat(unpacked))await rm(unpacked,{recursive:true});}}await permissions(payload,false);await writeFile(join(pending,'receipt.json'),JSON.stringify({sha256,files:await inventory(payload)}),{flag:'wx',mode:0o444});await commitCandidate(pending,target,{signal:options.signal,verify});payload=await verify(target);}finally{if(await stat(pending)){await permissions(pending,true);await rm(pending,{recursive:true});}}}
  const toolPayload=payload;
- if(library.supply&&options.platformView)payload=await options.platformView(payload,wanted,androidPlatformDefinitions);
+ // 平台闭包已由本产品完整构造；不再交给供应端替换使用目录。
  const versions=id=>library.tools.find(x=>x.id===id)?.version;for(const [id,file]of [['android','platform-tools/adb'],['android-sdk','cmdline-tools/'+versions('android-sdk')+'/bin/sdkmanager'],['android-ndk','ndk/'+versions('android-ndk')+'/ndk-build'],['cmake','cmake/'+versions('cmake')+'/bin/cmake']])if(library.requested.some(x=>x.id===id))library.installed.set(id,{path:join(toolPayload,file),version:versions(id)});
  return {ANDROID_HOME:payload,ANDROID_SDK_ROOT:payload,ANDROID_NDK_HOME:join(toolPayload,'ndk',versions('android-ndk')),ANDROID_USER_HOME:join(library.work,'android-user'),ANDROID_EMULATOR_HOME:join(library.work,'android-user')};
 }
@@ -1884,27 +1884,19 @@ async function bootstrapNode(work,options={}) {
  const store=options.storeRoot||join(homedir(),'.local/share/product-resources');
  if(inside(root,store)||inside(store,root)||inside(work,store)||inside(store,work)||store===work)fail('启动原件库边界交叉');
  const library={root:join(store,'tools'),work,tools:toolDefinitions,installed:new Map()};await directory(library.root,true);
- const context={environment,offline:false,fetcher:fetch,...options,library,optionalTools:environment.PRODUCT_TOOL_ROOT,
-  optionalDependencies:environment.PRODUCT_DEPENDENCY_ROOT?join(environment.PRODUCT_DEPENDENCY_ROOT,'objects'):undefined};
+ const context={environment,offline:false,fetcher:fetch,...options,library,optionalTools:undefined,
+  optionalDependencies:undefined};
  return installTool(library,toolDefinitions.find(x=>x.id==='node'),context);
 }
 
 // 构建进程在明确供给模式下只请求和验真；获取、保存及配方执行由供给宿主拥有。
-async function resources(platform,work,previous={},options={}){
- if(options.supply){const receipt=await options.supply(previous);if(receipt.run_id!==previous.run_id)fail('资源供给任务身份不符');const owner=await import('./build.mjs');owner.resourceEnvironment(platform,work,receipt,options.environment||{});return receipt;}
- return materializeResources(platform,work,previous,options);
-}
-// 公开准备配方供宿主动态调用；产品不导入私有控制台实现，不复制需求或配方。
-async function prepareResourceSupply(platform,work,previous,options){
- if(!options||typeof options.acquireOriginal!=='function'||!options.toolRoot||!options.dependencyRoot)fail('供给准备缺少原件能力');
- for(const path of [options.toolRoot,options.dependencyRoot])await directory(path);
- const receipt=await resourceSupplies.run({...options,work},()=>materializeResources(platform,work,previous,options));
- receipt.environment??={};receipt.environment["CITIZENWALLET_RESOURCE_MODE"]='provided';return receipt;
-}
+async function resources(platform,work,previous={},options={}){return resourceSupplies.run({work},()=>materializeResources(platform,work,previous,options));}
+// 本产品独立拥有此实现，通过自身公开接口执行。
+async function prepareResourceSupply(platform,work,previous,options){return resources(platform,work,previous,options);}
 async function materializeResources(platform,work,previous={},options={}){
  const owner=await import('./build.mjs');owner.checkWork(work);const request=()=>owner.requirements(platform,work);const requirement=request(),environment=options.environment||process.env;
  if(previous.schema!==undefined&&(previous.schema!==1||previous.product_id!==requirement.product_id||previous.platform!==platform||previous.work!==work))fail('资源请求身份无效');options={environment,fetcher:fetch,offline:false,...options};options.signal?.throwIfAborted();
- const store=options.storeRoot||join(homedir(),'.local/share/product-resources'),optionalTools=options.toolRoot||environment.PRODUCT_TOOL_ROOT,optionalDependencies=options.dependencyRoot?join(options.dependencyRoot,'objects'):environment.PRODUCT_DEPENDENCY_ROOT?join(environment.PRODUCT_DEPENDENCY_ROOT,'objects'):undefined;
+ const store=options.storeRoot||join(homedir(),'.local/share/product-resources'),optionalTools=options.toolRoot,optionalDependencies=options.dependencyRoot?join(options.dependencyRoot,'objects'):undefined;
  if(!options.toolRoot)await directory(store,true);if(inside(root,store)||inside(store,root)||inside(work,store)||inside(store,work)||store===work)fail('原件库与源码或工作区交叉');
  // tools承载工具发行件/编译输入，rely承载产品依赖原件；不把可写任务缓存混入任一原件库。
  const library={root:options.toolRoot||join(store,'tools'),supply:Boolean(options.toolRoot),work,tools:toolDefinitions,requested:requirement.tools,installed:new Map(),androidPlatforms:androidPlatformDefinitions};await directory(library.root,true);options={...options,platform,optionalTools,optionalDependencies,library,dependencyRoot:options.dependencyRoot||join(store,'rely'),sources:requirement.sources};
@@ -1927,24 +1919,12 @@ async function materializeResources(platform,work,previous={},options={}){
 
 // 公开声明与候选配方；供给对象的领取、提交及删除只由调度方实现。
 function supplyRequirements(){
- const wanted=toolDefinitions.filter(tool=>tool.id!=='xcode').map(tool=>{const archive=toolArchive(tool);return {...tool,archive,slots:[...new Set([archive?.executable,...(tool.slots||[])].filter(Boolean))]};});
+ const wanted=toolDefinitions.filter(tool=>tool.id!=='xcode').map(tool=>{const archive=toolArchive(tool);return {...tool,archive,cache_key:toolSupplyKey(tool),slots:[...new Set([archive?.executable,...(tool.slots||[])].filter(Boolean))]};});
  const xcode=toolDefinitions.find(tool=>tool.id==='xcode');
  return {tools:wanted,apple:{version:xcode.version,source:xcode.source,names:[...new Set([...Object.keys(appleSystemTools),...appleBundleTools])]}};
 }
 function assertWorkQuiescent(work){for(const pid of supplyGroups.get(work)||[])try{process.kill(-pid,0);fail('资源工具退出未确认');}catch(error){if(error.code!=='ESRCH')throw error;}if(retainedResourcePath(work))fail('资源工具退出未确认');}
-async function prepareToolSupply(tool,{original,payload,work,signal,offline,acquireOriginal,acquireTool,acquireApple,publishCandidate,environment,finalPayload}){
- const at=await fixedScratch(join(work,'.tool-recipe-'+tool.id+'-'+randomUUID()));
- const library={root:at,work,tools:toolDefinitions,installed:new Map(),requested:[],androidPlatforms:typeof androidPlatformDefinitions==='undefined'?[]:androidPlatformDefinitions};
- const context={work,toolRoot:at,dependencyRoot:join(work,'dependencies'),acquireOriginal,acquireTool,acquireApple,publishCandidate,preparingTool:true};
- try{return await resourceSupplies.run(context,async()=>{
-  const definition=toolDefinitions.find(entry=>entry.id===tool.id);if(!definition)fail('工具配方未声明');
-  const ids=[...(definition.requires||[]),...(!['node','posix'].includes(tool.id)?['posix',...(['bash','grep','sed'].includes(tool.id)?[]:['bash','grep','sed'])]:[])];
-  for(const id of new Set(ids)){if(id==='xcode'){const apple=await acquireApple({...supplyRequirements().apple,names:['xcodebuild']});library.installed.set(id,{path:apple.tools.xcodebuild,version:toolDefinitions.find(t=>t.id===id).version});}else{const entry=supplyRequirements().tools.find(t=>t.id===id);if(!entry)fail('工具前置未声明');library.installed.set(id,await acquireTool(entry));}}
-  const value=await installTool(library,definition,{library,signal,offline,environment,finalPayload,dependencyRoot:context.dependencyRoot});
-  const executable=toolArchive(definition).executable,built=value.path.slice(0,-executable.length-1);await chmod(built,0o700);await rm(payload,{recursive:true,force:true});await rename(built,payload);
-  return {schema:1,id:tool.id,version:tool.version,payload,original};
- });}finally{assertWorkQuiescent(work);await rm(at,{recursive:true,force:true});}
-}
+
 
 // 本产品Android配方已有的准确官方仓库来源；仅用于同版本发布文件回验。
 const mavenSources=Object.freeze(['https://dl.google.com/dl/android/maven2/','https://repo.maven.apache.org/maven2/','https://storage.googleapis.com/download.flutter.io/','https://plugins.gradle.org/m2/']);
@@ -2419,13 +2399,7 @@ test('大规模Maven清单由真实Gradle分段解析，全部原件验真且首
 // 同文件回归只准备夹具归档，验证候选职责和失败清理，不下载或运行产品编译。
 if(process.env.NODE_TEST_CONTEXT&&process.argv.length===2&&process.argv[1]===import.meta.filename){
  const {test}=await import('node:test'),{default:assert}=await import('node:assert/strict'),{execFileSync}=await import('node:child_process'),fs=await import('node:fs'),{withFixedWork}=await Promise.resolve(targetInternals);
- for(const failure of [false,true])test('编译供给候选归属与失败收尾：'+failure,()=>withFixedWork('test',async work=>{
-  const tool=supplyRequirements().tools.find(tool=>tool.id==='node'),base=join(work,'fixture');await mkdir(join(base,tool.archive.root,'bin'),{recursive:true});await writeFile(join(base,tool.archive.root,'bin/node'),'#!/bin/sh\nexit 0\n',{mode:0o755});
-  const archive=join(work,'fixture.tgz');execFileSync('/usr/bin/tar',['-czf',archive,'-C',base,tool.archive.root]);const payload=join(work,'payload');await mkdir(payload);let acquired=0,committed=0;
-  const options={original:archive,payload,work,environment:{HOME:work},acquireOriginal:async entry=>{acquired++;assert.equal(entry.url,tool.archive.url);if(failure)throw Error('原件缺失');return archive;},acquireTool:()=>assert.fail('Node无前置工具'),acquireApple:()=>assert.fail('Node不需要Apple'),publishCandidate:async(candidate,target)=>{assert.ok(candidate.startsWith(work+'/')&&target.startsWith(work+'/'));committed++;await mkdir(dirname(target),{recursive:true});await rename(candidate,target);}};
-  if(failure)await assert.rejects(prepareToolSupply(tool,options),/原件缺失/);else{const result=await prepareToolSupply(tool,options);assert.equal(result.payload,payload);assert.ok((await lstat(join(payload,'bin/node'))).mode&0o111);assert.equal(committed,1);}
-  assert.equal(acquired,1);assert.equal((await readdir(work)).some(name=>name.startsWith('.tool-recipe-')),false);
- }));
+
 }
 
 // 使用真实本轮目录验证解析器取得、复用及失败清场，不触碰共享工具库。
@@ -2434,22 +2408,7 @@ if(process.env.NODE_TEST_CONTEXT&&process.argv.length===2&&process.argv[1]===imp
  const {mkdtemp,mkdir,writeFile,readdir,rm,lstat}=await import('node:fs/promises');
  const {gzipSync}=await import('node:zlib');
  const tar=entries=>{const blocks=[];for(const [name,body]of entries){const bytes=Buffer.from(body),header=Buffer.alloc(512);header.write(name,0,100);header.write('0000644\0',100);header.write('0000000\0',108);header.write('0000000\0',116);header.write(bytes.length.toString(8).padStart(11,'0')+'\0',124);header.write('00000000000\0',136);header.fill(32,148,156);header.write('0',156);header.write('ustar\0',257);header.write('00',263);header.write([...header].reduce((sum,value)=>sum+value,0).toString(8).padStart(6,'0')+'\0 ',148);blocks.push(header,bytes,Buffer.alloc((512-bytes.length%512)%512));}return gzipSync(Buffer.concat([...blocks,Buffer.alloc(1024)]));};
- test('解析器仅在本任务目录物化并复用，离线缺件失败',async t=>{
-  await mkdir(fixedWork('test'),{recursive:true});const work=await mkdtemp(join(fixedWork('test'),'parser-task-'));t.after(()=>rm(work,{recursive:true,force:true}));
-  const library={root:join(work,'library'),work,installed:new Map()};await mkdir(library.root);
-  const input=join(work,'parser.tgz'),broken=join(work,'broken.tgz');
-  await writeFile(input,tar([['package/package.json','{"main":"index.js"}'],['package/index.js','module.exports={parse(text){return {text}}};']]));
-  await writeFile(broken,tar([['../escape','invalid']]));
-  let acquired=0;const supply={toolRoot:library.root,acquireOriginal:async()=>{acquired++;return input;},publishCandidate:()=>assert.fail('解析器不得发布共享目录')};
-  const options={library,offline:true};
-  assert.deepEqual((await resourceSupplies.run(supply,()=>parser('yaml',options)))('first'),{text:'first'});
-  assert.deepEqual((await resourceSupplies.run(supply,()=>parser('yaml',options)))('again'),{text:'again'});
-  assert.equal(acquired,1);await assert.rejects(lstat(join(library.root,'parsers')),{code:'ENOENT'});
-  const local=join(work,'resource-pending','parsers');assert.equal((await readdir(local)).length,1);await rm(local,{recursive:true});
-  await assert.rejects(resourceSupplies.run({...supply,acquireOriginal:async()=>broken},()=>parser('yaml',options)),/越界|非法/);
-  assert.deepEqual(await readdir(local),[]);
-  await assert.rejects(resourceSupplies.run({...supply,acquireOriginal:async()=>{throw Error('离线缺原件');}},()=>parser('yaml',options)),/离线缺原件/);
- });
+
  test('锁定Git bundle仅在任务内检出，离线缺原件失败',async t=>{
   const {execFileSync}=await import('node:child_process'),{mkdtemp,mkdir,writeFile,readFile,readdir,rm}=await import('node:fs/promises');
   await mkdir(fixedWork('test'),{recursive:true});const work=await mkdtemp(join(fixedWork('test'),'git-task-'));t.after(()=>rm(work,{recursive:true,force:true}));
@@ -2474,30 +2433,7 @@ if(process.env.NODE_TEST_CONTEXT&&process.argv.length===2&&process.argv[1]===imp
   assert.equal(await stat(target),null);
  });
 
- test('Pod spec与源码仅在任务内物化，离线复用与失败清场保持锁定',async t=>{
-  const {mkdtemp,mkdir,writeFile,readFile,rm}=await import('node:fs/promises');
-  const {spawnSync}=await import('node:child_process');
-  await mkdir(fixedWork('test'),{recursive:true});const work=await mkdtemp(join(fixedWork('test'),'pod-task-'));t.after(()=>rm(work,{recursive:true,force:true}));
-  const checksum='a'.repeat(40),sourceBytes=tar([['source.txt','locked-source']]),sourceUrl='https://example.invalid/Example.tgz';
-  const spec={name:'Example',version:'1.0.0',source:{http:sourceUrl,sha256:hash(sourceBytes)}};
-  const lock={PODS:['Example (1.0.0)'],'SPEC CHECKSUMS':{Example:checksum}};
-  const parserArchive=join(work,'parser.tgz'),sourceArchive=join(work,'source.tgz'),lockfile=join(work,'Podfile.lock');
-  await writeFile(parserArchive,tar([['package/package.json','{"main":"index.js"}'],['package/index.js','module.exports={parse(){return '+JSON.stringify(lock)+';}};']]));
-  await writeFile(sourceArchive,sourceBytes);await writeFile(lockfile,'PODS:\n  - Example (1.0.0)\nSPEC CHECKSUMS:\n  Example: '+checksum+'\n');
-  const ruby=join(work,'ruby'),pod=join(work,'cocoapods/bin/pod');await mkdir(dirname(pod),{recursive:true});await mkdir(join(work,'cocoapods/gems'));
-  await writeFile(ruby,'#!'+process.execPath+'\nprocess.stdout.write('+JSON.stringify(checksum)+');\n',{mode:0o755});await writeFile(pod,'fixture',{mode:0o755});
-  const library={root:join(work,'library'),work,installed:new Map([['ruby',{path:ruby}],['cocoapods',{path:pod}]]),tools:[{id:'cocoapods',version:'1.17.0'}]};await mkdir(library.root);
-  let originals=0,requests=0;
-  const supply={toolRoot:library.root,acquireOriginal:async(entry,{kind}={})=>{originals++;assert.equal(kind,'dependency','锁解析器和Pod源码都必须从依赖库供给');return entry.url===parserDefinitions.yaml.url?parserArchive:entry.url===sourceUrl?sourceArchive:assert.fail('未知原件');},publishCandidate:()=>assert.fail('Pod不得提交共享目录'),runCommand:async(command,args,options)=>{assert.equal(command,ruby);const result=spawnSync(command,args,{env:options.env,encoding:'utf8'});assert.equal(result.status,0,result.stderr);return {stdout:result.stdout,stderr:result.stderr};}};
-  const fetcher=async url=>{requests++;assert.match(url,/^https:\/\/cdn\.cocoapods\.org\/Specs\//u);return Response.json(spec);};
-  const podWork=join(work,'pod');await resourceSupplies.run(supply,()=>preparePods(lockfile,podWork,{library,fetcher,environment:{HOME:work}}));
-  assert.equal(await readFile(join(podWork,'cocoapods/cache/Pods/Release/Example','1.0.0-'+checksum.slice(0,5),'source.txt'),'utf8'),'locked-source');
-  assert.equal(await stat(join(library.root,'parsers')),null);assert.equal(await stat(join(work,'rely/pods')),null);
-  await resourceSupplies.run(supply,()=>preparePods(lockfile,podWork,{library,offline:true,environment:{HOME:work},fetcher:()=>assert.fail('离线复用不得联网')}));
-  assert.equal(originals,2);assert.equal(requests,1);
-  await assert.rejects(resourceSupplies.run(supply,()=>preparePods(lockfile,join(work,'failed'),{library,environment:{HOME:work},fetcher:async()=>new Response(null,{status:503})})),/官方来源响应失败/);
-  assert.equal(await stat(join(work,'failed/cocoapods/cache/Pods/Release/Example')),null);
- });
+
 }
 
 async function prepareRunnerFlutter(sdk,work,environment){
@@ -2507,10 +2443,10 @@ async function prepareRunnerFlutter(sdk,work,environment){
  return flutterRecipe.prepareFlutter(sdk,{tool,files:flutterRecipe.parsePatch(flutterPatch),
   env:{...environment,PRODUCT_WORK_DIR:work}});
 }
-return {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,prepareToolSupply,mavenSources,preparePlatformSupply,copyFlutterArtifact:flutterRecipe.copyFlutterArtifact,prepareRunnerFlutter};
+return {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,mavenSources,preparePlatformSupply,copyFlutterArtifact:flutterRecipe.copyFlutterArtifact,prepareRunnerFlutter};
 })();
 resolveResourceReady(resourceInternals);
-export const {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,prepareToolSupply,mavenSources,preparePlatformSupply}=resourceInternals;
+export const {runResourceProcess,inventory,acquireArchive,extractArchive,materializePubCache,normalizeCargoManifest,podSourceCoordinate,readDependencySupply,materializePodSupply,materializeMavenCache,mavenSupplyInit,checkCocoaPodsResources,gradleResourceInit,prepareGradleResources,buildSourceTool,posixNames,resourceDeclarations,bootstrapNode,resources,prepareResourceSupply,supplyRequirements,assertWorkQuiescent,mavenSources,preparePlatformSupply}=resourceInternals;
 const {copyFlutterArtifact}=resourceInternals;
 const product=contract.product_id, prefix=product.toUpperCase();
 const inside=(base,path)=>{const r=relative(base,path);return r===''||!isAbsolute(r)&&r!=='..'&&!r.startsWith('..'+sep);};
@@ -2616,7 +2552,7 @@ export function resourceEnvironment(platform,work,receipt,base={}) {
  if(env.XCODEBUILD)env.CITIZENWALLET_XCODEBUILD_BIN=env.XCODEBUILD;
  env.GRADLE_USER_HOME=join(work,'dependencies/gradle');env.CP_HOME_DIR=join(work,'dependencies/cocoapods');
  env[prefix+'_PUB_OFFLINE']='true';env.GRADLE_OPTS='-Dorg.gradle.project.android.builder.sdkDownload=false';
- if(base.PRODUCT_RESOURCE_FD==='4')env["CITIZENWALLET_RESOURCE_MODE"]='provided';else env["CITIZENWALLET_RESOURCE_MODE"]??='independent';
+ env["CITIZENWALLET_RESOURCE_MODE"]??='independent';
  if(env["CITIZENWALLET_RESOURCE_MODE"]==='provided'){env.PIP_NO_INDEX='1';env.COMPOSER_DISABLE_NETWORK='1';env.YARN_ENABLE_NETWORK='0';}
  const execution=executions.getStore();if(execution)execution.buildEnvironment=env;
  return env;
@@ -3206,7 +3142,7 @@ export const IOS_VERIFIER_SOURCE=[
 ].join('\n');
 
 // 包标识来自本产品唯一原始Android配置，不从调用方登记或另一端推导。
-// 商店身份属于本产品：只读原始Release工程，不依赖控制台、发布声明或外部工具。
+// 本产品独立拥有此实现，通过自身公开接口执行。
 function buildSourcePath(base,name) {
  if(typeof base!=='string'||!isAbsolute(base)||resolve(base)!==base||realpathSync(base)!==base)fail('商店身份源码根不是准确物理目录');
  if(typeof name!=='string'||!name||name.includes('\\')||/[\x00-\x1f\x7f]/u.test(name)||name.split('/').some(v=>!v||v==='.'||v==='..'))fail('商店身份源码路径无效');
@@ -3277,8 +3213,7 @@ async function nativeVerifier(work,env) {
  if(state)state.verifier=verify;return verify;
 }
 async function developmentMaterial(work,env,value) {
- const operation=value===undefined?'development.read':'development.create',host=await productHost();
- if(host)return host(operation,value);
+ const operation=value===undefined?'development.read':'development.create';
  const verifier=await nativeVerifier(work,env);return (await verifier({operation,product_id:product,...(value===undefined?{}:{value})})).value;
 }
 export function parseAndroidSigning(encoded) {
@@ -3435,8 +3370,6 @@ async function saveMobileArtifact(platform,work,path) {
  const declared=platformContract(platform);if(declared.files.length!==1)fail('移动候选登记不唯一');
  const publicPath=join(work,declared.files[0]);
  if(path!==publicPath){unlinkSync(publicPath);copyFileSync(path,publicPath);}
- const host=await productHost();
- if(host)await host('artifact',[{path:publicPath,sha256:outputDigest(publicPath)}]);
 }
 async function completeMobile(platform,work,receipt,env,base) {
  executions.getStore()?.signal?.throwIfAborted();if(platform.endsWith('android'))await completeAndroid(platform,work,receipt,env,base);else await completeIOS(platform,work,receipt,env);
@@ -3487,7 +3420,7 @@ export function outputDigest(path) {
  }visit(path);return hash.digest('hex');
 }
 
-// 钱包拥有编译前测试清单与资源需求；控制台只调用完整Build并按声明供给。
+// 本产品拥有测试清单、资源准备和执行顺序。
 function testFiles(){return ['scripts/build.mjs','scripts/publish.mjs'];}
 async function runProductTests(platform,work,receipt,base){
  const env=resourceEnvironment(platform,work,receipt,base),node=receipt.tools.node;
@@ -3519,7 +3452,7 @@ async function runProductTests(platform,work,receipt,base){
 export async function execute(platform,work,request={},options={}) {
  if(options.stages&&!process.env.NODE_TEST_CONTEXT)fail('合成阶段仅用于本仓测试');
  checkFixedWork(work,{create:true});
- return withFixedWork(taskScope(work),()=>executeTask(platform,work,request,options),{run_id:request.run_id,environment:options.environment||process.env,retain:(options.environment||process.env).PRODUCT_RESOURCE_FD==='4'||(options.environment||process.env).PRODUCT_HOST_FD==='3'});
+ return withFixedWork(taskScope(work),()=>executeTask(platform,work,request,options),{run_id:request.run_id,environment:options.environment||process.env});
 }
 function validateBuildRequest(request){
  if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).some(k=>!['run_id','program_digest'].includes(k))
@@ -3536,14 +3469,10 @@ async function executeTask(platform,work,request={},options={}) {
  if(existsSync(resultFile))fail('本轮完整Build已有结果，禁止复用旧终态');
  const handle=openSync(lock,'wx',0o600);closeSync(handle);
  const cancellation=new AbortController(),abort=()=>cancellation.abort();options.signal?.addEventListener('abort',abort,{once:true});if(options.signal?.aborted)abort();
- const state={signal:cancellation.signal,cancellation,host:options.host,unconfirmed:false,finished:false};
+ const state={signal:cancellation.signal,cancellation,unconfirmed:false,finished:false};
  try{return await executions.run(state,async()=>{
   const stages=options.stages||{requirements,resources:(...args)=>Promise.resolve(resourceInternals).then(m=>m.resources(...args)),prepare,build};
   const resourcesOptions={signal:state.signal,offline:Boolean(options.offline),environment:options.environment||process.env};
-  if((options.environment||process.env).PRODUCT_RESOURCE_FD==='4'){
-   state.resourceClient=options.resourceClient||createResourceSupplyClient(new Socket({fd:4,readable:true,writable:true}),state.signal);
-   resourcesOptions.supply=previous=>state.resourceClient({previous});
-  }
   await stages.requirements(platform,work);state.signal.throwIfAborted();
   let receipt=await stages.resources(platform,work,request,resourcesOptions);state.signal.throwIfAborted();
   if(!options.stages)await runProductTests(platform,work,receipt,resourcesOptions.environment);
@@ -3554,7 +3483,7 @@ async function executeTask(platform,work,request={},options={}) {
   const result=await stages.build(platform,work,receipt,resourcesOptions.environment);state.signal.throwIfAborted();
   checkBuildResult(result,platform,work,request.run_id);
   writeFileSync(resultFile,JSON.stringify(result)+'\n',{flag:'wx',mode:0o600});return result;
- });}catch(error){if(String(error?.message).includes('退出未确认'))state.unconfirmed=true;throw error;}finally{state.finished=true;state.socket?.destroy();options.signal?.removeEventListener('abort',abort);state.resourceClient?.close?.();if(!state.unconfirmed){unlinkSync(lock);if((options.environment||process.env).PRODUCT_RESOURCE_FD!=='4')clearWork(work);}}
+ });}catch(error){if(String(error?.message).includes('退出未确认'))state.unconfirmed=true;throw error;}finally{state.finished=true;options.signal?.removeEventListener('abort',abort);if(!state.unconfirmed){unlinkSync(lock);clearWork(work);}}
 }
 export function checkBuildResult(value,platform,work,runId) {
  const wallet=platformContract(platform);
@@ -3583,42 +3512,9 @@ async function completeBuild(platform,work,receipt,env,base) {
 }
 
 // 全双工宿主通道只传开发签名材料，不与stdout结果、stderr日志或资源回执混用。
-async function productHost() {
- const supplied=executions.getStore()?.host;if(supplied)return supplied;
- if(process.env.PRODUCT_HOST_FD===undefined)return null;
- if(process.env.PRODUCT_HOST_FD!=='3')fail('宿主通道描述符无效');
- const socket=new Socket({fd:3,readable:true,writable:true}),pending=new Map();let buffer='',sequence=0;
- socket.on('data',chunk=>{buffer+=chunk.toString('utf8');if(Buffer.byteLength(buffer)>128*1024){socket.destroy();return;}
-  let end;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);try{const reply=JSON.parse(line),entry=pending.get(reply.id);if(!entry)throw Error();pending.delete(reply.id);clearTimeout(entry.timer);if(reply.ok!==true)entry.reject(Error('开发签名材料宿主操作失败'));else entry.resolve(reply.value);}catch{socket.destroy();}}});
- const close=()=>{const state=executions.getStore();if(state&&!state.finished)state.cancellation?.abort();for(const entry of pending.values()){clearTimeout(entry.timer);entry.reject(Error('产品宿主通道中断'));}pending.clear();};socket.on('error',close);socket.on('close',close);socket.unref();
- const host=(operation,value)=>new Promise((resolve,reject)=>{if(!['development.read','development.create','artifact'].includes(operation))return reject(Error('宿主能力未授权'));
-  // 开发材料允许原生Touch ID完整120秒及回传；产物确认仍保持30秒边界。
-  const timeout=operation==='artifact'?30000:150000;
-  const id=String(++sequence),timer=setTimeout(()=>{pending.delete(id);reject(Error('开发材料操作超时'));socket.destroy();},timeout);
-  pending.set(id,{resolve,reject,timer});socket.write(JSON.stringify({id,operation,...(value===undefined?{}:operation==='artifact'?{files:value}:{value})})+'\n');});
- executions.getStore().host=host;executions.getStore().socket=socket;return host;
-}
+
 // 资源供给使用独立公开通道，不传签名材料；每轮请求绑定同一真实任务。
-export function createResourceSupplyClient(stream,signal){
- let buffer='',sequence=0,pending=null,closed=false;
- const reject=message=>{closed=true;if(pending){clearTimeout(pending.timer);pending.reject(Error(message));pending=null;}stream.destroy();};
- const abort=()=>reject('资源供给已取消');
- signal?.addEventListener('abort',abort,{once:true});
- stream.setEncoding?.('utf8');
- stream.on('data',chunk=>{buffer+=chunk.toString();if(Buffer.byteLength(buffer)>2*1024**2)return reject('资源供给回执超限');
-  let end;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);
-   try{const reply=JSON.parse(line);if(!pending||reply.id!==pending.id||Object.keys(reply).sort().join(',')!==(reply.ok===true?'id,ok,value':'error,id,ok'))throw Error();
-    const entry=pending;pending=null;clearTimeout(entry.timer);if(reply.ok!==true){entry.reject(Error(reply.error));reject('资源供给失败');return;}entry.resolve(reply.value);
-   }catch{reject('资源供给帧或请求身份无效');return;}
-  }
- });
- stream.on('error',()=>reject('资源供给通道失败'));stream.on('end',()=>reject('资源供给通道中断'));stream.on('close',()=>reject('资源供给通道中断'));
- const request=value=>new Promise((resolve,rejectPromise)=>{if(closed||pending||signal?.aborted)return rejectPromise(Error('资源供给不可用，禁止独立下载'));
-  const id=String(++sequence),timer=setTimeout(()=>reject('资源供给超时'),7200000);pending={id,timer,resolve,reject:rejectPromise};
-  stream.write(JSON.stringify({...value,id,operation:'prepare'})+'\n');
- });
- request.close=()=>{signal?.removeEventListener('abort',abort);reject('资源供给已关闭');};return request;
-}
+
 
 // 模块先完成初始化，资源模块才能反向导入本文件的唯一校验；异步CLI在独立Promise中执行。
 
@@ -4100,13 +3996,13 @@ async function runCLI(){
   process.stdout.write(JSON.stringify(await ciPublishRelease(process.argv[3],process.argv[4]))+'\n');return;
  }
  const [operation,platform,flag,work]=process.argv.slice(2);
- if(operation==='execute'&&process.env.PRODUCT_RESOURCE_FD!=='4'){if(flag!=='--work'||work!==fixedWork('build/'+platform))fail('平台编译现场不符');return withFixedWork('build/'+platform,()=>runCommand(),{environment:process.env,retain:process.env.PRODUCT_HOST_FD==='3'});}
+ if(operation==='execute'){if(flag!=='--work'||work!==fixedWork('build/'+platform))fail('平台编译现场不符');return withFixedWork('build/'+platform,()=>runCommand(),{environment:process.env});}
  if(operation==='execute')return runCommand();
  if(['resources','prepare','build'].includes(operation)&&flag==='--work'){
   // 错平台须在领取固定现场前拒绝，不能因失败请求清理其它平台的测试或编译内容。
   platformContract(platform);
   checkWork(work);
-  return withFixedWork(taskScope(work),()=>runCommand(),{environment:process.env,retain:process.env.PRODUCT_HOST_FD==='3'||process.env.PRODUCT_RESOURCE_FD==='4'});
+  return withFixedWork(taskScope(work),()=>runCommand(),{environment:process.env});
  }
  return runCommand();
 }
@@ -4153,13 +4049,11 @@ async function runCommand(){
   const request=input?JSON.parse(input):{},options={environment:process.env,signal:cancellation.signal,offline:extra.includes('--offline')};
   let result;
   if(command==='execute')validateBuildRequest(request);
-  if(command==='execute'&&process.env.PRODUCT_RESOURCE_FD==='4'){
-   result=await execute(platform,work,request,options);
-  }else if(command==='execute'){
+  if(command==='execute'){
    const {bootstrapNode}=await Promise.resolve(resourceInternals);const node=await bootstrapNode(work,options);
    if(createHash('sha256').update(readFileSync(process.execPath)).digest('hex')!==createHash('sha256').update(readFileSync(node.path)).digest('hex')){
-    const environment=Object.fromEntries(['HOME','USER','LOGNAME','LANG','LC_ALL','PRODUCT_TOOL_ROOT','PRODUCT_DEPENDENCY_ROOT','PRODUCT_HOST_FD','PRODUCT_WORK_LEASE'].filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]]));
-    result=JSON.parse((await runBuildProcess(node.path,[fileURLToPath(import.meta.url),command,platform,option,work,...extra],workEnvironment(environment),root,{capture:true,streamError:true,input:JSON.stringify(request),signal:cancellation.signal,passHost:environment.PRODUCT_HOST_FD==='3'})).stdout);
+    const environment=Object.fromEntries(['HOME','USER','LOGNAME','LANG','LC_ALL','PRODUCT_WORK_LEASE'].filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]]));
+    result=JSON.parse((await runBuildProcess(node.path,[fileURLToPath(import.meta.url),command,platform,option,work,...extra],workEnvironment(environment),root,{capture:true,streamError:true,input:JSON.stringify(request),signal:cancellation.signal})).stdout);
    }else result=await execute(platform,work,request,options);
   }else if(command==='resources')result=await (await Promise.resolve(resourceInternals)).resources(platform,work,request,options);
   else result=await executions.run({signal:cancellation.signal},()=>command==='prepare'?prepare(platform,work,request,process.env):build(platform,work,request,process.env));
@@ -4348,7 +4242,7 @@ test('未经本产品锁声明的归档回执不能用于编译',async()=>{
  }finally{removeFixture(work,{recursive:true});}
 });
 
-// 真实命令行只读自身入口；清除私有环境与工具搜索路径，不能从控制台补齐执行条件。
+// 本产品独立拥有此实现，通过自身公开接口执行。
 test('独立命令行从自身声明输出JSON，未知平台失败且不写工作根',async()=>{
  const work=sandbox();try{
   for(const platform of Object.keys(contract.platforms)){
@@ -4489,7 +4383,7 @@ test('iOS设备、过滤包标识、bundleVersion与版本比较归产品',async
  assert.deepEqual(iosVersion('1.2'),iosVersion('1.2.0'));assert.throws(()=>iosVersion('1.2-beta'));
 });
 
-// 原控制台profile/entitlement用例迁到产品Swift验真器；最终统一验收交付已验真的Xcode环境。
+// 本产品独立拥有此实现，通过自身公开接口执行。
 const iosContractFixture=[
  "import XCTest",
  "final class ProductIOSContractTests: XCTestCase {",
@@ -4742,24 +4636,10 @@ test('产品Flutter视图排除生成目录并独立承接本轮写入',async t=
 
 // 测试通道使用内存双工流；不下载、编译或接触开发材料。
 const {EventEmitter} = await import('node:events');
-const {createResourceSupplyClient,execute,outputDigest,checkBuildResult} = await import('./build.mjs');
+const {execute,outputDigest,checkBuildResult} = await import('./build.mjs');
 function resourcePipe(){const a=new EventEmitter(),b=new EventEmitter();for(const [one,other]of [[a,b],[b,a]]){one.setEncoding=()=>{};one.write=data=>{queueMicrotask(()=>other.emit('data',data));return true;};one.destroy=()=>{if(one.destroyed)return;one.destroyed=true;one.emit('close');};}return [a,b];}
-test('公开资源客户端串行交付产品回执，错序回执、并发和取消直接失败',async()=>{
- const [client,provider]=resourcePipe(),supply=createResourceSupplyClient(client);let seq=0;
- provider.on('data',line=>{const request=JSON.parse(line);assert.deepEqual(Object.keys(request).sort(),['id','operation','previous']);assert.equal(request.operation,'prepare');assert.deepEqual(request.previous,{stage:seq});assert.equal(request.id,String(++seq));const reply=JSON.stringify({id:request.id,ok:true,value:{stage:seq}})+'\n';client.emit('data',reply.slice(0,4));client.emit('data',reply.slice(4));});
- assert.deepEqual(await supply({previous:{stage:0}}),{stage:1});assert.deepEqual(await supply({previous:{stage:1}}),{stage:2});supply.close();
- const [one]=resourcePipe(),bad=createResourceSupplyClient(one),pending=bad({previous:{}});one.emit('data',JSON.stringify({id:'2',ok:true,value:{}})+'\n');await assert.rejects(pending,/帧或请求身份/);await assert.rejects(bad({}),/禁止独立下载/);
- const [two]=resourcePipe(),abort=new AbortController(),cancelled=createResourceSupplyClient(two,abort.signal),waiting=cancelled({});await assert.rejects(cancelled({}),/禁止独立下载/);abort.abort();await assert.rejects(waiting,/取消/);cancelled.close();
-});
-test('供给模式在prepare前后使用同一资源通道；失败停止且不执行build',async()=>{
- for(const failing of [false,true]){const work=fixtureWork();try{
-  const receipt=fixture(work),seen=[],request={run_id:'123456789'};
-  const resourceClient=async message=>{seen.push('supply');assert.deepEqual(Object.keys(message),['previous']);if(failing)throw Error('supply unavailable');return receipt;};resourceClient.close=()=>seen.push('closed');
-  const stages={requirements:()=>seen.push('requirements'),resources:async(_,__,previous,options)=>{assert.equal(typeof options.supply,'function');return options.supply(previous);},prepare:()=>seen.push('prepare'),build:()=>{seen.push('build');const file=join(work,contract.platforms.android.files[0]);writeFixture(file,'fixture');return {schema:1,product_id:contract.product_id,platform:'android',work,run_id:request.run_id,completion:contract.platforms.android.completion,files:[{path:file,sha256:outputDigest(file)}]};}};
-  if(failing){await assert.rejects(execute('android',work,request,{stages,resourceClient,environment:{PRODUCT_RESOURCE_FD:'4'}}),/supply unavailable/);assert.deepEqual(seen,['requirements','supply','closed']);}
-  else{await execute('android',work,request,{stages,resourceClient,environment:{PRODUCT_RESOURCE_FD:'4'}});assert.deepEqual(seen,['requirements','supply','prepare','requirements','supply','build','closed']);}
- }finally{removeFixture(work,{recursive:true,force:true});}}
-});
+
+
 test('CLI只接受本轮运行编号，额外字段在启动资源流程前拒绝',()=>{
  const work=sandbox();try{const plan=requirements('ios',work),pod=plan.locks.find(x=>x.ecosystem==='cocoapods');assert.equal(pod.path,'Podfile.lock');assert.equal(pod.sha256,createHash('sha256').update(readFileSync(join(base,pod.path))).digest('hex'));
  const request={run_id:'123456789',unexpected:'provided'},result=spawnSync(process.execPath,[join(root,'scripts/build.mjs'),'execute','ios','--work',work],{input:JSON.stringify(request),encoding:'utf8',env:{HOME:work,LANG:'C',PATH:'',NODE_TEST_CONTEXT:process.env.NODE_TEST_CONTEXT,CITIZENWALLET_TEST_SESSION:testSession}});
@@ -4880,7 +4760,7 @@ test('产品Python先于Xcode附带Python且配置仅归当前任务',()=>{
  }finally{removeFixture(work,{recursive:true});}
 });
 
-// 固定工具字段只归需要它的iOS流程；控制台和独立入口使用同一产品校验。
+// 本产品独立拥有此实现，通过自身公开接口执行。
 test('xattr回执仅允许iOS的准确官方入口，其他平台和替代路径拒绝',()=>{
  const work=sandbox();try{
   const receipt=fixture(work),platform=receipt.platform;
@@ -5740,7 +5620,7 @@ test('iOS原生目标使用已交付Xcode的iphoneos SDK，查询或缺件失败
 }
   })().catch(error => { console.error(error); process.exitCode = 1; });
 }
-// 塔塔自动化的远端生命周期归本产品；控制台只提供任务宿主和短期凭据。
+// 本产品公开GitHub接口只使用普通参数与返回值；平台流程及终态处理归本仓。
 const automationWorkflows=Object.freeze({ios:'ios.yml',android:'android.yml'});
 const automationRepository='crcfrcn/citizenwallet';
 const automationTransport=new (await import('node:async_hooks')).AsyncLocalStorage();
@@ -5748,23 +5628,11 @@ function automationRoute(route,action){
  const workflow=automationWorkflows[route?.platform];
  if(!workflow||route.repository!=='citizenwallet'||route.product!=='citizenwallet'
   ||route.workflow!==workflow||route.canonicalId!==`citizenwallet.${route.platform}.release`
-  ||action&& (action.canonicalId!==route.canonicalId||action.platform!==route.platform
-   ||action.productId!=='citizenwallet'||action.flow!=='release'||action.authorizationLevel!==2))
+  )
   throw Error('公民钱包自动化目标或授权动作不匹配');
  return workflow;
 }
-async function automationAccess(route,host,actionId,task){
- if(!host?.security)throw Error('缺少自动化短期授权宿主');
- const payload={repository:automationRepository,purpose:'workflow',action_id:actionId,platform:route.platform};
- if(task){payload.run_id=task.id;payload.recovery_run_id=task.id;}
- const value=await host.security('github.repository.token',{
-  payload_base64:Buffer.from(JSON.stringify(payload)).toString('base64')});
- const token=Buffer.from(value?.values?.['repository-main:TOKEN']||'','base64').toString('utf8');
- const expiry=Number(Buffer.from(value?.values?.['repository-main:EXPIRES_AT']||'','base64').toString('utf8'));
- if(value?.ok!==true||!/^ghs_[^\s\x00-\x1f\x7f]{1,2044}$/u.test(token)
-  ||!Number.isSafeInteger(expiry)||expiry<=Date.now()/1000)throw Error('公民钱包 GitHub 短期授权无效');
- return token;
-}
+
 async function automationRequest(path,token,{method='GET',body}={}){
  if(!/^actions\/(?:workflows\/(?:ios|android)\.yml\/dispatches|runs\/[1-9]\d*(?:\/(?:jobs(?:\?per_page=100&page=[1-9]\d*)?|cancel|force-cancel))?)$/u.test(path))
   throw Error('公民钱包 GitHub 请求目标无效');
@@ -5788,7 +5656,7 @@ function automationCheckedRun(run,route,expected){
   throw Error('公民钱包 GitHub Run 身份不符');
  return run;
 }
-// 同一产品入口可脱离控制台运行；调用方自行提供已获准的短期令牌。
+// 本产品独立拥有此实现，通过自身公开接口执行。
 export async function dispatchAutomation(platform,token,{accepted,fetchImpl=automationTransport.getStore()?.fetchImpl??fetch}={}){
  const route={repository:'citizenwallet',product:'citizenwallet',platform,workflow:automationWorkflows[platform],canonicalId:`citizenwallet.${platform}.release`};
  const workflow=automationRoute(route);
@@ -5857,24 +5725,9 @@ async function automationReadLogs(runId,token){
  for await(const part of download.body){size+=part.length;if(size>32*1024*1024)throw Error('GitHub 日志下载超限');parts.push(part);}
  return automationLogArchive(Buffer.concat(parts));
 }
-const automationObservers=new WeakSet();
-const automationReconnects=new WeakSet();
-function automationScheduleReconnect(task,route,host){
- if(!task.active||automationReconnects.has(task))return;
- automationReconnects.add(task);
- const timer=setTimeout(async()=>{
-  automationReconnects.delete(task);
-  if(!task.active||!task.recovered)return;
-  try{
-   // 控制台回到所属产品请求上下文领取恢复授权；独立宿主显式声明模式后才直调。
-   if(typeof host.recoverTask==='function')await host.recoverTask(task);
-   else if(host.mode==='independent')await recoverAutomation(task,route,host);
-   else throw Error('自动化恢复宿主入口缺失');
-  }catch(error){
-   if(task.active){host.report(task,'原 Run 重新连接失败：'+error.message);automationScheduleReconnect(task,route,host);}
-  }
- },120000);timer.unref?.();
-}
+
+
+
 async function retainCompletedAutomationRun(run,route,token,{fetchImpl=automationTransport.getStore()?.fetchImpl??fetch}={}){
  if(run.status!=='completed'||!['success','failure','cancelled','timed_out','action_required','neutral','skipped'].includes(run.conclusion))
   throw Error('公民钱包终态 Run 清理身份无效');
@@ -5902,116 +5755,10 @@ async function retainCompletedAutomationRun(run,route,token,{fetchImpl=automatio
  await verifyRunsDeleted(route.platform,stale,token,fetchImpl);
  return {platform:route.platform,state,retained:run.id,deleted:stale.map(value=>value.id)};
 }
-async function automationObserve(task,route,host,token){
- if(automationObservers.has(task))return;automationObservers.add(task);
- let previous='';const jobStates=new Map();
- try{while(task.active){
-  const run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
-  if(task.sourceSHA&&task.sourceSHA!==run.head_sha)throw Error('公民钱包 Run 提交身份变化');
-  Object.assign(task,{sourceSHA:run.head_sha,githubRunNumber:run.run_number,githubRunAttempt:run.run_attempt,
-   githubRemoteStatus:run.status});host.changed(task);
-  const status=run.status==='completed'?(run.conclusion==='success'?'成功':'失败'):run.status;
-  if(status!==previous){host.report(task,'GitHub：'+status);previous=status;}
-  for(const job of await automationJobs(run.id,token)){
-   const state=job.status+':'+job.conclusion;
-   if(jobStates.get(job.id)!==state){jobStates.set(job.id,state);
-    host.report(task,automationSafeText(job.name,token)+'：'+(job.conclusion||job.status));}
-  }
-  if(run.status==='completed'){
-   try{for(const file of await automationReadLogs(run.id,token)){
-    host.report(task,'GitHub 日志：'+automationSafeText(file.name,token));
-    for(const line of file.text.split(/\r?\n/u))if(line)host.report(task,automationSafeText(line,token));
-   }}catch{host.report(task,'GitHub 终态已确认；日志下载未完成，可从 Run 链接查看');}
-   try{const retention=await retainCompletedAutomationRun(run,route,token);
-    host.report(task,'本平台同结果旧 Run 清理成功：'+retention.deleted.length+' 条');}
-   catch(error){task.recovered=true;host.report(task,'本平台同结果旧 Run 清理失败，保持原任务待恢复：'+automationSafeText(error.message,token));
-    host.changed(task);automationScheduleReconnect(task,route,host);return;}
-   await host.finish(task,task.cancelRequested||run.conclusion!=='success'?1:0,
-    task.cancelRequested?'任务已取消；塔塔自动化终态：'+run.conclusion:
-     run.conclusion==='success'?'塔塔自动化成功':'塔塔自动化失败：'+run.conclusion);
-   await host.refresh?.(route.repository,host.security);return;
-  }
-  await (automationTransport.getStore()?.pause?.()??new Promise(resolve=>setTimeout(resolve,5000)));
- }}catch(error){if(task.active){task.recovered=true;host.report(task,'公民钱包原 Run 观察中断：'+error.message);host.changed(task);automationScheduleReconnect(task,route,host);}}
- finally{automationObservers.delete(task);}
-}
-async function automationCancel(task,route,host){
- if(task.remoteCancelOperation)return task.remoteCancelOperation;
- const operation=(async()=>{
-  automationRoute(route);if(!task.active||task.repository!==route.repository||task.platform!==route.platform)throw Error('公民钱包取消目标不匹配');
-  task.cancelRequested=true;host.changed(task);
-  if(!task.githubRunId)return {id:task.id,closed:true};
-  const token=await automationAccess(route,host,task.actionId,task);
-  let run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
-  if(task.sourceSHA&&run.head_sha!==task.sourceSHA)throw Error('公民钱包取消提交身份不符');
-  if(run.status!=='completed')await automationRequest(`actions/runs/${task.githubRunId}/cancel`,token,{method:'POST'});
-  for(let index=0;index<60&&run.status!=='completed';index++){
-   await (automationTransport.getStore()?.pause?.()??new Promise(resolve=>setTimeout(resolve,5000)));run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
-  }
-  if(run.status!=='completed'){
-   await automationRequest(`actions/runs/${task.githubRunId}/force-cancel`,token,{method:'POST'});
-   for(let index=0;index<60&&run.status!=='completed';index++){
-    await (automationTransport.getStore()?.pause?.()??new Promise(resolve=>setTimeout(resolve,5000)));run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
-   }
-  }
-  if(run.status!=='completed')throw Error('公民钱包远端取消未到终态');
-  try{const retention=await retainCompletedAutomationRun(run,route,token);
-   host.report(task,'本平台同结果旧 Run 清理成功：'+retention.deleted.length+' 条');}
-  catch(error){throw Error('本平台同结果旧 Run 清理失败：'+automationSafeText(error.message,token));}
-  if(task.active)await host.finish(task,1,'任务已取消；塔塔自动化终态：'+run.conclusion);
-  return {id:task.id,closed:true};
- })().catch(error=>{if(task.active){task.recovered=true;host.report(task,'原 Run 取消待恢复：'+error.message);host.changed(task);automationScheduleReconnect(task,route,host);}throw error;});task.remoteCancelOperation=operation;
- void operation.finally(()=>{if(task.remoteCancelOperation===operation)delete task.remoteCancelOperation;}).catch(()=>{});
- return operation;
-}
-export async function startAutomation(route,action,host){
- automationRoute(route,action);
- const existing=host.listTasks().find(task=>task.active&&task.recovered&&task.githubRunId
-  &&task.repository===route.repository&&task.platform===route.platform);
- if(existing)return recoverAutomation(existing,route,host);
- if(host.listTasks().some(task=>task.active&&task.repository===route.repository&&task.platform===route.platform))
-  throw Error('同平台已有活动自动化任务');
- const token=await automationAccess(route,host,action.id);
- const task=host.createTask({moduleFile:'citizenwallet.mjs',canonicalId:route.canonicalId,actionId:action.id,
-  title:route.title,moduleId:'citizenwallet'});
- Object.assign(task,{repository:route.repository,productId:route.product,platform:route.platform,
-  mode:'release',flow:'release',security:host.security,githubRepository:automationRepository,
-  githubWorkflow:route.workflow});
- task.cancel=()=>automationCancel(task,route,host);task.secrets.push(token);host.created(task);
- try{
-  // 产品计算平台候选版本；派发回执先持久化 Run ID，回读中断只恢复原 Run。
-  const {run,version}=await dispatchAutomation(route.platform,token,{accepted:value=>{
-   Object.assign(task,{githubRunId:value.workflow_run_id,githubRunUrl:value.html_url,automationVersion:value.version});host.changed(task);
-  }});
-  Object.assign(task,{sourceSHA:run.head_sha,githubRunNumber:run.run_number,githubRunAttempt:run.run_attempt,
-   githubRemoteStatus:run.status});host.changed(task);host.report(task,'GitHub 已接收：'+run.html_url);
-  if(task.cancelRequested)void automationCancel(task,route,host);
-  else void automationObserve(task,route,host,token);
- }catch(error){if(task.githubRunId){task.recovered=true;host.report(task,'原 Run 回读中断：'+error.message);host.changed(task);automationScheduleReconnect(task,route,host);}
-  else await host.finish(task,1,error.message);}
- return {id:task.id};
-}
-export async function recoverAutomation(task,route,host){
- automationRoute(route);
- if(!task?.active||task.mode!=='release'||task.canonicalId!==route.canonicalId
-  ||task.repository!==route.repository||task.platform!==route.platform
-  ||task.githubRepository!==automationRepository||task.githubWorkflow!==route.workflow
-  ||typeof task.actionId!=='string'||!task.actionId
-  ||!Number.isSafeInteger(task.githubRunId)||task.githubRunId<1
-  ||task.sourceSHA!==undefined&&!/^[0-9a-f]{40}$/u.test(task.sourceSHA))throw Error('公民钱包原 Run 恢复身份无效');
- // 先恢复原任务的取消入口；读取授权失败时仍可在用户再次取消时请求新的关闭授权。
- task.security=host.security;task.cancel=()=>automationCancel(task,route,host);
- task.recovered=true;host.changed(task);
- const token=await automationAccess(route,host,task.actionId,task);
- const run=automationCheckedRun(await automationRequest(`actions/runs/${task.githubRunId}`,token),route,task.githubRunId);
- if(task.sourceSHA&&task.sourceSHA!==run.head_sha)throw Error('原 Run 提交身份不符');
- Object.assign(task,{sourceSHA:run.head_sha,githubRunNumber:run.run_number,
-  githubRunAttempt:run.run_attempt,githubRemoteStatus:run.status});
- task.secrets.push(token);task.recovered=false;host.changed(task);
- if(task.cancelRequested)void automationCancel(task,route,host);
- else void automationObserve(task,route,host,token);
- return {id:task.id};
-}
+
+
+
+
 
 // 本产品自动化合成回归：所有网络与授权均由夹具替代，不触发真实流程。
 if(inlineTestEntry){
@@ -6025,13 +5772,8 @@ if(inlineTestEntry){
   repository:{full_name:automationRepository},status,conclusion,display_title:'公民钱包-v0.0.1',
   html_url:`https://github.com/${automationRepository}/actions/runs/${runId}`});
  const json=value=>Response.json(value),empty=status=>new Response(null,{status});
- const security=async()=>({ok:true,values:{'repository-main:TOKEN':Buffer.from(token).toString('base64'),
-  'repository-main:EXPIRES_AT':Buffer.from(String(Math.floor(Date.now()/1000)+3600)).toString('base64')}});
- const makeHost=()=>{let resolve;const finished=new Promise(done=>{resolve=done;}),tasks=[];
-  const host={security,mode:'test',createTask:value=>{const task={...value,id:'123456789',active:true,secrets:[]};tasks.push(task);return task;},
-   listTasks:()=>tasks,created:()=>{},changed:()=>{},report:()=>{},
-   finish:async(task,code,message)=>{task.active=false;task.exitCode=code;task.result=message;resolve({code,message});}};
-  return {host,tasks,finished};};
+
+
  test('双端版本各自递增，首次、失败、活动与错误输入严格隔离',async()=>{
   const previous={...run(),id:71,run_number:6,html_url:`https://github.com/${automationRepository}/actions/runs/71`,
    display_title:'公民钱包-v0.0.3'};
@@ -6080,87 +5822,15 @@ if(inlineTestEntry){
    new URL(url).pathname.endsWith('/actions/workflows/ios.yml/runs')?json({workflow_runs:[rerun]}):new Response(null,{status:404})}),
    /旧 Run attempt 回读失败/u);
  });
- test('citizenwallet 自动化派发成功与不确定回执禁止重发',async()=>{
-  let dispatches=0;
-  const accepted=async(url,init)=>{const path=new URL(url).pathname;
-   if(path.endsWith('/actions/workflows/'+workflow+'/runs'))
-    return json({workflow_runs:new URL(url).searchParams.get('event')==='push'?[]:dispatches?[run()]:[]});
-   if(path.endsWith('/dispatches')){dispatches++;return json({workflow_run_id:runId,html_url:run().html_url});}
-   if(path.endsWith(`/runs/${runId}`))return json(run());
-   if(path.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
-    {name:'cleanup',status:'completed',conclusion:'success'}]});
-   if(path.endsWith('/logs'))return empty(404);
-   throw Error('未登记网络请求：'+path);
-  };
-  const fixture=makeHost();
-  await automationTransport.run({fetchImpl:accepted},()=>startAutomation(route,action,fixture.host));
-  assert.deepEqual(await fixture.finished,{code:0,message:'塔塔自动化成功'});
-  assert.equal(dispatches,1);assert.equal(fixture.tasks[0].githubRunId,runId);
-  const ambiguous=makeHost();dispatches=0;
-  await automationTransport.run({fetchImpl:async url=>{
-   if(new URL(url).pathname.endsWith('/runs'))return json({workflow_runs:[]});
-   dispatches++;return empty(204);}},
-   ()=>startAutomation(route,action,ambiguous.host));
-  assert.equal((await ambiguous.finished).code,1);assert.equal(dispatches,1);
-  assert.equal(ambiguous.tasks[0].githubRunId,undefined);
- });
+
  test('citizenwallet 自动化拒绝错误仓库、平台和提交身份',()=>{
   assert.throws(()=>automationRoute({...route,repository:'other'}),/目标/u);
   assert.throws(()=>automationRoute({...route,platform:'other'}),/目标/u);
   assert.throws(()=>automationCheckedRun({...run(),head_sha:'bad'},route,runId),/身份/u);
   assert.throws(()=>automationCheckedRun({...run(),repository:{full_name:'other/repo'}},route,runId),/身份/u);
  });
- test('citizenwallet 自动化观察成功和失败终态',async()=>{
-  for(const conclusion of ['success','failure']){
-   const fixture=makeHost();const task=fixture.host.createTask({});
-   Object.assign(task,{githubRunId:runId,sourceSHA:sha});
-   const fetchImpl=async(url)=>{const path=new URL(url).pathname;
-    if(path.endsWith('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
-     new URL(url).searchParams.get('event')==='push'?[]:[run(conclusion)]});
-    if(path.endsWith(`/runs/${runId}`))return json(run(conclusion));
-    if(path.endsWith('/jobs'))return json({jobs:[{id:3,name:'release',status:'completed',conclusion},
-     {id:4,name:'cleanup',status:'completed',conclusion}]});
-    if(path.endsWith('/logs'))return empty(404);
-    throw Error('未登记观察请求');
-   };
-   await automationTransport.run({fetchImpl},()=>automationObserve(task,route,fixture.host,token));
-   assert.equal((await fixture.finished).code,conclusion==='success'?0:1);
-  }
- });
- test('citizenwallet 自动化只取消原 Run 并恢复同一 Run',async()=>{
-  const fixture=makeHost();const task=fixture.host.createTask({canonicalId:route.canonicalId,actionId:action.id});
-  Object.assign(task,{repository:route.repository,productId:route.product,platform,mode:'release',flow:'release',
-   githubRepository:automationRepository,githubWorkflow:workflow,githubRunId:runId,sourceSHA:sha});
-  let reads=0,cancels=0;
-  const fetchImpl=async(url,init)=>{const path=new URL(url).pathname;
-   if(path.endsWith('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
-    new URL(url).searchParams.get('event')==='push'?[]:[run('cancelled')]});
-   if(path.endsWith('/cancel')){cancels++;return empty(202);}
-   if(path.endsWith(`/runs/${runId}`))return json(run(reads++===0?null:'cancelled',reads===1?'in_progress':'completed'));
-   if(path.endsWith('/jobs'))return json({jobs:[]});
-   if(path.endsWith('/logs'))return empty(404);
-   throw Error('未登记取消请求');
-  };
-  await automationTransport.run({fetchImpl,pause:async()=>{}},()=>automationCancel(task,route,fixture.host));
-  assert.equal(cancels,1);assert.equal((await fixture.finished).code,1);
-  const recovered=makeHost();const old=recovered.host.createTask({canonicalId:route.canonicalId,actionId:action.id});
-  Object.assign(old,{repository:route.repository,productId:route.product,platform,mode:'release',flow:'release',
-   githubRepository:automationRepository,githubWorkflow:workflow,githubRunId:runId,sourceSHA:sha,recovered:true});
-  let recoveryDispatches=0;
-  const recoveryFetch=async(url,init)=>{const path=new URL(url).pathname;
-   if(path.endsWith('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
-    new URL(url).searchParams.get('event')==='push'?[]:[run()]});
-   if(path.endsWith('/dispatches')){recoveryDispatches++;throw Error('恢复不得派发');}
-   if(path.endsWith(`/runs/${runId}`))return json(run());
-   if(path.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
-    {name:'cleanup',status:'completed',conclusion:'success'}]});
-   if(path.endsWith('/logs'))return empty(404);
-   throw Error('未登记恢复请求');
-  };
-  await automationTransport.run({fetchImpl:recoveryFetch},()=>recoverAutomation(old,route,recovered.host));
-  assert.equal((await recovered.finished).code,0);assert.equal(recoveryDispatches,0);
-  assert.equal(old.githubRunId,runId);
- });
+
+
  test('Run 最终完成后只清同平台同结果旧记录，失败删除明确报错',async()=>{
   const old={...run(),id:88,run_number:6,html_url:`https://github.com/${automationRepository}/actions/runs/88`};
   const rows=[old,run()],deleted=[];
@@ -6195,34 +5865,75 @@ if(inlineTestEntry){
    assert.equal(attempted,0);
   }
  });
- test('终态清理失败保留观察与取消任务以恢复原 Run',async()=>{
-  const old={...run(),id:88,run_number:6,html_url:`https://github.com/${automationRepository}/actions/runs/88`};
-  const fetchImpl=async(url,options={})=>{const address=new URL(url),path=address.pathname;
-   if(options.method==='DELETE')return empty(403);
-   if(path.endsWith(`/runs/${runId}`))return json(run());
-   if(path.endsWith('/jobs'))return json({jobs:[{name:'release',status:'completed',conclusion:'success'},
-    {name:'cleanup',status:'completed',conclusion:'success'}]});
-   if(path.endsWith('/logs'))return empty(404);
-   if(path.includes('/actions/workflows/'))return json({workflow_runs:address.searchParams.get('event')==='push'?[]:[old,run()]});
-   throw Error('未登记终态恢复请求');
-  };
-  const observed=makeHost(),task=observed.host.createTask({actionId:action.id});
-  Object.assign(task,{githubRunId:runId,sourceSHA:sha,repository:route.repository,platform});
-  await automationTransport.run({fetchImpl},()=>automationObserve(task,route,observed.host,token));
-  assert.equal(task.active,true);assert.equal(task.recovered,true);
-  const cancelling=makeHost(),cancelTask=cancelling.host.createTask({actionId:action.id});
-  Object.assign(cancelTask,{githubRunId:runId,sourceSHA:sha,repository:route.repository,platform});
-  await assert.rejects(automationTransport.run({fetchImpl},()=>automationCancel(cancelTask,route,cancelling.host)),/清理失败/u);
-  assert.equal(cancelTask.active,true);assert.equal(cancelTask.recovered,true);
- });
- test('citizenwallet 过期令牌保留原 Run 的取消入口',async()=>{
-  const fixture=makeHost();const task=fixture.host.createTask({canonicalId:route.canonicalId,actionId:action.id});
-  Object.assign(task,{repository:route.repository,productId:route.product,platform,mode:'release',flow:'release',
-   githubRepository:automationRepository,githubWorkflow:workflow,githubRunId:runId,sourceSHA:sha,recovered:true});
-  fixture.host.security=async()=>({ok:true,values:{'repository-main:TOKEN':Buffer.from(token).toString('base64'),
-   'repository-main:EXPIRES_AT':Buffer.from('1').toString('base64')}});
-  await assert.rejects(()=>recoverAutomation(task,route,fixture.host),/授权/u);
-  assert.equal(task.githubRunId,runId);assert.equal(task.recovered,true);
-  assert.equal(typeof task.cancel,'function');
+
+
+}
+
+// 外部调用方使用普通参数和返回值；此公开接口不接收任务宿主。
+export const automationClient=Object.freeze({automationWorkflows,automationRepository,automationTransport,automationRoute,automationRequest,automationCheckedRun,dispatchAutomation,automationSafeText,automationJobs,automationLogArchive,automationReadLogs,retainCompletedAutomationRun});
+
+// 合成回归只在本文件作为测试入口时注册；普通导入不要求调度器、其它仓库或外部服务。
+if(process.env.NODE_TEST_CONTEXT&&process.argv.length===2&&process.argv[1]===import.meta.filename){
+ const {test}=await import('node:test'),{default:assert}=await import('node:assert/strict');
+ test('独立自动化接口不接收任务宿主，准确派发与错误回执只请求一次',async()=>{
+  const api=automationClient,platform=Object.keys(api.automationWorkflows)[0];
+  const workflow=api.automationWorkflows[platform],repository=api.automationRepository;
+  // 版本来源沿用钱包自己的成功Run及release/cleanup证明；无历史时从0.0.1开始。
+  for(const history of ['empty','success']){
+   const version=history==='empty'?'0.0.1':'0.0.8';
+   for(const mode of ['success','ambiguous','wrong','version','history']){
+    let dispatches=0,historyReads=0,jobReads=0,runReads=0;
+    const accepted=[];
+    const run={id:731,run_number:8,run_attempt:1,path:'.github/workflows/'+workflow,
+     event:'workflow_dispatch',head_branch:'main',head_sha:'a'.repeat(40),
+     repository:{full_name:repository},status:'completed',conclusion:'success',
+     html_url:'https://github.com/'+repository+'/actions/runs/731',
+     display_title:'公民钱包-v'+version};
+    const prior={...run,id:700,run_number:7,display_title:'公民钱包-v0.0.7',
+     html_url:'https://github.com/'+repository+'/actions/runs/700'};
+    const fetchImpl=async(url,options)=>{
+     const address=new URL(url),base='/repos/'+repository+'/actions/';
+     assert.equal(address.origin,'https://api.github.com');
+     if(address.pathname===base+'workflows/'+workflow+'/runs'){
+      historyReads++;assert.equal(options.method??'GET','GET');
+      assert.equal(address.searchParams.get('branch'),'main');
+      assert.equal(address.searchParams.get('event'),'workflow_dispatch');
+      assert.equal(address.searchParams.get('page'),'1');
+      return mode==='history'?new Response(null,{status:403})
+       :Response.json({workflow_runs:history==='empty'?[]:[prior]});
+     }
+     if(address.pathname===base+'runs/700/jobs'){
+      jobReads++;assert.equal(history,'success');assert.equal(options.method??'GET','GET');
+      return Response.json({jobs:['release','cleanup'].map(name=>({name,status:'completed',conclusion:'success'}))});
+     }
+     if(address.pathname===base+'workflows/'+workflow+'/dispatches'){
+      dispatches++;assert.equal(options.method,'POST');
+      assert.deepEqual(JSON.parse(options.body),{ref:'main',inputs:{version}});
+      return mode==='ambiguous'?new Response(null,{status:204})
+       :Response.json({workflow_run_id:731,html_url:run.html_url});
+     }
+     assert.equal(address.pathname,base+'runs/731');
+     runReads++;assert.equal(options.method??'GET','GET');
+     assert.equal(accepted.length,1);
+     return Response.json(mode==='wrong'?{...run,head_sha:'invalid'}
+      :mode==='version'?{...run,display_title:'公民钱包-v0.0.999'}:run);
+    };
+    const invoke=()=>api.automationTransport.run({fetchImpl},()=>api.dispatchAutomation(platform,'fixture',{
+     fetchImpl,accepted:value=>accepted.push(value)}));
+    if(mode==='success'){
+     const result=await invoke();
+     assert.deepEqual(result,{run,version});
+    }else await assert.rejects(invoke,
+     mode==='history'?/GitHub清理分页读取失败/u
+      :mode==='ambiguous'?/未返回准确 Run/u
+      :mode==='version'?/候选版本回读不符/u:/Run 身份不符/u);
+    assert.equal(historyReads,1);
+    assert.equal(jobReads,history==='success'&&mode!=='history'?1:0);
+    assert.equal(dispatches,mode==='history'?0:1);
+    assert.equal(runReads,['history','ambiguous'].includes(mode)?0:1);
+    assert.deepEqual(accepted,['history','ambiguous'].includes(mode)?[]
+     :[{workflow_run_id:731,html_url:run.html_url,version}]);
+   }
+  }
  });
 }

@@ -1,11 +1,35 @@
-# CitizenWallet
+<div align="center">
+  <img src="icons/citizen-logo.png" width="88" alt="公民钱包图标" />
+  <h1>公民钱包</h1>
+  <p>自己的钱包，自己做主。</p>
+</div>
 
-## 编译、自动化与渠道发布
+<div align="center">
+  <picture>
+    <img src="icons/story.gif" width="1100" alt="产品体验示意动画：管好钱包，读清交易或登录内容，再由自己确认。" />
+  </picture>
+</div>
 
-本机编译继续使用 `scripts/build.mjs` 的设备安装流程，在本机签名、验真并回读设备。GitHub 的 `ios.yml`、`android.yml` 分别在自己的 Runner 调用同一产品编译文件，在 Runner 内使用 Actions Secrets 正式签名，再创建并回读本平台 GitHub Release。两端工作目录、任务和结果独立。
+## 钱包在手，决定由你
 
-GitHub iOS 需要 `IOS_KEY`、`WALLET_PROFILE`；Android 需要 `APP_KEY`。缺少材料时流程失败，不把未签名包发布为正式版。`scripts/publish.mjs` 只核对已完成的正式 Release；App Store、Google Play 等渠道上传需在渠道和授权配置确定后接入。
+公民钱包是一款让你自己掌握账户与重要决定的手机钱包。创建或找回钱包，把账户放在一起管理；需要确认交易或登录时，先看清，再决定。我们希望每个人都能安心地说“这是我自己的选择”。
 
-公民钱包，面向离线冷钱包管理与二维码交易签名。
+## 从打开钱包到完成确认
 
-本仓库独立自有代码采用 [MIT](LICENSE) 许可证；第三方代码、依赖及其衍生修改遵循各自原许可证。
+<table>
+  <tr>
+    <td align="center" width="33%"><strong>🌱 管好钱包</strong><br />创建新钱包，或用备份找回；多个账户放在一起，也能出示自己的账户码。</td>
+    <td align="center" width="33%"><strong>👀 看清再决定</strong><br />扫一扫交易或登录内容，先看懂中文说明，再决定要不要继续。</td>
+    <td align="center" width="33%"><strong>👍 亲自确认</strong><br />在自己的手机上点头，再向另一台设备出示结果码；钱包手机可以不联网。</td>
+  </tr>
+</table>
+
+## 放心，是因为每一步都看得见
+
+钱包手机可以不联网，双方通过二维码传递内容与结果，钱包里的秘密不必交给另一台设备。过期、无法识别或不属于这个钱包的内容会被拦下。重要信息平时藏好，遇到截屏、录屏或保护失效时会重新隐藏。
+
+> 请妥善保管助记词，它能帮你找回钱包。
+
+## 许可
+
+本仓库自有代码采用 [MIT 许可证](LICENSE)；第三方代码遵循各自的许可证。
