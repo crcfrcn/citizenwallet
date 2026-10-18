@@ -269,7 +269,7 @@ Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具
 
 ## Release 全量构建（第 7.4 步）
 
-GitHub Actions 的静态 Workflow 名称为`公民钱包`，本轮 Run 名与正式 Release 展示标题均为`公民钱包-v<本平台候选版本>`。iOS、Android 各自读取本平台上一条最终成功的手动 Run 及其 release/cleanup Job 回执计算下一候选版本；没有成功记录时为`v0.0.1`，此后每次成功末位加一，失败或取消不推进。安全身份只按本仓、`main`、准确的`GITHUB_WORKFLOW_REF`、Run ID 和提交核验，不从可见标题猜平台；GitHub 自带 Run 编号不作为软件版本。
+GitHub Actions 的固定Workflow名称为`公民钱包·平台`，本轮Run、双Job、Tag、Release和正式包展示名均为`公民钱包·平台·v<本平台候选版本>`。iOS、Android各自读取本平台上一条最终成功的手动Run、双Job及正式Release证明计算下一候选版本；新版本序列没有成功记录时为`v1.0.0`，此后每次成功补丁号加一，失败或取消不推进。安全身份按本仓、`main`、准确的`GITHUB_WORKFLOW_REF`、Run ID和提交核验，不从可见标题猜平台；GitHub自带Run编号不作为软件版本。
 
 正式自动化按平台在独立 GitHub Runner 执行产品测试、全量原生构建、签名、正式包验真、Tag/Release 创建及回读；Android 在同一 Gradle 任务图执行 `assembleRelease` 与 `bundleRelease`，APK、AAB 写入本轮产品 `BUILD_DIR`，并使用 GitHub Actions `APP_KEY` Secret 签名；iOS 使用对应签名 Secret 生成和验收 IPA。本机 Build 仍按本机签名流程运行。本机与 GitHub Runner 的 Cargo 编译目标目录按平台落入 `target/cache/cargo/ios` 或 `target/cache/cargo/android`，不属于本轮 `target/build/<平台>` 临时现场；两者缓存互相隔离。CI 构建明确交付本平台 `CARGO_TARGET_DIR`，并在成功前验明缓存内有宿主库和本平台目标库；空缓存不能作为编译增量保存。GitHub workflow 按平台恢复并保存唯一 Run 键缓存，末尾清理 Job 独立裁剪该平台旧 Cargo cache。创建 Release 前，工作流调用本仓 `ci-create-release-tag` 建立并回读指向本次 `GITHUB_SHA` 的轻量 tag；草稿身份、tag、提交、资产按 Release ID 回读，发布后再次按 ID 验收。两个平台展示标题使用同一格式，正式 Tag 仍各自包含平台、Run ID 和 attempt，不能把展示标题当作 Tag。
 
@@ -546,7 +546,7 @@ Apple验真器测试由同一锁定Xcode的swiftc编译实际XCTest Bundle，使
 
 ## 工程准备与供给工具入口闭合（2026-10-08）
 
-本轮双端真实流程通过工程副本创建后，iOS实际命中Xcode附带Python与已供给Python库目录混用，Android实际命中资源解析前缺local.properties。产品完整环境优先使用自身声明的语言工具，Xcode附带目录仅在其后使用；HOME和USERPROFILE归准确任务工作根。Android prepare在同一任务工程中写入验真SDK路径和原始pubspec版本，使用已供给Pub原件离线生成工程配置与插件清单，之后由同一Gradle按产品原仓库解析Maven闭包并使用其原生缓存。解析子进程继承同一产品任务工程、已供给工具和配置，不恢复宿主PATH或另选源码工程。
+本轮双端真实流程通过工程副本创建后，iOS实际命中Xcode附带Python与已供给Python库目录混用，Android实际命中资源解析前缺local.properties。产品完整环境优先使用自身声明的语言工具，Xcode附带目录仅在其后使用；HOME和USERPROFILE归准确任务工作根。Android prepare在同一任务工程中写入验真SDK路径和本平台成功自动化推导的候选版本，不读取pubspec版本作为安装包版本；使用已供给Pub原件离线生成工程配置与插件清单，之后由同一Gradle按产品原仓库解析Maven闭包并使用其原生缓存。解析子进程继承同一产品任务工程、已供给工具和配置，不恢复宿主PATH或另选源码工程。
 
 本机Shell与准备入口同样只允许本产品target/build/<平台>或target/test工作根及当前source-view映射；可写工程、缓存、产物不得经过目录链接或属于其它任务。未交付工程的准备入口只在本轮target建立独立文件副本并排除整棵target及原生成文件；原源码不能通过副本链接被改写。Android正式编译从该副本android根执行，并消费prepare生成的同一local.properties，不切回原源码目录。工具版本、来源和原始依赖锁不变，显式离线缺件和真实执行错误仍立即失败。候选回归不代表双端真实编译、签名安装及回读已经完成。
 
@@ -621,7 +621,7 @@ Android签名入口按真实混合资源声明选择唯一Build Tools SDK组件�
 citizenwallet/
 ├── scripts/
 │   ├── build.mjs                 # 编译、资源、固定工作根与公开声明
-│   └── publish.mjs               # 已完成GitHub Release的独立分发核验
+│   └── publish.mjs               # 发布渠道原始应用身份读取
 ├── icons/
 │   └── generate.mjs              # 图标派生；原始图标仍在同目录
 └── .github/
@@ -652,31 +652,31 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 
 本产品完整本机流程由scripts/build.mjs实现，声明、资源准备、适用测试、编译及验收均归本仓。外部调度只调用同一公开完整入口；依赖由产品按原锁自行准备，既有工具入口可显式复用，任务现场及资源工具后代由产品确认退出后收尾。
 
-公开编译组件只有本文件中的正文；确有既有消费者的原路径只转交参数或公开接口，不保存编译命令。本机编译不生成第二份脚本。公开SDK依赖按本仓原锁消费，不读取兄弟仓本机检出或调度兄弟仓任务。GitHub流程不属于本次修改范围。
+公开编译组件只有本文件中的正文；确有既有消费者的原路径只转交参数或公开接口，不保存编译命令。本机编译不生成第二份脚本。公开SDK依赖按本仓原锁消费，不读取兄弟仓本机检出或调度兄弟仓任务。正式编译包的GitHub公开回读和逐件验真同归本文件；`scripts/publish.mjs`只管理发布渠道的原始应用身份。
 
 ## GitHub自动化
 
-本仓自动化只在GitHub的main源码上执行；控制台按公民钱包产品接入声明分别以“塔塔自动化 · iOS”和“塔塔自动化 · Android”按钮派发准确平台 Workflow。两份平台 Workflow 互不调用，各自包含产品测试、单平台原生编译、正式签名、产物验真及该平台 Release。
+本仓自动化只在GitHub的main源码上执行；控制台按公民钱包产品接入声明分别以“塔塔自动化·iOS”和“塔塔自动化·Android”按钮派发准确平台 Workflow。两份平台 Workflow 互不调用，各自包含产品测试、单平台原生编译、正式签名、产物验真及该平台 Release。控制台任务名为“公民钱包·流程·平台”；固定Workflow名为“公民钱包·平台”，每次Run、双Job、Tag、Release和正式资产名为“公民钱包·平台·vX.Y.Z”。
 
 - `.github/workflows/ios.yml` 与 `.github/workflows/android.yml`。
 - 平台产品构建、Tag/Release 验真及清理合同统一由 `scripts/build.mjs` 实现，控制台不复制产品逻辑。
 
-每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行，继续核验并裁剪本平台 Cargo 缓存、旧正式 Release/Tag 及早于最近成功和失败回执的陈旧 Run；本轮 Run 仍在活动时，上一条成功和上一条失败 Run 均保留。iOS、Android 各自只读取本仓 `main` 上准确平台 Workflow 的手动 Run，按 Run ID、attempt、提交、路径、仓库和终态核验。当前 Run 最终成为 `completed/success` 或非成功终态后，产品自己的自动化观察入口才删除本平台同结果类别的旧 Run；清理失败时当前产品任务保持活动并重连原 Run 重试，不能报告清理成功，也不能重新派发。另一平台、另一结果类别的最新 Run 始终受保护。正式 Release 仍须先验明本轮发布证明、Tag、资产和标题，才删除同平台旧 Release；发布失败时不清旧正式版。旧成功 Run 的准确终态与展示版本在新 Run 最终收口前保留，因此失败或取消不使下一候选版本回退。
+每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行，核验并裁剪本平台增量缓存及早于最近成功和失败回执的陈旧 Run；本轮 Run 尚未形成最终结论时，上一条成功和上一条失败 Run 均保留。产品自动化观察入口回读本轮最终Run及双Job后，成功时先确认本轮正式Release、Tag、资产和标题，再删除同平台旧Release/Tag及旧成功Run；失败时只撤销本轮候选Release/Tag，再删除旧失败Run。清理失败时当前产品任务保持活动并重连原Run重试，不能报告成功；另一平台和另一结果类别始终受保护。
 
 所属构建、Tag/Release 与 Run/cache 清理回归位于 `scripts/build.mjs`，覆盖平台隔离、活动Run保护、完整分页、删除失败和缓存保留。控制台镜像只读取 `main` 上手动派发且已完成的对应平台 Run，每个平台的成功/失败各保留最新一条；本机活动任务独立显示。真实 GitHub 自动化与 Release 仍需按授权另行启动。
 
-旧 Release 清理先逐项核对发布证明、资产与存在的 Tag 指向；删除时先移除旧 Tag，再移除其 Release。旧草稿缺 Tag 可以单独删 Release；若任一删除请求失败，cleanup 明确失败，保留当前正式 Release，并使残留旧对象可由下一轮同一平台继续识别与清理。
+旧Release清理先逐项核对发布证明、资产与存在的Tag指向；只有当前Run最终成功才替换旧正式版。失败候选仅按本轮Run、attempt和提交身份删除自己的Release与Tag。删除请求失败会保留原任务待恢复，不能报告记录清理成功。
 
 工具准备复用本产品既有独立配方和已声明入口；依赖准备、原锁、SDK选择、验收及现场清理均归本产品。调用方只传本仓公开参数并消费公开结果，不执行退役的资源服务协议。
 
 本机编译现场由本产品领取和收尾。调度任务编号随本产品领取记录保存；本轮结果消费后，只允许匹配该编号的收尾请求。产品确认自身进程及资源工具后代全部退出后才清场；异常、编号不符或退出未确认时保留现场。控制台只创建自己的任务并调用产品入口；产品自己管理资源和收尾。
 
-软件版本只按本平台上一条最终成功且 release/cleanup Job 均成功的手动 Run 展示版本计算；新 Run 派发前给出候选版本，Runner再核对，首次为0.0.1。失败、取消及同一Run重试不推进软件版本；当前 Run 尚未结束时保留上一成功 Run 作为版本依据，最终成功或失败后由产品自动化入口只清同结果类别的旧 Run。
+软件版本只按本平台上一条最终成功、双Job均成功且有正式Release证明的手动Run计算；新Run派发前给出候选版本，Runner再核对。新版本序列的首次成功为1.0.0，其后每次成功仅增加补丁号；现有0.0.2成功正式版仍是迁移前的旧正式版，直到本平台1.0.0最终成功才删除。失败、取消、本机编译及同一Run重试都不推进版本；本机安装包和Runner正式包使用同一候选版本，不从pubspec.yaml读取自动化版本。
 
 
 ### 当前自动化最后处理
 
-Run 记录和 Cargo cache 是不同对象，分别清理。本机平台缓存位于 `target/cache/cargo/<平台>`；产品资源环境和执行环境共用唯一 `cargoTargetDirectory` 入口。原生 Shell 只在工作根准确为 `target/build/ios` 或 `target/build/android` 时允许 Cargo 使用对应平台固定缓存，其它原生产物和临时目录仍须位于本轮工作根；测试会话使用自身临时 Cargo 目录，链接、跨平台和任意外部路径均拒绝。GitHub cache key 使用平台名与 Run/attempt，末尾 Job 通过 Actions cache API 只保留本仓 `main` 上该平台最新一份。历史 Run 清理不会删除缓存，缓存清理不会改动 Run 结论。清理失败需在对应日志明确失败并令最终 Run 失败；下一次同平台自动化可再次收敛未完成的旧记录。
+Run记录与增量缓存是不同对象，分别清理。本机Cargo缓存位于`target/cache/cargo/<平台>`；Flutter、Gradle和Xcode可复用编译中间结果位于`target/cache/build/<平台>`，均不保存签名材料或安装包。缓存按平台、宿主架构、声明工具及原锁指纹验真；每平台只保留最新一份，失败或过期缓存不冒充新版本。GitHub同一平台Cache对象同时保存这两处路径，key含平台及Run/attempt，末尾Job通过Actions Cache API只保留本仓`main`上本平台最新一份。测试会话使用独立缓存，跨平台、链接及外部路径拒绝。缓存清理失败令最终Run失败，不改变已完成的编译回执；下一次同平台自动化可继续收敛。
 
 
 ### 本仓 GitHub 自动化与塔塔门禁目录
