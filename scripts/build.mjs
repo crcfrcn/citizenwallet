@@ -3424,6 +3424,11 @@ function releaseDisplayTitle(platform,version){
   releaseVersion({CITIZENWALLET_AUTOMATION_VERSION:version});
   return '公民钱包·'+(platform==='ios'?'iOS':'Android')+'·v'+version;
 }
+function releaseAssetName(platform,version,extension){
+ platformContract(platform);releaseVersion({CITIZENWALLET_AUTOMATION_VERSION:version});
+ return 'citizenwallet-'+platform+'-v'+version+extension;
+}
+function releaseAssetLabel(platform,version,extension){return releaseDisplayTitle(platform,version)+extension;}
 function completedRunOrder(left,right){return left.run_number-right.run_number||left.run_attempt-right.run_attempt||left.id-right.id;}
 async function githubPages(url,property,token,fetchImpl){
  const values=[];
@@ -3568,6 +3573,7 @@ export async function ciCleanup(platform,environment=process.env,{fetchImpl=fetc
   ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
   ||!checkedWorkflowDisplay(platform,environment)||!/^[1-9][0-9]*$/u.test(runId||'')
   ||!['success','failure','cancelled','skipped'].includes(upstream)||!token)fail('GitHub清理身份或上游结果无效');
+ const draft=upstream==='success'?null:await reconcileFailedDraft(platform,runId,environment,{fetchImpl,completed:false});
  // 当前 Run 还未形成最终结论；至少保留旧成功和旧失败各一条，终态后再由产品清同结果旧项。
   const cache=await cleanupCargoCaches(platform,token,fetchImpl,{currentKey:'citizenwallet-cargo-'+platform+'-'+runId+'-'+environment.GITHUB_RUN_ATTEMPT,
    requireCurrent:upstream==='success'}),candidate=upstream==='success'?'success':'failure';
@@ -3577,7 +3583,7 @@ export async function ciCleanup(platform,environment=process.env,{fetchImpl=fetc
  const stale=runs.filter(run=>run.id!==latest[cleanupRunState(run)]?.id);
  const remove=async values=>{for(const run of values)await deleteCompletedRun(run,token,fetchImpl);await verifyRunsDeleted(platform,values,token,fetchImpl);};
  await remove(stale);
- return {platform,candidate,cache,runs_deleted:stale.map(run=>run.id)};
+ return {platform,candidate,draft,cache,runs_deleted:stale.map(run=>run.id)};
 }
 
 // Release 展示记录与 Actions Run 分别保留；只识别本仓发布证明，当前正式包确认后才删旧项。
@@ -3604,10 +3610,79 @@ function checkedPlatformRelease(release,platform){
   const rows=release.assets.filter(value=>value?.name===item?.name);
   if(rows.length!==1||!Number.isSafeInteger(item?.size)||item.size<=0
    ||! /^[a-f0-9]{64}$/u.test(item?.sha256??'')||rows[0].size!==item.size
+   ||(item.label!==undefined&&rows[0].label!==item.label)
    ||rows[0].state!=='uploaded'||rows[0].digest!=='sha256:'+item.sha256)
    fail('GitHub Release 资产回读不符');
  }
  return proof;
+}
+// 仅撤销本平台失败 Run 的候选草稿；旧版 GitHub 会把中文上传文件名规整，按扩展名和摘要核实。
+async function reconcileFailedDraft(platform,runId,environment,{fetchImpl=fetch,completed=true}={}){
+ const token=environment.GH_TOKEN||environment.GITHUB_TOKEN,version=releaseVersion(environment),tag=releaseDisplayTitle(platform,version);
+ if(environment.GITHUB_ACTIONS!=='true'||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product
+  ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
+  ||!checkedWorkflowDisplay(platform,environment)||!token||!/^[1-9][0-9]*$/u.test(String(runId)))fail('失败草稿清理身份无效');
+ const headers=GITHUB_API_HEADERS(token),runResponse=await fetchImpl(GITHUB_API+'/actions/runs/'+runId,{redirect:'error',headers});
+ if(!runResponse.ok)fail('失败草稿所属 Run 回读失败');
+ const run=await runResponse.json();
+ if(run.id!==Number(runId)||run.path!=='.github/workflows/'+platform+'.yml'||run.event!=='workflow_dispatch'
+  ||run.head_branch!=='main'||run.repository?.full_name!=='crcfrcn/'+product||run.display_title!==tag
+  ||! /^[a-f0-9]{40}$/u.test(run.head_sha??'')||completed&&(run.status!=='completed'||run.conclusion==='success')
+  ||!completed&&run.status==='completed'&&run.conclusion==='success')fail('失败草稿所属 Run 身份或结果无效');
+ const rows=await githubPages(GITHUB_API+'/releases','',token,fetchImpl);
+ const matches=rows.filter(value=>value?.tag_name===tag);
+ if(matches.length>1)fail('失败草稿 Tag 对应多个 Release');
+ const release=matches[0];
+ if(release){
+  const note=/^<!-- automation:(\{[^\n]*\}) -->$/u.exec(String(release.body??'').trim());
+  let proof;try{proof=note?JSON.parse(note[1]):null;}catch{fail('失败草稿发布证明无效');}
+  const extensions=platform==='ios'?['.ipa','.json']:['.apk','.aab','.json'];
+  if(release.draft!==true||release.immutable===true||release.name!==tag||release.target_commitish!==run.head_sha
+   ||release.prerelease!==false||proof?.schema!==1||proof.repository!=='crcfrcn/'+product
+   ||proof.product_id!==product||proof.platform!==platform||proof.workflow!==run.path
+   ||proof.run_id!==run.id||proof.run_attempt!==run.run_attempt||proof.run_number!==run.run_number
+   ||proof.source_sha!==run.head_sha||proof.version!==version||proof.tag!==tag
+   ||!Array.isArray(proof.assets)||proof.assets.length!==extensions.length||!Array.isArray(release.assets)
+   ||release.assets.length!==extensions.length)fail('失败草稿归属或资产数量无效');
+  for(const extension of extensions){
+   const item=proof.assets.filter(value=>value?.name?.endsWith(extension));
+   const asset=release.assets.filter(value=>value?.name?.endsWith(extension));
+   const legacyName=(platform==='ios'?'iOS':'Android')+'.v'+version+extension;
+   if(item.length!==1||asset.length!==1||!Number.isSafeInteger(item[0].size)||item[0].size<=0
+    ||! /^[a-f0-9]{64}$/u.test(item[0].sha256??'')||asset[0].state!=='uploaded'
+    ||asset[0].size!==item[0].size||asset[0].digest!=='sha256:'+item[0].sha256
+    ||(item[0].label===undefined&&(item[0].name!==releaseAssetLabel(platform,version,extension)||asset[0].name!==legacyName))
+    ||(item[0].label!==undefined&&(asset[0].name!==item[0].name||asset[0].label!==item[0].label)))
+    fail('失败草稿资产回读不符');
+  }
+ }
+ const refUrl=GITHUB_API+'/git/ref/tags/'+encodeURIComponent(tag),ref=await fetchImpl(refUrl,{redirect:'error',headers});
+ if(ref.status!==404&&!ref.ok)fail('失败草稿 Tag 回读失败');
+ if(ref.ok){const value=await ref.json();
+  if(value.ref!=='refs/tags/'+tag||value.object?.type!=='commit'||value.object.sha!==run.head_sha)
+   fail('失败草稿 Tag 来源不符');
+ }
+ if(!release&&!ref.ok)return {platform,removed_candidate:null,removed_tag:null};
+ if(ref.ok){const removed=await fetchImpl(GITHUB_API+'/git/refs/tags/'+encodeURIComponent(tag),
+  {method:'DELETE',redirect:'error',headers});if(removed.status!==204)fail('失败草稿 Tag 删除失败：HTTP '+removed.status);}
+ if(release){const removed=await fetchImpl(GITHUB_API+'/releases/'+release.id,
+  {method:'DELETE',redirect:'error',headers});if(removed.status!==204)fail('失败草稿 Release 删除失败：HTTP '+removed.status);}
+ const [afterRef,afterRelease]=await Promise.all([fetchImpl(refUrl,{redirect:'error',headers}),
+  fetchImpl(GITHUB_API+'/releases/tags/'+encodeURIComponent(tag),{redirect:'error',headers})]);
+ if(afterRef.status!==404||afterRelease.status!==404)fail('失败草稿清理回读不符');
+ return {platform,removed_candidate:release?.id??null,removed_tag:ref.ok?tag:null};
+}
+export async function ciReconcileFailedDraft(platform,environment=process.env,{fetchImpl=fetch}={}){
+ const token=environment.GH_TOKEN||environment.GITHUB_TOKEN,version=releaseVersion(environment);
+ if(!token||!['ios','android'].includes(platform))fail('失败草稿预检平台或授权无效');
+ const rows=await githubPages(GITHUB_API+'/releases','',token,fetchImpl);
+ const matched=rows.filter(value=>value?.tag_name===releaseDisplayTitle(platform,version));
+ if(!matched.length)return {platform,removed_candidate:null,removed_tag:null};
+ if(matched.length!==1)fail('失败草稿预检发现重复 Release');
+ const note=/^<!-- automation:(\{[^\n]*\}) -->$/u.exec(String(matched[0].body??'').trim());
+ let proof;try{proof=note?JSON.parse(note[1]):null;}catch{fail('失败草稿预检证明无效');}
+ if(!Number.isSafeInteger(proof?.run_id)||proof.run_id===Number(environment.GITHUB_RUN_ID))fail('失败草稿预检 Run 无效');
+ return reconcileFailedDraft(platform,String(proof.run_id),environment,{fetchImpl});
 }
 export async function ciRetainReleases(platform,environment=process.env,{fetchImpl=fetch}={}){
  platformContract(platform);
@@ -3749,17 +3824,18 @@ export async function ciBuild(platform,environment=process.env){
   const assets=[];
    for(const original of names){const source=join(output,original),info=lstatSync(source);
    if(!info.isFile()||info.isSymbolicLink()||!info.size)fail('GitHub正式签名包缺失');
-    const name=releaseDisplayTitle(platform,version)+original.slice(original.lastIndexOf('.'));
+    const extension=original.slice(original.lastIndexOf('.'));
+    const name=releaseAssetName(platform,version,extension),label=releaseAssetLabel(platform,version,extension);
     const destination=join(assetsDir,name);copyFileSync(source,destination);
-   assets.push({name,size:info.size,sha256:createHash('sha256').update(readFileSync(destination)).digest('hex')});
+   assets.push({name,label,size:info.size,sha256:createHash('sha256').update(readFileSync(destination)).digest('hex')});
   }
   const bundleId='ios.'+product,packageName='com.crcfrcn.'+product;
-   const manifestName=releaseDisplayTitle(platform,version)+'.json';
+   const manifestName=releaseAssetName(platform,version,'.json');
   const manifest={product_id:product,version,github_run_number:Number(number),head_sha:sha,bundle_id:bundleId,
    package_name:packageName,assets:assets.map(value=>({platform:platform==='ios'?'iOS':'Android',asset_name:value.name,asset_sha256:value.sha256}))};
   writeFileSync(join(assetsDir,manifestName),JSON.stringify(manifest)+'\n',{flag:'wx',mode:0o600});
   const manifestInfo=lstatSync(join(assetsDir,manifestName));
-  assets.push({name:manifestName,size:manifestInfo.size,sha256:createHash('sha256').update(readFileSync(join(assetsDir,manifestName))).digest('hex')});
+  assets.push({name:manifestName,label:releaseAssetLabel(platform,version,'.json'),size:manifestInfo.size,sha256:createHash('sha256').update(readFileSync(join(assetsDir,manifestName))).digest('hex')});
    const tag=releaseDisplayTitle(platform,version);
   const proof={schema:1,repository:'crcfrcn/'+product,product_id:product,platform,workflow:'.github/workflows/'+workflow,
    run_id:Number(run),run_attempt:Number(attempt),run_number:Number(number),source_sha:sha,version,tag,assets};
@@ -3795,7 +3871,7 @@ export async function ciVerifyRelease(platform,phase,releaseId,environment=proce
  for(const item of plan.assets){const local=join(plan.directory,item.name);
   if(createHash('sha256').update(readFileSync(local)).digest('hex')!==item.sha256)fail('本轮移动资产字节漂移');
   const rows=release.assets.filter(value=>value.name===item.name);
-  if(rows.length!==1||rows[0].state!=='uploaded'||rows[0].size!==item.size||rows[0].digest!=='sha256:'+item.sha256)
+  if(rows.length!==1||rows[0].label!==item.label||rows[0].state!=='uploaded'||rows[0].size!==item.size||rows[0].digest!=='sha256:'+item.sha256)
    fail('GitHub移动Release资产回读不符');
  }
  return {platform,tag:plan.tag,release_id:releaseId,phase};
@@ -3862,14 +3938,15 @@ export async function inspectPublishedBuild(platform,tag,{send=fetch}={}){
   ||jobList.jobs.some(job=>job.name!==tag||job.status!=='completed'||job.conclusion!=='success'))
   fail('正式包没有同一次完整成功自动化证明');
  const suffixes=platform==='ios'?['.ipa','.json']:['.apk','.aab','.json'];
- const names=suffixes.map(suffix=>tag+suffix),manifestName=tag+'.json';
+ const names=suffixes.map(suffix=>releaseAssetName(platform,version,suffix)),manifestName=releaseAssetName(platform,version,'.json');
  if(!Array.isArray(release.assets)||release.assets.length!==names.length
   ||names.some(name=>release.assets.filter(asset=>asset?.name===name).length!==1)
   ||!Array.isArray(proof.assets)||proof.assets.length!==names.length)
   fail('正式包资产集合不完整');
  const results=[];
  for(const name of names){const asset=release.assets.find(value=>value.name===name),item=proof.assets.find(value=>value.name===name);
-  if(!Number.isSafeInteger(asset?.id)||asset.id<1||asset.state!=='uploaded'||asset.size!==item?.size
+  if(!Number.isSafeInteger(asset?.id)||asset.id<1||asset.label!==releaseAssetLabel(platform,version,name.slice(name.lastIndexOf('.')))
+   ||asset.state!=='uploaded'||asset.size!==item?.size
    ||!/^[a-f0-9]{64}$/u.test(item?.sha256??'')||asset.digest!=='sha256:'+item.sha256
    ||asset.url!==base+'releases/assets/'+asset.id)fail('正式包资产证明无效');
   const content=await publishedBuildGet(asset.url,{send,...(name===manifestName?{raw:true,maxBytes:1024*1024}:{digestOnly:true,maxBytes:2*1024**3})});
@@ -3921,6 +3998,10 @@ async function ciCreateReleaseTag(platform,environment=process.env,{fetchImpl=fe
 }
 
 async function runCLI(){
+ if(process.argv[2]==='ci-reconcile-failed-draft'){
+  if(process.argv.length!==4)fail('失败草稿预检参数无效');
+  process.stdout.write(JSON.stringify(await ciReconcileFailedDraft(process.argv[3]))+'\n');return;
+ }
  if(process.argv[2]==='ci-retain-releases'){
   if(process.argv.length!==4)fail('GitHub Release 清理参数无效');
   process.stdout.write(JSON.stringify(await ciRetainReleases(process.argv[3]))+'\n');return;
@@ -5072,6 +5153,10 @@ test('GitHub清理失败明确失败且在缓存清理失败时不删Run',async(
   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/android.yml@refs/heads/main',GITHUB_RUN_ID:'100',
   CITIZENWALLET_RELEASE_RESULT:'failure',GH_TOKEN:'synthetic'};let runDeletes=0;
  const fetchImpl=async(url,options={})=>{
+  if(String(url).endsWith('/actions/runs/100'))return Response.json({id:100,path:'.github/workflows/android.yml',event:'workflow_dispatch',head_branch:'main',
+   repository:{full_name:'crcfrcn/citizenwallet'},display_title:releaseDisplayTitle('android','1.0.0'),head_sha:'a'.repeat(40),status:'in_progress'});
+  if(new URL(url).pathname.endsWith('/releases'))return Response.json([]);
+  if(String(url).includes('/git/ref/tags/'))return new Response(null,{status:404});
   if(String(url).includes('/actions/caches/')&&options.method==='DELETE')return new Response(null,{status:403});
   if(String(url).includes('/actions/caches?'))return Response.json({actions_caches:[
    {id:20,key:'citizenwallet-cargo-android-1-1',ref:'refs/heads/main',created_at:'2026-10-14T00:00:00Z'},
@@ -5104,6 +5189,10 @@ test('GitHub Run删除请求失败会明确失败而不回报清理成功',async
  const runs=[make(10,10,'success'),make(11,11,'failure'),make(9,9,'failure')];let deleteStatus=503;
  const fetchImpl=async(url,options={})=>{
   const address=new URL(url);
+  if(address.pathname.endsWith('/actions/runs/101'))return Response.json({id:101,path:'.github/workflows/ios.yml',event:'workflow_dispatch',head_branch:'main',
+   repository:{full_name:'crcfrcn/citizenwallet'},display_title:releaseDisplayTitle('ios','1.0.0'),head_sha:'a'.repeat(40),status:'in_progress'});
+  if(address.pathname.endsWith('/releases'))return Response.json([]);
+  if(address.pathname.includes('/git/ref/tags/'))return new Response(null,{status:404});
   if(address.pathname.endsWith('/actions/caches'))return Response.json({actions_caches:[]});
   if(address.pathname.includes('/actions/runs/'))return new Response(null,{status:deleteStatus});
   if(address.pathname.includes('/actions/workflows/'))return Response.json({workflow_runs:runs.filter(value=>value.event===address.searchParams.get('event'))});
@@ -5215,6 +5304,9 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
   const verifyPublished=workflow.indexOf('ci-verify-release '+platform+' published "$release_id"');
   assert.ok(create>=0&&draft>create&&resolveId>draft&&verify>resolveId&&publish>verify&&verifyPublished>publish,
    platform+'必须按Release ID验证草稿、发布并回读');
+  assert.ok(workflow.indexOf('ci-reconcile-failed-draft '+platform)<create,'新Tag前必须核对并清理旧失败草稿');
+  assert.ok(workflow.includes('citizenwallet-'+platform+'-v$version$extension#公民钱包·'
+   +(platform==='ios'?'iOS':'Android')+'·v$version$extension'),'资产下载名与中文展示标签必须分别传给GitHub');
   assert.ok(workflow.includes('version="$(node -e \'const p=require(process.argv[1]);process.stdout.write(p.version)\' "$plan")'));
    const label=platform==='ios'?'iOS':'Android';
    assert.ok(workflow.includes('--title "公民钱包·'+label+'·v$version"'));
@@ -5335,21 +5427,60 @@ test('Release Tag已有引用必须相同，创建或回读异常均失败',asyn
  assert.equal(calls,3);
 });
 
+test('失败草稿只按本平台Run、Tag和逐件摘要清理，拒绝跨平台及错误摘要',async()=>{
+ const version='1.0.0',sha='a'.repeat(40),digest='b'.repeat(64),response=(status,value={})=>({status,ok:status>=200&&status<300,json:async()=>value});
+ for(const platform of ['ios','android']){
+  const tag=releaseDisplayTitle(platform,version),runId=platform==='ios'?39136056943:39136084165;
+  const extensions=platform==='ios'?['.ipa','.json']:['.apk','.aab','.json'];
+  const assets=extensions.map(extension=>({name:releaseAssetLabel(platform,version,extension),size:5,sha256:digest}));
+  const proof={schema:1,repository:'crcfrcn/citizenwallet',product_id:product,platform,workflow:'.github/workflows/'+platform+'.yml',
+   run_id:runId,run_attempt:1,run_number:17,source_sha:sha,version,tag,assets};
+  const release={id:platform==='ios'?416498962:416503255,tag_name:tag,name:tag,target_commitish:sha,draft:true,
+   immutable:false,prerelease:false,body:'<!-- automation:'+JSON.stringify(proof)+' -->',
+   assets:extensions.map(extension=>({name:(platform==='ios'?'iOS':'Android')+'.v'+version+extension,
+    state:'uploaded',size:5,digest:'sha256:'+digest}))};
+  const run={id:runId,path:proof.workflow,event:'workflow_dispatch',head_branch:'main',repository:{full_name:'crcfrcn/citizenwallet'},
+   display_title:tag,head_sha:sha,run_attempt:1,run_number:17,status:'completed',conclusion:'failure'};
+  let current=release,ref=true;const deleted=[];
+  const fetchImpl=async(url,options={})=>{const path=new URL(url).pathname;
+   if(path.endsWith('/actions/runs/'+runId))return response(200,run);
+   if(path.endsWith('/releases'))return response(200,current?[current]:[]);
+   if(path.includes('/git/ref/tags/'))return ref?response(200,{ref:'refs/tags/'+tag,object:{type:'commit',sha}}):response(404);
+   if(path.includes('/git/refs/tags/')&&options.method==='DELETE'){ref=false;deleted.push('tag');return response(204);}
+   if(path.endsWith('/releases/'+release.id)&&options.method==='DELETE'){current=null;deleted.push('release');return response(204);}
+   if(path.includes('/releases/tags/'))return current?response(200,current):response(404);
+   throw Error('unexpected failed draft endpoint '+url);
+  };
+  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',GITHUB_REF:'refs/heads/main',
+   GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'公民钱包·'+(platform==='ios'?'iOS':'Android'),
+   GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/'+platform+'.yml@refs/heads/main',
+   CITIZENWALLET_AUTOMATION_VERSION:version,GITHUB_RUN_ID:'999',GH_TOKEN:'synthetic'};
+  release.assets[0].digest='sha256:'+'c'.repeat(64);
+  await assert.rejects(ciReconcileFailedDraft(platform,env,{fetchImpl}),/资产回读不符/u);
+  assert.deepEqual(deleted,[]);
+  release.assets[0].digest='sha256:'+digest;
+  assert.deepEqual(await ciReconcileFailedDraft(platform,env,{fetchImpl}),
+   {platform,removed_candidate:release.id,removed_tag:tag});
+  assert.deepEqual(deleted,['tag','release']);
+ }
+});
+
 test('移动Release通过GitHub返回的ID校验草稿、发布并回读',async()=>{
  await withFixedWork('build/ios',async work=>{
    const tag=releaseDisplayTitle('ios','1.0.0'),sha='e'.repeat(40),releaseId='987654321';
   const notes=join(work,'release-notes.txt'),assetsDir=join(work,'release-assets');mkdirSync(assetsDir);
   writeFileSync(notes,'release notes\n');
   const bytes=Buffer.from('synthetic ipa'),digest=createHash('sha256').update(bytes).digest('hex');
-   writeFileSync(join(assetsDir,tag+'.ipa'),bytes);
+   const assetName=releaseAssetName('ios','1.0.0','.ipa'),assetLabel=releaseAssetLabel('ios','1.0.0','.ipa');
+   writeFileSync(join(assetsDir,assetName),bytes);
   const plan={schema:1,product_id:'citizenwallet',platform:'ios',tag,version:'1.0.0',source_sha:sha,notes,directory:assetsDir,
-    assets:[{name:tag+'.ipa',size:bytes.length,sha256:digest}]};
+    assets:[{name:assetName,label:assetLabel,size:bytes.length,sha256:digest}]};
   writeFileSync(join(work,'release-plan.json'),JSON.stringify(plan)+'\n');
   const env={GITHUB_ACTIONS:'true',CITIZENWALLET_AUTOMATION_VERSION:'1.0.0',GITHUB_REPOSITORY:'crcfrcn/citizenwallet',
    GITHUB_WORKFLOW:'公民钱包·iOS',
    GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/ios.yml@refs/heads/main',GITHUB_SHA:sha,GH_TOKEN:'test-token'};
   const tagReference={ref:'refs/tags/'+tag,object:{type:'commit',sha}};
-   const asset={name:tag+'.ipa',state:'uploaded',size:bytes.length,digest:'sha256:'+digest};
+   const asset={name:assetName,label:assetLabel,state:'uploaded',size:bytes.length,digest:'sha256:'+digest};
   const draft={id:Number(releaseId),tag_name:tag,name:releaseDisplayTitle('ios','1.0.0'),target_commitish:sha,
    prerelease:false,draft:true,published_at:null,
    body:'release notes',assets:[asset]};
@@ -5388,13 +5519,13 @@ test('移动Release通过GitHub返回的ID校验草稿、发布并回读',async(
 
 test('正式编译包公开回读同一成功Run、双Job、Tag和逐件资产',async()=>{
  const platform='ios',version='1.0.0',tag=releaseDisplayTitle(platform,version),sha='a'.repeat(40),runId=73;
- const ipa=Buffer.from('signed-ipa'),ipaName=tag+'.ipa',manifestName=tag+'.json';
+ const ipa=Buffer.from('signed-ipa'),ipaName=releaseAssetName(platform,version,'.ipa'),manifestName=releaseAssetName(platform,version,'.json');
  const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
  const manifest=Buffer.from(JSON.stringify({product_id:product,version,github_run_number:19,head_sha:sha,
   bundle_id:'ios.'+product,package_name:'com.crcfrcn.'+product,
   assets:[{platform:'iOS',asset_name:ipaName,asset_sha256:digest(ipa)}]}));
  const payloads=new Map([[ipaName,ipa],[manifestName,manifest]]);
- const assets=[...payloads].map(([name,bytes],index)=>({id:index+1,name,size:bytes.length,state:'uploaded',
+ const assets=[...payloads].map(([name,bytes],index)=>({id:index+1,name,label:releaseAssetLabel(platform,version,name.slice(name.lastIndexOf('.'))),size:bytes.length,state:'uploaded',
   digest:'sha256:'+digest(bytes),url:GITHUB_API+'/releases/assets/'+(index+1)}));
  const proof={schema:1,repository:'crcfrcn/'+product,product_id:product,platform,workflow:'.github/workflows/ios.yml',
   run_id:runId,run_attempt:1,run_number:19,source_sha:sha,version,tag,

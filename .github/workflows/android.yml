@@ -100,8 +100,13 @@ jobs:
           version="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.version)' "$plan")"
           notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
           assets="$GITHUB_WORKSPACE/target/build/android/release-assets"
+          node scripts/build.mjs ci-reconcile-failed-draft android
           node scripts/build.mjs ci-create-release-tag android
-          gh release create "$tag" "$assets"/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "公民钱包·Android·v$version" --notes-file "$notes" --draft --latest=false
+          files=()
+          for extension in .apk .aab .json; do
+            files+=("$assets/citizenwallet-android-v$version$extension#公民钱包·Android·v$version$extension")
+          done
+          gh release create "$tag" "${files[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "公民钱包·Android·v$version" --notes-file "$notes" --draft --latest=false
           release_id="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
           [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
           node scripts/build.mjs ci-verify-release android draft "$release_id"
