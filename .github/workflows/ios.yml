@@ -31,6 +31,8 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 25.2.1
+      - name: 清理本平台上轮失败候选
+        run: node scripts/build.mjs ci-reconcile-failed-candidate ios
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
         with:
           toolchain: 1.97.1
@@ -100,7 +102,6 @@ jobs:
           version="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.version)' "$plan")"
           notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
           assets="$GITHUB_WORKSPACE/target/build/ios/release-assets"
-          node scripts/build.mjs ci-reconcile-failed-candidate ios
           node scripts/build.mjs ci-create-release-tag ios
           files=()
           for extension in .ipa .json; do

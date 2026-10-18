@@ -667,17 +667,17 @@ iOS当前失败点为真机UI自动化模式初始化超时，测试Runner已安
 - `.github/workflows/ios.yml` 与 `.github/workflows/android.yml`。
 - 平台产品构建、Tag/Release 验真及清理合同统一由 `scripts/build.mjs` 实现，控制台不复制产品逻辑。
 
-每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行，核验并裁剪本平台增量缓存及早于最近成功和失败回执的陈旧 Run；本轮 Run 尚未形成最终结论时，上一条成功和上一条失败 Run 均保留。产品自动化观察入口回读本轮最终Run及双Job后，成功时先确认本轮正式Release、Tag、资产和标题，再删除同平台旧Release/Tag及旧成功Run；失败时只撤销本轮候选Release/Tag，再删除旧失败Run。清理失败时当前产品任务保持活动并重连原Run重试，不能报告成功；另一平台和另一结果类别始终受保护。
+每份 Workflow 的 `cleanup` Job 在 `release` Job 之后以 `always()` 运行，只清理本平台失败候选和最新增量缓存，不在当前 Run 尚未结束时删除历史 Run。产品观察入口取得本轮最终 Run 后，成功直接删除同平台旧成功 Run，失败直接删除同平台旧失败 Run；另一平台、另一结果和活动 Run 保留。正式 Release/Tag 是独立记录，由本平台 Workflow 验真并收口，不作为 Run 版本计算或 Run 记录删除的前置条件。清理失败明确记录失败，不报告清理成功。
 
 所属构建、Tag/Release 与 Run/cache 清理回归位于 `scripts/build.mjs`，覆盖平台隔离、活动Run保护、完整分页、删除失败和缓存保留。控制台镜像只读取 `main` 上手动派发且已完成的对应平台 Run，每个平台的成功/失败各保留最新一条；本机活动任务独立显示。真实 GitHub 自动化与 Release 仍需按授权另行启动。
 
-旧Release清理先逐项核对发布证明、资产与存在的Tag指向；只有当前Run最终成功才替换旧正式版。失败候选仅按本轮Run、attempt和提交身份删除自己的Release与Tag。删除请求失败会保留原任务待恢复，不能报告记录清理成功。
+旧Release清理仍按正式包发布证明、资产与Tag指向处理；失败候选由本平台 Workflow 在编译前处理，上游步骤未到达时由cleanup Job收口。Run记录只依据最终结果分类替换，不要求Release资产回读。删除请求失败不得报告清理成功。
 
 工具准备复用本产品既有独立配方和已声明入口；依赖准备、原锁、SDK选择、验收及现场清理均归本产品。调用方只传本仓公开参数并消费公开结果，不执行退役的资源服务协议。
 
 本机编译现场由本产品领取和收尾。调度任务编号随本产品领取记录保存；本轮结果消费后，只允许匹配该编号的收尾请求。产品确认自身进程及资源工具后代全部退出后才清场；异常、编号不符或退出未确认时保留现场。控制台只创建自己的任务并调用产品入口；产品自己管理资源和收尾。
 
-软件版本只按本平台上一条最终成功、双Job均成功且有正式Release证明的手动Run计算；新Run派发前给出候选版本，Runner再核对。新版本序列的首次成功为1.0.0，其后每次成功仅增加补丁号；现有0.0.2成功正式版仍是迁移前的旧正式版，直到本平台1.0.0最终成功才删除。失败、取消、本机编译及同一Run重试都不推进版本；本机安装包和Runner正式包使用同一候选版本，不从pubspec.yaml读取自动化版本。
+软件版本只按本平台最新最终成功的main手动Run计算，不查询该Run的Job或Release资产；新Run派发前给出候选版本，Runner再按同一成功Run计算。首次成功版本为1.0.0，其后每次成功仅增加补丁号；现有0.0.2正式版仍在本平台1.0.0成功前保留。失败、取消和本机编译不推进版本；本机安装包和Runner正式包使用同一候选版本，不从pubspec.yaml读取自动化版本。
 
 
 ### 当前自动化最后处理
@@ -717,7 +717,7 @@ GitHub Release 资产使用稳定 ASCII 下载文件名 `citizenwallet-<平台>-
 ADB未授权超时回归先让模拟子进程实际返回一次 `unauthorized`，之后等到既定期限核对提示；该夹具不在最后数毫秒反复启动进程。生产轮询、取消及安装实现保持原样。
 ## 塔塔自动化远端任务归属
 
-本产品 `scripts/build.mjs` 提供独立的 `dispatchAutomation(platform, token, options)` 以及公开的 Run 观察、取消、终态验真接口。产品按本仓平台与 Workflow 白名单派发、回读、观察 Run 与 Job、限额读取终态日志、取消及恢复原 GitHub Run；控制台的 `tata/citizenwallet.mjs` 只保存任务坐标、领取短期授权、调用公开接口并显示返回结果。派发回执中的 Run ID 先写入任务，回读中断后只恢复该 Run，禁止重复派发；控制台宿主通过 `recoverTask(task)` 重进原任务授权上下文。取消和恢复均重新核验本仓、主分支、Workflow、提交及 Run ID。失败 Run 始终记为失败；控制台只读令牌看不到草稿时不推断清理成功，下一轮同平台 Workflow 在新 Tag 前凭发布证明核对并清理旧候选，控制台不删除 Tag。成功 Run 的旧 Release 与 Tag 由同平台 cleanup Job 清理，产品终态只读核对唯一正式版；旧同结果 Run 在最终状态回读后由产品入口按准确平台清理。产品合成回归覆盖派发、终态、失败候选、取消和恢复边界。
+本产品 `scripts/build.mjs` 提供独立的 `dispatchAutomation(platform, token, options)` 以及公开的 Run 观察、取消和终态接口。产品按本仓平台与 Workflow 派发并保存唯一Run ID；控制台的 `tata/citizenwallet.mjs` 只保存任务坐标、领取短期授权、调用公开接口并显示返回结果。回读中断只恢复原 Run，禁止重复派发。最终Run成功就删除本平台旧成功Run，最终Run失败就删除本平台旧失败Run；不以Job或Release资产证明决定Run记录替换。取消和恢复仍核对本仓、主分支、平台与原Run ID。失败候选由本平台Workflow处理，控制台不以只读令牌删除Tag；正式版由同平台Workflow收口。回归覆盖两个结果类别和平台隔离。
 
 
 ## 独立执行与外部接入边界
