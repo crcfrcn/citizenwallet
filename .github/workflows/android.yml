@@ -100,7 +100,7 @@ jobs:
           version="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.version)' "$plan")"
           notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
           assets="$GITHUB_WORKSPACE/target/build/android/release-assets"
-          node scripts/build.mjs ci-reconcile-failed-draft android
+          node scripts/build.mjs ci-reconcile-failed-candidate android
           node scripts/build.mjs ci-create-release-tag android
           files=()
           for extension in .apk .aab .json; do
@@ -146,4 +146,10 @@ jobs:
           if ! node scripts/build.mjs ci-cleanup android; then
             echo '::error::Android Run/Cargo 缓存清理失败；构建与 Release 结果保持原回执。'
             exit 1
+          fi
+          if [[ "$CITIZENWALLET_RELEASE_RESULT" == success ]]; then
+            if ! node scripts/build.mjs ci-retain-releases android; then
+              echo '::error::Android 旧 Release/Tag 清理失败；不得报告本轮自动化成功。'
+              exit 1
+            fi
           fi

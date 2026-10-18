@@ -3573,7 +3573,7 @@ export async function ciCleanup(platform,environment=process.env,{fetchImpl=fetc
   ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
   ||!checkedWorkflowDisplay(platform,environment)||!/^[1-9][0-9]*$/u.test(runId||'')
   ||!['success','failure','cancelled','skipped'].includes(upstream)||!token)fail('GitHub清理身份或上游结果无效');
- const draft=upstream==='success'?null:await reconcileFailedDraft(platform,runId,environment,{fetchImpl,completed:false});
+ const candidateRelease=upstream==='success'?null:await reconcileFailedCandidate(platform,runId,environment,{fetchImpl,completed:false});
  // 当前 Run 还未形成最终结论；至少保留旧成功和旧失败各一条，终态后再由产品清同结果旧项。
   const cache=await cleanupCargoCaches(platform,token,fetchImpl,{currentKey:'citizenwallet-cargo-'+platform+'-'+runId+'-'+environment.GITHUB_RUN_ATTEMPT,
    requireCurrent:upstream==='success'}),candidate=upstream==='success'?'success':'failure';
@@ -3583,7 +3583,7 @@ export async function ciCleanup(platform,environment=process.env,{fetchImpl=fetc
  const stale=runs.filter(run=>run.id!==latest[cleanupRunState(run)]?.id);
  const remove=async values=>{for(const run of values)await deleteCompletedRun(run,token,fetchImpl);await verifyRunsDeleted(platform,values,token,fetchImpl);};
  await remove(stale);
- return {platform,candidate,draft,cache,runs_deleted:stale.map(run=>run.id)};
+ return {platform,candidate,candidate_release:candidateRelease,cache,runs_deleted:stale.map(run=>run.id)};
 }
 
 // Release 展示记录与 Actions Run 分别保留；只识别本仓发布证明，当前正式包确认后才删旧项。
@@ -3616,8 +3616,8 @@ function checkedPlatformRelease(release,platform){
  }
  return proof;
 }
-// 仅撤销本平台失败 Run 的候选草稿；旧版 GitHub 会把中文上传文件名规整，按扩展名和摘要核实。
-async function reconcileFailedDraft(platform,runId,environment,{fetchImpl=fetch,completed=true}={}){
+// 仅撤销本平台失败 Run 的候选 Release；旧版 GitHub 会把中文上传文件名规整，按扩展名和摘要核实。
+async function reconcileFailedCandidate(platform,runId,environment,{fetchImpl=fetch,completed=true}={}){
  const token=environment.GH_TOKEN||environment.GITHUB_TOKEN,version=releaseVersion(environment),tag=releaseDisplayTitle(platform,version);
  if(environment.GITHUB_ACTIONS!=='true'||environment.GITHUB_REPOSITORY!=='crcfrcn/'+product
   ||environment.GITHUB_REF!=='refs/heads/main'||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'
@@ -3637,7 +3637,8 @@ async function reconcileFailedDraft(platform,runId,environment,{fetchImpl=fetch,
   const note=/^<!-- automation:(\{[^\n]*\}) -->$/u.exec(String(release.body??'').trim());
   let proof;try{proof=note?JSON.parse(note[1]):null;}catch{fail('失败草稿发布证明无效');}
   const extensions=platform==='ios'?['.ipa','.json']:['.apk','.aab','.json'];
-  if(release.draft!==true||release.immutable===true||release.name!==tag||release.target_commitish!==run.head_sha
+  if(typeof release.draft!=='boolean'||release.immutable===true||release.name!==tag||release.target_commitish!==run.head_sha
+   ||(!release.draft&&!release.published_at)
    ||release.prerelease!==false||proof?.schema!==1||proof.repository!=='crcfrcn/'+product
    ||proof.product_id!==product||proof.platform!==platform||proof.workflow!==run.path
    ||proof.run_id!==run.id||proof.run_attempt!==run.run_attempt||proof.run_number!==run.run_number
@@ -3672,7 +3673,7 @@ async function reconcileFailedDraft(platform,runId,environment,{fetchImpl=fetch,
  if(afterRef.status!==404||afterRelease.status!==404)fail('失败草稿清理回读不符');
  return {platform,removed_candidate:release?.id??null,removed_tag:ref.ok?tag:null};
 }
-export async function ciReconcileFailedDraft(platform,environment=process.env,{fetchImpl=fetch}={}){
+export async function ciReconcileFailedCandidate(platform,environment=process.env,{fetchImpl=fetch}={}){
  const token=environment.GH_TOKEN||environment.GITHUB_TOKEN,version=releaseVersion(environment);
  if(!token||!['ios','android'].includes(platform))fail('失败草稿预检平台或授权无效');
  const rows=await githubPages(GITHUB_API+'/releases','',token,fetchImpl);
@@ -3682,7 +3683,7 @@ export async function ciReconcileFailedDraft(platform,environment=process.env,{f
  const note=/^<!-- automation:(\{[^\n]*\}) -->$/u.exec(String(matched[0].body??'').trim());
  let proof;try{proof=note?JSON.parse(note[1]):null;}catch{fail('失败草稿预检证明无效');}
  if(!Number.isSafeInteger(proof?.run_id)||proof.run_id===Number(environment.GITHUB_RUN_ID))fail('失败草稿预检 Run 无效');
- return reconcileFailedDraft(platform,String(proof.run_id),environment,{fetchImpl});
+ return reconcileFailedCandidate(platform,String(proof.run_id),environment,{fetchImpl});
 }
 export async function ciRetainReleases(platform,environment=process.env,{fetchImpl=fetch}={}){
  platformContract(platform);
@@ -3998,9 +3999,9 @@ async function ciCreateReleaseTag(platform,environment=process.env,{fetchImpl=fe
 }
 
 async function runCLI(){
- if(process.argv[2]==='ci-reconcile-failed-draft'){
+ if(process.argv[2]==='ci-reconcile-failed-candidate'){
   if(process.argv.length!==4)fail('失败草稿预检参数无效');
-  process.stdout.write(JSON.stringify(await ciReconcileFailedDraft(process.argv[3]))+'\n');return;
+  process.stdout.write(JSON.stringify(await ciReconcileFailedCandidate(process.argv[3]))+'\n');return;
  }
  if(process.argv[2]==='ci-retain-releases'){
   if(process.argv.length!==4)fail('GitHub Release 清理参数无效');
@@ -5304,7 +5305,7 @@ test('正式移动Release前先创建并回读当前提交Tag',()=>{
   const verifyPublished=workflow.indexOf('ci-verify-release '+platform+' published "$release_id"');
   assert.ok(create>=0&&draft>create&&resolveId>draft&&verify>resolveId&&publish>verify&&verifyPublished>publish,
    platform+'必须按Release ID验证草稿、发布并回读');
-  assert.ok(workflow.indexOf('ci-reconcile-failed-draft '+platform)<create,'新Tag前必须核对并清理旧失败草稿');
+  assert.ok(workflow.indexOf('ci-reconcile-failed-candidate '+platform)<create,'新Tag前必须核对并清理旧失败候选');
   assert.ok(workflow.includes('citizenwallet-'+platform+'-v$version$extension#公民钱包·'
    +(platform==='ios'?'iOS':'Android')+'·v$version$extension'),'资产下载名与中文展示标签必须分别传给GitHub');
   assert.ok(workflow.includes('version="$(node -e \'const p=require(process.argv[1]);process.stdout.write(p.version)\' "$plan")'));
@@ -5351,8 +5352,10 @@ test('iOS与Android独立Workflow各自清Run并维护唯一平台Cargo缓存',(
   assert.ok(workflow.includes('needs: release')&&workflow.includes('    if: always()'));
   assert.ok(workflow.includes('CITIZENWALLET_RELEASE_RESULT: "${{ needs.release.result }}"'));
   assert.ok(workflow.includes('node scripts/build.mjs ci-cleanup '+platform));
-  assert.ok(!workflow.includes('node scripts/build.mjs ci-retain-releases '+platform),
-   '旧正式版须等当前Run最终成功后才替换');
+  assert.ok(workflow.includes('node scripts/build.mjs ci-retain-releases '+platform),
+   '本平台cleanup Job必须验真并收口旧正式版');
+  assert.ok(workflow.indexOf('ci-retain-releases '+platform)>workflow.indexOf('ci-cleanup '+platform),
+   '旧正式版须在本轮缓存与Run清理成功后处理');
   assert.ok(workflow.includes('actions: write'));
   assert.ok(workflow.includes('contents: write'));
   assert.doesNotMatch(workflow,new RegExp('target/cache/cargo/'+(platform==='ios'?'android':'ios'),'u'));
@@ -5427,7 +5430,7 @@ test('Release Tag已有引用必须相同，创建或回读异常均失败',asyn
  assert.equal(calls,3);
 });
 
-test('失败草稿只按本平台Run、Tag和逐件摘要清理，拒绝跨平台及错误摘要',async()=>{
+test('失败候选只按本平台Run、Tag和逐件摘要清理，拒绝跨平台及错误摘要',async()=>{
  const version='1.0.0',sha='a'.repeat(40),digest='b'.repeat(64),response=(status,value={})=>({status,ok:status>=200&&status<300,json:async()=>value});
  for(const platform of ['ios','android']){
   const tag=releaseDisplayTitle(platform,version),runId=platform==='ios'?39136056943:39136084165;
@@ -5435,8 +5438,9 @@ test('失败草稿只按本平台Run、Tag和逐件摘要清理，拒绝跨平�
   const assets=extensions.map(extension=>({name:releaseAssetLabel(platform,version,extension),size:5,sha256:digest}));
   const proof={schema:1,repository:'crcfrcn/citizenwallet',product_id:product,platform,workflow:'.github/workflows/'+platform+'.yml',
    run_id:runId,run_attempt:1,run_number:17,source_sha:sha,version,tag,assets};
-  const release={id:platform==='ios'?416498962:416503255,tag_name:tag,name:tag,target_commitish:sha,draft:true,
-   immutable:false,prerelease:false,body:'<!-- automation:'+JSON.stringify(proof)+' -->',
+  const release={id:platform==='ios'?416498962:416503255,tag_name:tag,name:tag,target_commitish:sha,draft:platform==='ios',
+   published_at:platform==='ios'?null:'2026-10-18T00:00:00Z',immutable:false,prerelease:false,
+   body:'<!-- automation:'+JSON.stringify(proof)+' -->',
    assets:extensions.map(extension=>({name:(platform==='ios'?'iOS':'Android')+'.v'+version+extension,
     state:'uploaded',size:5,digest:'sha256:'+digest}))};
   const run={id:runId,path:proof.workflow,event:'workflow_dispatch',head_branch:'main',repository:{full_name:'crcfrcn/citizenwallet'},
@@ -5456,10 +5460,10 @@ test('失败草稿只按本平台Run、Tag和逐件摘要清理，拒绝跨平�
    GITHUB_WORKFLOW_REF:'crcfrcn/citizenwallet/.github/workflows/'+platform+'.yml@refs/heads/main',
    CITIZENWALLET_AUTOMATION_VERSION:version,GITHUB_RUN_ID:'999',GH_TOKEN:'synthetic'};
   release.assets[0].digest='sha256:'+'c'.repeat(64);
-  await assert.rejects(ciReconcileFailedDraft(platform,env,{fetchImpl}),/资产回读不符/u);
+  await assert.rejects(ciReconcileFailedCandidate(platform,env,{fetchImpl}),/资产回读不符/u);
   assert.deepEqual(deleted,[]);
   release.assets[0].digest='sha256:'+digest;
-  assert.deepEqual(await ciReconcileFailedDraft(platform,env,{fetchImpl}),
+  assert.deepEqual(await ciReconcileFailedCandidate(platform,env,{fetchImpl}),
    {platform,removed_candidate:release.id,removed_tag:tag});
   assert.deepEqual(deleted,['tag','release']);
  }
@@ -5955,48 +5959,84 @@ async function retainCompletedAutomationRun(run,route,token,{fetchImpl=automatio
  return {platform:route.platform,state,retained:run.id,deleted:stale.map(value=>value.id)};
 }
 
-// 只在GitHub确认Run最终结论后处理正式版：成功替换旧版，失败撤销本轮候选。
+// 只读核对最终Run的产品发布证明；Tag/Release写入与清理由本平台Workflow完成。
 async function finalizeAutomationRelease(run,route,token,{fetchImpl=automationTransport.getStore()?.fetchImpl??fetch}={}){
  automationRoute(route);
  if(run.status!=='completed'||!['success','failure','cancelled','timed_out','action_required','neutral','skipped'].includes(run.conclusion))
   throw Error('公民钱包正式版终态无效');
+ const tag=run.display_title,version=tag?.split('·v').at(-1);
+ if(tag!==releaseDisplayTitle(route.platform,version))throw Error('公民钱包终态版本标题无效');
+ const rows=await githubPages(GITHUB_API+'/releases','',token,fetchImpl);
  if(run.conclusion==='success'){
-  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'crcfrcn/'+product,GITHUB_REF:'refs/heads/main',
-   GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_WORKFLOW:'公民钱包·'+(route.platform==='ios'?'iOS':'Android'),
-   GITHUB_WORKFLOW_REF:'crcfrcn/'+product+'/.github/workflows/'+route.workflow+'@refs/heads/main',
-   GITHUB_RUN_ID:String(run.id),GITHUB_RUN_ATTEMPT:String(run.run_attempt),GITHUB_RUN_NUMBER:String(run.run_number),
-   GITHUB_SHA:run.head_sha,CITIZENWALLET_AUTOMATION_VERSION:run.display_title.split('·v').at(-1),
-   CITIZENWALLET_RELEASE_RESULT:'success',GH_TOKEN:token};
-  return ciRetainReleases(route.platform,env,{fetchImpl});
+  const owned=rows.map(release=>({release,proof:checkedPlatformRelease(release,route.platform)}))
+   .filter(value=>value.proof);
+  if(owned.length!==1||owned[0].release.tag_name!==tag||owned[0].release.draft
+   ||owned[0].release.name!==tag||owned[0].proof.run_id!==run.id
+   ||owned[0].proof.run_attempt!==run.run_attempt||owned[0].proof.run_number!==run.run_number
+   ||owned[0].proof.source_sha!==run.head_sha||owned[0].proof.version!==version)
+   throw Error('成功Run缺少唯一正式版与清理证明');
+  const reference=await fetchImpl(GITHUB_API+'/git/ref/tags/'+encodeURIComponent(tag),
+   {redirect:'error',headers:GITHUB_API_HEADERS(token)});
+  if(!reference.ok)throw Error('成功Run正式Tag缺失');
+  const ref=await reference.json();
+  if(ref.ref!=='refs/tags/'+tag||ref.object?.type!=='commit'||ref.object.sha!==run.head_sha)
+   throw Error('成功Run正式Tag来源不符');
+  return {platform:route.platform,retained:owned[0].release.id,cleanup_pending:false,
+   summary:'本平台唯一正式版回读完成'};
  }
- const rows=await githubPages(GITHUB_API+'/releases','',token,fetchImpl),candidates=[];
- for(const release of rows){const proof=checkedPlatformRelease(release,route.platform);
-  if(proof?.run_id===run.id&&proof.run_attempt===run.run_attempt){
-   if(proof.source_sha!==run.head_sha)throw Error('失败候选Release提交身份不符');
-   candidates.push(release);
+ // 旧失败Run可能留下草稿；只报告待清理，不用控制台的只读contents令牌尝试删除。
+ const candidate=rows.filter(release=>release?.tag_name===tag);
+ if(candidate.length>1||candidate.some(release=>!release.draft||release.target_commitish!==run.head_sha))
+  throw Error('失败候选Release身份无效');
+ return {platform:route.platform,retained:null,cleanup_pending:null,
+  summary:'失败Run已结束；候选清理由本平台Workflow核对，控制台只读令牌不证明草稿不存在'};
+}
+
+// 产品独立判断远端终态和本平台记录收尾；调用方只负责展示、授权和保存任务回执。
+async function settleCompletedAutomation(run,route,token){
+ const release=await finalizeAutomationRelease(run,route,token);
+ const retention=await retainCompletedAutomationRun(run,route,token);
+ return {run,release,retention,success:run.conclusion==='success'&&!release.cleanup_pending};
+}
+async function observeAutomationRun(route,runId,token,{sourceSHA,onRun=()=>{},onJob=()=>{},onLog=()=>{},
+ active=()=>true,pause=()=>new Promise(resolve=>setTimeout(resolve,5000))}={}){
+ automationRoute(route);
+ if(!Number.isSafeInteger(runId)||runId<1||typeof token!=='string'||!token)throw Error('公民钱包观察目标无效');
+ const states=new Map();
+ while(active()){
+  const run=automationCheckedRun(await automationRequest('actions/runs/'+runId,token),route,runId);
+  if(sourceSHA&&run.head_sha!==sourceSHA)throw Error('公民钱包Run提交身份变化');
+  onRun(run);
+  for(const job of await automationJobs(run.id,token)){
+   const state=job.status+':'+job.conclusion;
+   if(states.get(job.id)!==state){states.set(job.id,state);onJob(job);}
+  }
+  if(run.status==='completed'){
+   try{for(const file of await automationReadLogs(run.id,token))onLog(file);}catch{onLog(null);}
+   return settleCompletedAutomation(run,route,token);
+  }
+  await pause();
+ }
+ return null;
+}
+async function cancelAutomationRun(route,runId,token,{sourceSHA,onForce=()=>{},
+ pause=()=>new Promise(resolve=>setTimeout(resolve,5000))}={}){
+ automationRoute(route);
+ if(!Number.isSafeInteger(runId)||runId<1||typeof token!=='string'||!token)throw Error('公民钱包取消目标无效');
+ let run=automationCheckedRun(await automationRequest('actions/runs/'+runId,token),route,runId);
+ if(sourceSHA&&run.head_sha!==sourceSHA)throw Error('公民钱包取消提交身份不符');
+ if(run.status!=='completed')await automationRequest('actions/runs/'+runId+'/cancel',token,{method:'POST'});
+ for(let index=0;index<60&&run.status!=='completed';index++){
+  await pause();run=automationCheckedRun(await automationRequest('actions/runs/'+runId,token),route,runId);
+ }
+ if(run.status!=='completed'){
+  onForce();await automationRequest('actions/runs/'+runId+'/force-cancel',token,{method:'POST'});
+  for(let index=0;index<60&&run.status!=='completed';index++){
+   await pause();run=automationCheckedRun(await automationRequest('actions/runs/'+runId,token),route,runId);
   }
  }
- if(candidates.length>1)throw Error('本轮失败候选Release不唯一');
- const tag=run.display_title;
- if(tag!==releaseDisplayTitle(route.platform,tag?.split('·v').at(-1)))throw Error('失败候选Tag标题无效');
- if(candidates.length&&candidates[0].tag_name!==tag)throw Error('失败候选Release Tag不一致');
- const headers=GITHUB_API_HEADERS(token),refUrl=GITHUB_API+'/git/ref/tags/'+encodeURIComponent(tag);
- const reference=await fetchImpl(refUrl,{redirect:'error',headers});
- if(reference.status!==404&&!reference.ok)throw Error('失败候选Tag回读失败');
- if(reference.ok){const value=await reference.json();
-  if(value.ref!=='refs/tags/'+tag||value.object?.type!=='commit'||value.object.sha!==run.head_sha)
-   throw Error('失败候选Tag来源不符');
- }
- if(candidates.length){const release=candidates[0];
-  if(release.immutable===true)throw Error('失败候选Release不可删除');
-  const deleted=await fetchImpl(GITHUB_API+'/releases/'+release.id,{method:'DELETE',redirect:'error',headers});
-  if(deleted.status!==204)throw Error('失败候选Release删除失败：HTTP '+deleted.status);
- }
- if(reference.ok){const deleted=await fetchImpl(GITHUB_API+'/git/refs/tags/'+encodeURIComponent(tag),
-  {method:'DELETE',redirect:'error',headers});
-  if(deleted.status!==204)throw Error('失败候选Tag删除失败：HTTP '+deleted.status);
- }
- return {platform:route.platform,removed_candidate:candidates[0]?.id??null,removed_tag:reference.ok?tag:null};
+ if(run.status!=='completed')throw Error('公民钱包取消后Run仍未到终态');
+ return settleCompletedAutomation(run,route,token);
 }
 
 
@@ -6131,7 +6171,7 @@ if(inlineTestEntry){
   }
  });
 
-  test('失败自动化只撤销自己的Release与Tag，保留旧正式版',async()=>{
+  test('控制台只读失败候选并交回失败终态，不使用只读令牌删除Tag',async()=>{
    const failed=run('failure'),tag=failed.display_title,digest='b'.repeat(64),names=[tag+'.ipa',tag+'.json'];
    const proof={schema:1,repository:automationRepository,product_id:product,platform,
     workflow:'.github/workflows/'+workflow,run_id:failed.id,run_attempt:1,run_number:failed.run_number,
@@ -6142,21 +6182,64 @@ if(inlineTestEntry){
    const prior={...candidate,id:400,tag_name:'公民钱包-v0.0.2',body:'旧正式版证明',draft:false};
    const calls=[],fetchImpl=async(url,options={})=>{const path=new URL(url).pathname;
     if(path.endsWith('/releases'))return json([prior,candidate]);
-    if(path.includes('/git/ref/tags/'))return json({ref:'refs/tags/'+tag,object:{type:'commit',sha:failed.head_sha}});
-    if(path.endsWith('/releases/500')&&options.method==='DELETE'){calls.push('release');return empty(204);}
-    if(path.includes('/git/refs/tags/')&&options.method==='DELETE'){calls.push('tag');return empty(204);}
+    if(options.method==='DELETE'){calls.push(path);throw Error('控制台只读令牌不得删除产品Tag或Release');}
     assert.fail('未登记失败候选清理请求：'+url);
    };
    assert.deepEqual(await finalizeAutomationRelease(failed,route,token,{fetchImpl}),
-    {platform,removed_candidate:500,removed_tag:tag});
-   assert.deepEqual(calls,['release','tag']);
+    {platform,retained:null,cleanup_pending:null,
+     summary:'失败Run已结束；候选清理由本平台Workflow核对，控制台只读令牌不证明草稿不存在'});
+   assert.deepEqual(calls,[]);
   });
+
+ test('产品观察接口独立返回双Job成功及旧失败候选终态，控制台只需保存回执',async()=>{
+  for(const conclusion of ['success','failure']){
+   const current=run(conclusion),tag=current.display_title,release=releaseFor(current);
+   const pending={...release,draft:true,published_at:null};
+   const events=[],jobs=[1,2].map(id=>({id,name:tag,status:'completed',conclusion:'success'}));
+   const fetchImpl=async(url,options={})=>{const path=new URL(url).pathname;
+    if(options.method==='DELETE'||options.method==='POST')assert.fail('观察接口不得写Tag、Release或派发新Run');
+    if(path.endsWith('/actions/runs/'+runId))return json(current);
+    if(path.endsWith('/actions/runs/'+runId+'/logs'))return empty(503);
+    if(path.endsWith('/actions/runs/'+runId+'/jobs'))return json({jobs});
+    if(path.endsWith('/releases'))return json([conclusion==='success'?release:pending]);
+    if(path.includes('/git/ref/tags/'))return json({ref:'refs/tags/'+tag,object:{type:'commit',sha}});
+    if(path.includes('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
+     new URL(url).searchParams.get('event')==='push'?[]:[current]});
+    assert.fail('未登记产品观察请求：'+url);
+   };
+   const outcome=await automationTransport.run({fetchImpl},()=>observeAutomationRun(route,runId,token,{
+    onRun:value=>events.push(['run',value.id]),onJob:value=>events.push(['job',value.id]),
+    onLog:value=>events.push(['log',value])}));
+   assert.equal(outcome.success,conclusion==='success');
+   assert.equal(outcome.release.cleanup_pending,conclusion==='success'?false:null);
+   assert.deepEqual(outcome.retention.deleted,[]);
+   assert.deepEqual(events.map(value=>value[0]),['run','job','job','log']);
+  }
+ });
+
+ test('产品取消只针对原Run并回读失败终态，已结束Run不重复发送取消',async()=>{
+  const failed=run('cancelled'),calls=[];
+  const fetchImpl=async(url,options={})=>{const path=new URL(url).pathname;
+   calls.push([path,options.method??'GET']);
+   if(path.endsWith('/actions/runs/'+runId))return json(failed);
+   if(path.endsWith('/releases'))return json([]);
+   if(path.includes('/actions/workflows/'+workflow+'/runs'))return json({workflow_runs:
+    new URL(url).searchParams.get('event')==='push'?[]:[failed]});
+   assert.fail('取消接口访问了未登记目标：'+url);
+  };
+  const outcome=await automationTransport.run({fetchImpl},()=>cancelAutomationRun(route,runId,token,{sourceSHA:sha}));
+  assert.equal(outcome.success,false);assert.equal(outcome.release.cleanup_pending,null);
+  assert.ok(calls.some(([,method])=>method==='GET'));
+  assert.equal(calls.some(([,method])=>method==='POST'||method==='DELETE'),false);
+  await assert.rejects(automationTransport.run({fetchImpl},()=>cancelAutomationRun(route,runId,token,
+   {sourceSHA:'b'.repeat(40)})),/提交身份不符/u);
+ });
 
 
 }
 
 // 外部调用方使用普通参数和返回值；此公开接口不接收任务宿主。
-export const automationClient=Object.freeze({automationWorkflows,automationRepository,automationTransport,automationRoute,automationRequest,automationCheckedRun,dispatchAutomation,automationSafeText,automationJobs,automationLogArchive,automationReadLogs,retainCompletedAutomationRun,finalizeAutomationRelease});
+export const automationClient=Object.freeze({automationWorkflows,automationRepository,automationTransport,automationRoute,automationRequest,automationCheckedRun,dispatchAutomation,automationSafeText,automationJobs,automationLogArchive,automationReadLogs,observeAutomationRun,cancelAutomationRun});
 
 // 合成回归只在本文件作为测试入口时注册；普通导入不要求调度器、其它仓库或外部服务。
 if(process.env.NODE_TEST_CONTEXT&&process.argv.length===2&&process.argv[1]===import.meta.filename){

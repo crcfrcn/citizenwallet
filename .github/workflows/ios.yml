@@ -100,7 +100,7 @@ jobs:
           version="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.version)' "$plan")"
           notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
           assets="$GITHUB_WORKSPACE/target/build/ios/release-assets"
-          node scripts/build.mjs ci-reconcile-failed-draft ios
+          node scripts/build.mjs ci-reconcile-failed-candidate ios
           node scripts/build.mjs ci-create-release-tag ios
           files=()
           for extension in .ipa .json; do
@@ -146,4 +146,10 @@ jobs:
           if ! node scripts/build.mjs ci-cleanup ios; then
             echo '::error::iOS Run/Cargo 缓存清理失败；构建与 Release 结果保持原回执。'
             exit 1
+          fi
+          if [[ "$CITIZENWALLET_RELEASE_RESULT" == success ]]; then
+            if ! node scripts/build.mjs ci-retain-releases ios; then
+              echo '::error::iOS 旧 Release/Tag 清理失败；不得报告本轮自动化成功。'
+              exit 1
+            fi
           fi

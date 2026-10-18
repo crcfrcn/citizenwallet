@@ -706,7 +706,7 @@ Run记录与增量缓存是不同对象，分别清理。本机Cargo缓存位于
 
 控制台任务取消信号传入本仓签名和发布接口：本机签名工具终止本轮进程组并等待退出；发布请求立即中止后，使用不受取消信号影响的回查接口核对并撤销本次已确认归属的 Tag/Release。创建回执不明时不删除同名远端资源，并报告未闭合失败；历史清理与本次发布成功回执之间仍按本仓流程验真。
 
-GitHub Release 资产使用稳定 ASCII 下载文件名 `citizenwallet-<平台>-vX.Y.Z.<扩展名>`，GitHub 资产标签显示 `公民钱包·平台·vX.Y.Z.<扩展名>`。两份独立 Workflow 在上传时逐件传入文件名和标签；产品编译回读同时核对本地字节摘要、远端文件名、标签、大小、Digest、Run、Tag 和提交。新 Run 创建 Tag 前，只在失败草稿的发布证明、失败 Run 和平台资产摘要全部吻合时撤销同平台上轮草稿及 Tag；失败 Run 的末尾清理亦只撤销自己的草稿。旧正式版直到新 Run 最终成功后才替换。
+GitHub Release 资产使用稳定 ASCII 下载文件名 `citizenwallet-<平台>-vX.Y.Z.<扩展名>`，GitHub 资产标签显示 `公民钱包·平台·vX.Y.Z.<扩展名>`。两份独立 Workflow 在上传时逐件传入文件名和标签；产品编译回读同时核对本地字节摘要、远端文件名、标签、大小、Digest、Run、Tag 和提交。新 Run 创建 Tag 前，只在失败候选的发布证明、失败 Run 和平台资产摘要全部吻合时撤销同平台上轮候选及 Tag；失败 Run 的末尾清理亦只撤销自己的候选。旧正式版由本平台 Workflow 的末尾 cleanup Job 在当前发布验真、Run/Cargo 清理成功后替换；控制台只读回执，不执行产品 Tag/Release 清理。
 
 编译入口在同一次任务中由本仓完整 Build 先取得资源回执、运行适用代码回归，全部通过后才执行所选平台正式编译；测试失败或取消均禁止生成正式编译产物。测试清单与所需工具只归本仓 Build，外部调用同一本仓完整入口，资源由本产品自己准备。
 
@@ -717,7 +717,7 @@ GitHub Release 资产使用稳定 ASCII 下载文件名 `citizenwallet-<平台>-
 ADB未授权超时回归先让模拟子进程实际返回一次 `unauthorized`，之后等到既定期限核对提示；该夹具不在最后数毫秒反复启动进程。生产轮询、取消及安装实现保持原样。
 ## 塔塔自动化远端任务归属
 
-本产品现有 `scripts/build.mjs` 提供 `startAutomation(route, action, host)`、`recoverAutomation(task, route, host)` 和独立模式的 `dispatchAutomation(platform, token, options)`。产品按本仓平台与 Workflow 白名单派发、回读、观察 Run 与 Job、限额读取终态日志、取消及恢复原 GitHub Run；控制台的 `tata/citizenwallet.mjs` 仅调用这些公开入口，提供任务宿主及短期授权。派发回执中的 Run ID 先写入任务，回读中断后只恢复该 Run，禁止重复派发；控制台宿主通过 `recoverTask(task)` 重进所属产品的恢复授权上下文，显式独立模式才调用产品恢复入口。恢复时先挂接原任务的产品取消入口，再请求观察授权；观察授权失败仍保留取消能力，用户取消时单独领取关闭授权。取消和恢复均重新核验本仓、主分支、Workflow、提交及 Run ID。其他记录、资产和发布能力不在本次迁移范围内。 同文件的合成合同回归覆盖派发成功与不确定回执、错误仓库/平台/SHA、观察两种终态、只取消原 Run、只恢复原 Run 和过期授权保留取消入口。
+本产品 `scripts/build.mjs` 提供独立的 `dispatchAutomation(platform, token, options)` 以及公开的 Run 观察、取消、终态验真接口。产品按本仓平台与 Workflow 白名单派发、回读、观察 Run 与 Job、限额读取终态日志、取消及恢复原 GitHub Run；控制台的 `tata/citizenwallet.mjs` 只保存任务坐标、领取短期授权、调用公开接口并显示返回结果。派发回执中的 Run ID 先写入任务，回读中断后只恢复该 Run，禁止重复派发；控制台宿主通过 `recoverTask(task)` 重进原任务授权上下文。取消和恢复均重新核验本仓、主分支、Workflow、提交及 Run ID。失败 Run 始终记为失败；控制台只读令牌看不到草稿时不推断清理成功，下一轮同平台 Workflow 在新 Tag 前凭发布证明核对并清理旧候选，控制台不删除 Tag。成功 Run 的旧 Release 与 Tag 由同平台 cleanup Job 清理，产品终态只读核对唯一正式版；旧同结果 Run 在最终状态回读后由产品入口按准确平台清理。产品合成回归覆盖派发、终态、失败候选、取消和恢复边界。
 
 
 ## 独立执行与外部接入边界
