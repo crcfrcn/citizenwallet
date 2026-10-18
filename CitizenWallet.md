@@ -104,6 +104,8 @@ CitizenWallet在独立环境由调用方按产品声明交付工具；控制台�
 
 Android工程统一使用Gradle9.1.0、AGP9.0.1、Kotlin2.2.20，与塔塔工具库及受控Flutter修订一致；开启新DSL与内置Kotlin。根工程把AGP与KGP放入同一个buildscript依赖图，settings不再提前创建只含AGP自带KGP2.2.10的插件类加载器，Flutter读取到的实际KGP因此与声明版本一致。应用不再应用独立Kotlin Android插件，字节码使用公开compilerOptions并保持Java17；应用脚本显式导入JDK类型，资源与JNI源集通过AGP9公开`directories`集合登记。锁文件已无isar_flutter_libs，删除针对它的反射及多接口尝试配置。应用标识、版本、签名、ABI和业务依赖不变；配置合同通过不代表APK构建或设备安装已通过。
 
+Android编译平台只使用API36：本仓根Gradle定义唯一`citizenWalletCompileSdk`，应用从该值读取，所有`com.android.library`插件在AGP的`finalizeDsl`阶段统一最终`compileSdk`。锁定的`isar_community_flutter_libs`上游脚本原值为35，但不会成为本轮最终编译平台；本仓不修改上游缓存或锁，也不再请求第二套Android平台。工具库已有的Android36完整SDK由控制台按产品声明交付，独立入口按同一产品配方准备。
+
 ### citizenwallet 公民钱包 PQC 抗量子签名升级技术设计
 
 - 状态:设计 / 待实现。**真源 = `CitizenWallet.md`**(取代旧 PQC 迁移方案)。
@@ -446,7 +448,7 @@ Pub/npm/Cargo按原始锁准备；Git按固定HTTPS提交检出，Git Cargo目�
 
 控制台每次Build只读取本产品 `build.mjs describe` 公开声明并调用一次execute；控制台只跟踪真实任务、核验公开结果和保存产物，不解释产品工具、依赖、编译参数或设备规则。
 
-Android只读取本轮获准的既有开发材料，可由专用PRODUCT_HOST_FD=3提供，原生端仅保管既有DEV_KEY；产品自身负责材料解析、工具、临时密钥、Release包签名、证书/版本核对及USB安装回读。独立调用由产品自己的Keychain保管开发材料。材料不写入公开结果或日志，临时密钥只在工具确认退出后删除。iOS由产品直接验证编译生成的Runner.app、原始Release配置、Apple签名profile、团队/设备授权、代码签名和entitlement，再完成主动真机探测、防降级、安装及bundleVersion回读。控制台不再包含LocalMobileTask/MobileSecurityManager执行链。
+Android只使用本产品声明的正式`APP_KEY`：控制台调用时按本轮Android Build身份与Touch ID从既有受保护配置领取一次，经专用FD3交付产品；独立调用时由产品自己的Keychain读取同名正式材料。产品自身解析材料、临时密钥、Release包签名、证书/版本核对及USB安装回读，缺件即失败，不生成替代身份。材料不进入公开stdin、环境、参数、任务日志或回执，临时密钥只在工具确认退出后删除。iOS由产品直接验证编译生成的Runner.app、原始Release配置、Apple签名profile、团队/设备授权、代码签名和entitlement，再完成主动真机探测、防降级、安装及bundleVersion回读。控制台不再包含LocalMobileTask/MobileSecurityManager执行链。
 
 Android Build必须直接开始编译，禁止编译前选择或等待设备。签名完成后先执行ADB USB安装，不限制品牌、机型或数量，不要求设备登记或另设设备授权门禁；仅当ADB报告多个USB目标时列出全部USB设备号并逐台安装，每台安装后回拉验真。一台失败仍须尝试其余目标，任务最终失败；其他ADB直接安装失败据实失败。禁止固定设备、模拟器和无线安装。
 
@@ -580,13 +582,15 @@ Gradle资源准备只按releaseCompileClasspath、releaseRuntimeClasspath和构�
 
 iOS真机Rust目标明确使用资源回执中的Clang绝对入口与同一Xcode的iphoneos SDK，不依赖生产PATH中存在cc。Android Gradle按产品工程、原仓库和原始元数据选择实际变体，使用本轮GRADLE_USER_HOME；只有产品显式离线选项才传--offline，缺件和解析失败直接返回，不回写控制台库存。
 
+资源阶段完成只表示已解析闭包就绪，不强制整个正式构建离线。正常Android构建允许AGP按自身准确版本从既有Google Maven声明取得任务图延迟请求的AAPT2，并将Gradle缓存纳入本平台最新增量；显式`--offline`仍禁止获取缺件并准确失败。编译与依赖准备均由本仓执行，控制台只交付已声明工具。
+
 本次只修复本机双端Build；完整编译、签名、安装、回读以真实任务验收为准。
 
 Gradle模块元数据保持上游原文，跨版本、跨模块与平台变体交由Gradle解析。
 
 本机构建环境显式使用UTF-8 LC_ALL，避免C语言区域设置覆盖LANG导致Ruby与CocoaPods按ASCII-8BIT处理路径。
 
-本机签名继续使用原有指定开发身份：iOS在隔离HOME引用既有钥匙串，要求钱包团队有效Apple Development身份唯一，并只复制Apple签名有效、未过期且包含同一证书的钱包与测试授权描述文件；不导出私钥、不修改宿主搜索列表、不生成新身份。Android只读取已有开发材料，缺失即失败，删除自动生成替代密钥的路径。该修改恢复原先自动签名环境的可见性，不把签名缺件误报为用户没有保存密钥。完整Release配置编译、签名、安装和回读仍以真实任务验收为准。
+本机签名继续使用原有指定身份：iOS在隔离HOME引用既有钥匙串，要求钱包团队有效Apple Development身份唯一，并只复制Apple签名有效、未过期且包含同一证书的钱包与测试授权描述文件；不导出私钥、不修改宿主搜索列表、不生成新身份。Android从控制台已配置的正式`APP_KEY`取得本轮材料，与GitHub自动化使用相同格式和别名；产品旧开发密钥入口已删除。完整Release配置编译、签名、安装和回读仍以真实任务验收为准。
 
 
 ## 本机固定执行目录

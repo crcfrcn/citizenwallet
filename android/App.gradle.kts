@@ -79,7 +79,7 @@ android {
     sourceSets.getByName("main").res.directories.clear()
 
     namespace = "com.crcfrcn.citizenwallet"
-    compileSdk = 36
+    compileSdk = rootProject.extra["citizenWalletCompileSdk"] as Int
     ndkVersion = "28.2.13676358"
 
     // 只从CitizenWallet原生输出目录打包Rust库，产品仓库不保留生成的jniLibs。
