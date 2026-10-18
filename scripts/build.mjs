@@ -2066,11 +2066,13 @@ test('资源下载声明identity，自动解码正文按锁摘要校验而不误
  await assert.rejects(acquireArchive(archive(body,'https://example.invalid/incorrect'),{store:root,fetcher:async()=>new Response('incorrect',{headers:{'content-encoding':'gzip','content-length':'7'}})}),/摘要/);
 });
 test('产品依赖独立准备，外部工具根只验真不下载或写入',async t=>{
- const work=await sandbox(t),external=join(homedir(),'.local/share/registered-tools');
- const selected=checkedProductLibraryPaths(work,{toolRoot:external});
+ // 测试Runner把HOME设为本轮工作根；这里用未创建的兄弟路径表达真正外部的原件与工具根。
+ const work=await sandbox(t),outside=dirname(root),storeRoot=join(outside,'.citizenwallet-test-store'),
+  external=join(outside,'.citizenwallet-test-tools');
+ const selected=checkedProductLibraryPaths(work,{storeRoot,toolRoot:external});
  assert.equal(selected.toolRoot,external);assert.equal(selected.supplied,true);
- assert.throws(()=>checkedProductLibraryPaths(work,{toolRoot:'relative/tools'}),/原件库与源码或工作区交叉/);
- assert.throws(()=>checkedProductLibraryPaths(work,{toolRoot:join(work,'tools')}),/原件库与源码或工作区交叉/);
+ assert.throws(()=>checkedProductLibraryPaths(work,{storeRoot,toolRoot:'relative/tools'}),/原件库与源码或工作区交叉/);
+ assert.throws(()=>checkedProductLibraryPaths(work,{storeRoot,toolRoot:join(work,'tools')}),/原件库与源码或工作区交叉/);
  const tools=join(work,'registered-tools'),shared=join(tools,'shared');await mkdir(shared,{recursive:true});
  const library={root:tools,supply:true,work,tools:toolDefinitions,installed:new Map()};
  await assert.rejects(installTool(library,toolDefinitions.find(x=>x.id==='node'),{offline:false,fetcher:()=>assert.fail('工具根不应下载')}),/工具库缺少已声明工具/);
