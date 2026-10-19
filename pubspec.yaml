@@ -30,6 +30,8 @@ dependencies:
   flutter_secure_storage: 10.3.1
   shared_preferences: ^2.5.5
   path_provider: ^2.1.6
+  # 关于页只读取当前已安装应用的原生包版本，不查询远端Release。
+  package_info_plus: 10.2.2
   # 生物识别
   local_auth: ^3.0.2
   # 生物识别对话框文案本地化需要直接引用消息类(local_auth 不再导出它们)。

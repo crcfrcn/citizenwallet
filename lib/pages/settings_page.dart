@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../security/app_lock_service.dart';
 import 'widgets/biometric_auth_text.dart';
@@ -21,6 +22,7 @@ class _SettingsPageState extends State<SettingsPage> {
   // 单源加固实例(选项集中在 security/secure_storage.dart)。
   static const _secure = appSecureStorage;
   final LocalAuthentication _localAuth = LocalAuthentication();
+  late final Future<String> _installedVersion;
   bool _deviceLockEnabled = false;
   bool _pinLockEnabled = false;
   bool _duressModeEnabled = false;
@@ -29,7 +31,20 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    _installedVersion = _readInstalledVersion();
     _loadSettings();
+  }
+
+  // 关于页只展示当前安装包的原生版本；无效回执不得伪装成某次正式发布。
+  Future<String> _readInstalledVersion() async {
+    try {
+      final version = (await PackageInfo.fromPlatform()).version;
+      return RegExp(r'^[0-9]+\.[0-9]+\.[0-9]+$').hasMatch(version)
+          ? 'v$version'
+          : '版本未知';
+    } catch (_) {
+      return '版本未知';
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -256,25 +271,34 @@ class _SettingsPageState extends State<SettingsPage> {
                   padding: const EdgeInsets.all(16),
                   decoration:
                       AppTheme.cardDecoration(radius: AppTheme.radiusLg),
-                  child: const Column(
+                  child: Column(
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.shield_outlined,
+                          const Icon(Icons.shield_outlined,
                               size: 18, color: AppTheme.textSecondary),
-                          SizedBox(width: 12),
-                          Text('公民钱包',
+                          const SizedBox(width: 12),
+                          const Text('公民钱包',
                               style: TextStyle(
                                   color: AppTheme.textPrimary,
                                   fontWeight: FontWeight.w500)),
-                          Spacer(),
-                          Text('v1.0.0',
-                              style: TextStyle(
-                                  color: AppTheme.textTertiary, fontSize: 13)),
+                          const Spacer(),
+                          FutureBuilder<String>(
+                            future: _installedVersion,
+                            builder: (context, snapshot) => Text(
+                              snapshot.data ??
+                                  (snapshot.connectionState ==
+                                          ConnectionState.done
+                                      ? '版本未知'
+                                      : '读取中…'),
+                              style: const TextStyle(
+                                  color: AppTheme.textTertiary, fontSize: 13),
+                            ),
+                          ),
                         ],
                       ),
-                      SizedBox(height: 8),
-                      Row(
+                      const SizedBox(height: 8),
+                      const Row(
                         children: [
                           SizedBox(width: 30),
                           Text(

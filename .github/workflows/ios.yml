@@ -70,6 +70,7 @@ jobs:
             "$HOME/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager" 'build-tools;37.0.1' 'platforms;android-36' 'ndk;28.2.13676358'
           fi
       - name: 恢复 iOS Cargo 增量缓存
+        continue-on-error: true
         uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57
         with:
           path: |
@@ -87,6 +88,7 @@ jobs:
           test -n "$IOS_KEY" && test -n "$IOS_PROVISIONING_PROFILE"
           node scripts/build.mjs ci-build ios > "$RUNNER_TEMP/citizenwallet-ios-result.json"
       - name: 保存 iOS Cargo 增量缓存
+        continue-on-error: true
         uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57
         with:
           path: |
@@ -95,24 +97,7 @@ jobs:
           key: citizenwallet-cargo-ios-${{ github.run_id }}-${{ github.run_attempt }}
       - name: 创建并回读本平台正式 GitHub Release
         shell: bash
-        run: |
-          set -euo pipefail
-          plan="$GITHUB_WORKSPACE/target/build/ios/release-plan.json"
-          tag="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.tag)' "$plan")"
-          version="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.version)' "$plan")"
-          notes="$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.notes)' "$plan")"
-          assets="$GITHUB_WORKSPACE/target/build/ios/release-assets"
-          node scripts/build.mjs ci-create-release-tag ios
-          files=()
-          for extension in .ipa .json; do
-            files+=("$assets/citizenwallet-ios-v$version$extension#公民钱包·iOS·v$version$extension")
-          done
-          gh release create "$tag" "${files[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "公民钱包·iOS·v$version" --notes-file "$notes" --draft --latest=false
-          release_id="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
-          [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
-          node scripts/build.mjs ci-verify-release ios draft "$release_id"
-          node scripts/build.mjs ci-publish-release ios "$release_id"
-          node scripts/build.mjs ci-verify-release ios published "$release_id"
+        run: node scripts/build.mjs ci-release ios
       - name: 清理本平台编译现场
         if: always()
         shell: bash
