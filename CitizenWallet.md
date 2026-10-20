@@ -242,3 +242,12 @@ Flutter测试使用官方JSON reporter，Bash pipefail与tee将原始报告同�
 Android在官方android DSL中声明testBuildType = "release"，使AGP9仅为选定Release构建类型创建单测组件，沿用testReleaseUnitTest入口；不恢复同时创建Debug与Release单测的旧全局开关，不新增编译任务或修改业务与安全断言。本机调用通过JAVA_HOME和PATH交付现有Android Studio JBR，配置不安装Java。
 
 iOS签名静态库的符号验收使用现有Apple nm -g --no-llvm-bc，只读取已生成机器码的导出，避免Apple LLVM读取较新Rust LLVM的上游bitcode。四个必需sr25519导出断言、工具非零退出失败处理均保留；不安装其他LLVM工具，不调整Rust编译参数，宿主及Android检查不变。通过实际iOS编译入口验收，不以文本匹配测试代替真实符号检查。
+
+
+## 正式包安装与终态清理
+
+控制台公民页的钱包两个蓝色按钮沿用公开flow=build调用，产品入口实际执行安装；独立CLI的build仍供官方编译使用，install供独立安装使用。安装只选对应平台最新成功Run及同一正式Release/Tag，附件沿GitHub实际名称、大小和官方digest核对。IPA/APK直接保存于/Users/rhett/citizenwallet/target/，不建安装缓存子目录或索引；缺包或内容不符先下载到该目录直属临时文件，校验成功后替换，旧同平台正式包随后清除，最新包直接复用。下载失败保留原包且不安装旧包。临时iOS解包现场仅满足Apple工具要求，确认工具退出后清理，正式IPA始终留在target直属位置。
+
+Android用官方APK分析器、apksigner、adb install -r及安装后版本回读；iOS用系统unzip、plutil、codesign、devicectl及安装后版本回读，设备适用性由Apple官方安装流程实际检查。无唯一已授权手机、包身份或版本不符、工具失败和回读不符均失败；不卸载、不降级、不重签名、不编译。每个平台以target直属锁文件排除并发覆盖，工具退出未确认则保留现场和锁。配置与发布文件不承载安装功能，控制台不拥有产品安装实现。
+
+GitHub请求统一使用产品自己的官方REST实现，不依赖控制台PATH中的gh；令牌仅存在调用内存。先输出原Run真实终态再清理，按产品平台保留最新成功、最新失败各最多一条，活动任务保留；新成功资产保护只阻止旧成功删除，不阻止旧失败清理。旧Run、日志、Artifact和按归属核验的旧Release/Tag实际删除并回查；清理失败明确输出清理未完成，cleanup仅重试清理，不重新派发、测试或编译。官网沿同一原则独立实现。iOS工作流只补充IPA验收阶段和行号诊断，原业务、安全与产物断言全部保留。

@@ -112,19 +112,29 @@ jobs:
       - name: 验收正式IPA
         run: |
           set -euo pipefail
+          phase='解包正式IPA'
+          trap 'printf "IPA验收失败：%s，第%s行\n" "$phase" "$LINENO" >&2' ERR
           name="公民钱包·iOS·v$PRODUCT_VERSION"
           unzip -q "$PRODUCT_WORK/artifact/$name.ipa" -d "$PRODUCT_WORK/verify"
           apps=("$PRODUCT_WORK"/verify/Payload/*.app)
+          phase='唯一应用'
           test "${#apps[@]}" = 1
           app="${apps[0]}"
+          phase='签名完整性'
           codesign --verify --deep --strict "$app"
+          phase='应用标识'
           test "$(plutil -extract CFBundleIdentifier raw -o - "$app/Info.plist")" = ios.citizenwallet
+          phase='版本号'
           test "$(plutil -extract CFBundleShortVersionString raw -o - "$app/Info.plist")" = "$PRODUCT_VERSION"
+          phase='构建号'
           test "$(plutil -extract CFBundleVersion raw -o - "$app/Info.plist")" = "$GITHUB_RUN_NUMBER"
+          phase='签名信息'
           codesign -dv --verbose=4 "$app" 2> "$PRODUCT_WORK/signing/verified.txt"
+          phase='签名团队'
           grep -Fxq TeamIdentifier=MHYMVRN6FC "$PRODUCT_WORK/signing/verified.txt"
+          phase='读取导出符号'
           nm -g "$app/Runner" > "$PRODUCT_WORK/exports.txt"
-          for symbol in derive_hard public_key sign verify; do grep -Eq "[[:space:]]_citizen_sr25519_${symbol}$" "$PRODUCT_WORK/exports.txt"; done
+          for symbol in derive_hard public_key sign verify; do phase="导出符号：$symbol"; grep -Eq "[[:space:]]_citizen_sr25519_${symbol}$" "$PRODUCT_WORK/exports.txt"; done
       - name: 装配并核对正式附件
         run: |
           node scripts/build.mjs package "$PLATFORM"

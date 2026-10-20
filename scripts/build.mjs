@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // 产品流程只调用官方工具；版本与记录保留是本产品自己的规则。
 import childProcess,{spawn} from 'node:child_process';
-import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,copyFileSync,cpSync,rmSync,readdirSync,lstatSync,realpathSync,chmodSync,existsSync,rmdirSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,copyFileSync,cpSync,rmSync,readdirSync,lstatSync,realpathSync,chmodSync,existsSync,rmdirSync,openSync,closeSync,writeSync,renameSync} from 'node:fs';
 import {join,dirname,resolve,relative,sep,basename} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {tools,repository,platforms,initialVersion} from './config.mjs';
 export const root=fileURLToPath(new URL('../',import.meta.url));
 const controller=new AbortController();
@@ -40,9 +40,8 @@ function sourceView(work,names){
  for(const name of names)copy(join(root,name),join(project,name));return project;
 }
 // 每次调用拥有独立进程组；取消或未退出的后代禁止提前清场。
-export async function run(command,args,{cwd=root,env={},capture=false,input,githubToken,signal=controller.signal}={}){
+export async function run(command,args,{cwd=root,env={},capture=false,input,signal=controller.signal}={}){
  signal.throwIfAborted();const environment={...process.env,...env};delete environment.GH_TOKEN;delete environment.GITHUB_TOKEN;
- if(githubToken)environment.GH_TOKEN=githubToken;
  return new Promise((ok,fail)=>{
   const child=spawn(command,args,{cwd,env:environment,detached:true,stdio:[input===undefined?'ignore':'pipe',capture?'pipe':process.stderr,'pipe']});
   let output='',diagnostic='',failure,timer;
@@ -83,11 +82,14 @@ function claimCache(work){
  catch{if(owned)rmdirSync(lock);const base=directory(join(work,'cache'));return {base,release(){}};}
 }
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
-async function github(path,{method='GET',body,token}={}){
+// 产品直接使用GitHub官方REST；控制台只交付短期令牌，不依赖宿主PATH中的gh。
+export async function github(path,{method='GET',body,token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN,fetchImpl=fetch}={}){
  if(typeof path!=='string'||path.startsWith('/')||path.includes('..')||/[\r\n]/u.test(path))throw Error('GitHub产品路径无效');
- const args=['api','repos/'+repository+'/'+path,'--method',method,'-H','X-GitHub-Api-Version: 2026-03-10'];
- if(body!==undefined)args.push('--input','-');
- const text=await run('gh',args,{capture:true,githubToken:token,input:body===undefined?undefined:JSON.stringify(body)});return text?JSON.parse(text):null;
+ const response=await fetchImpl('https://api.github.com/repos/'+repository+'/'+path,{method,redirect:'error',signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30000)]),
+  headers:{...(token?{Authorization:'Bearer '+token}:{}),Accept:'application/vnd.github+json','Content-Type':'application/json','User-Agent':repository.split('/')[1],'X-GitHub-Api-Version':'2026-03-10'},
+  ...(body===undefined?{}:{body:JSON.stringify(body)})});
+ if(!response.ok)throw Object.assign(Error('GitHub HTTP '+response.status),{status:response.status});
+ return response.status===204?null:response.json();
 }
 async function rowsFor(platform,read){
  automationDisplayName(platform,initialVersion);const rows=[];
@@ -102,37 +104,45 @@ function releaseProof(release){
  try{return JSON.parse(/^<!-- automation:(\{[^\n]*\}) -->$/mu.exec(release.body||'')?.[1]||'null');}catch{return null;}
 }
 // 只删除同一产品平台已结束的旧记录；新成功正式资产完整后才能淘汰旧成功。
-export async function cleanupRuns(platform,{token=process.env.GH_TOKEN,read=path=>github(path,{token}),remove=path=>github(path,{method:'DELETE',token})}={}){
- const rows=await rowsFor(platform,read),keep=retainedRuns(rows),stale=rows.filter(row=>row.status==='completed'&&!keep.has(row.id));
- if(!stale.length)return {completed:true,deleted:[]};
+export async function cleanupRuns(platform,{token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN,read=path=>github(path,{token}),remove=path=>github(path,{method:'DELETE',token}),completedRun}={}){
+ const rows=await rowsFor(platform,read);
+ // GitHub列表可能晚于单Run终态；本轮真实终态参与同一次保留计算。
+ if(completedRun){const index=rows.findIndex(row=>row.id===completedRun.id);if(index<0)rows.push(completedRun);else rows[index]=completedRun;}
+ const keep=retainedRuns(rows),stale=rows.filter(row=>row.status==='completed'&&!keep.has(row.id));
+ if(!stale.length)return {completed:true,deleted:[],kept:[...keep]};
  const releases=[];for(let page=1;;page++){const values=await read('releases?per_page=100&page='+page);releases.push(...values);if(values.length<100)break;}
  const absent=async path=>{try{await read(path);return false;}catch(error){if(error.status===404||/HTTP 404/u.test(error.message))return true;throw error;}};
- const success=rows.find(row=>keep.has(row.id)&&row.conclusion==='success'&&row.status==='completed');
- if(stale.some(row=>row.conclusion==='success')){
+ const success=rows.find(row=>keep.has(row.id)&&row.conclusion==='success'&&row.status==='completed');let blocked;
+ if(stale.some(row=>row.conclusion==='success'))try{
   const release=releases.find(value=>releaseProof(value)?.run_id===success?.id);
   if(!release||release.draft||release.prerelease||release.tag_name!==success.display_title||release.assets?.length!==assetCount(platform))throw Error('最新成功正式Release或附件未确认，保留旧成功');
-  const tag=await read('git/ref/tags/'+encodeURIComponent(release.tag_name));if(tag.object?.type!=='commit'||tag.object.sha!==success.head_sha)throw Error('新成功Tag提交不符');
-  const artifacts=await read('actions/runs/'+success.id+'/artifacts?per_page=100');if(artifacts.artifacts?.filter(value=>value.name===success.display_title&&!value.expired&&value.size_in_bytes>0).length!==1)throw Error('最新成功Artifact未确认');
- }
+  const tag=await read('git/ref/tags/'+encodeURIComponent(release.tag_name));if(tag.object?.type!=='commit'||tag.object.sha!==success.head_sha)throw Error('新成功Tag提交不符，保留旧成功');
+  const artifacts=await read('actions/runs/'+success.id+'/artifacts?per_page=100');if(artifacts.artifacts?.filter(value=>value.name===success.display_title&&!value.expired&&value.size_in_bytes>0).length!==1)throw Error('最新成功Artifact未确认，保留旧成功');
+ }catch(error){blocked=error;}
  const deleted=[];
  for(const row of stale){
+  // 保护旧成功不阻挡旧失败清理；真正DELETE失败立即停止，不冒充清理完成。
+  if(blocked&&row.conclusion==='success')continue;
   const fresh=await read('actions/runs/'+row.id);if(fresh.status!=='completed'||fresh.head_sha!==row.head_sha||fresh.path!==row.path||fresh.conclusion!==row.conclusion)throw Error('删除前Run身份或终态变化');
   for(const release of releases){
    const proof=releaseProof(release);
-   // 历史官网记录只按其官方Run/提交回执核对删除，不恢复旧执行接口或旧命名。
    const historical=Object.keys(platforms).length===1&&release.body===`Source: ${row.head_sha}\nRun: ${row.id} / ${row.run_attempt}`;
    if(!(proof?.run_id===row.id&&proof.platform===platform)&&!historical)continue;
    if(release.target_commitish!==row.head_sha)throw Error('旧Release提交不符');
    const tagPath='git/ref/tags/'+encodeURIComponent(release.tag_name);
-   // 先删Tag后删Release；中断重试仍有原Release回执，不遗失待清理Tag的归属。
+   // 先删Tag后删Release，失败重试仍以原Release回执确认归属。
    if(!await absent(tagPath)){const tag=await read(tagPath);if(tag.object?.type!=='commit'||tag.object.sha!==row.head_sha)throw Error('旧Tag归属不符');await remove('git/refs/tags/'+encodeURIComponent(release.tag_name));}
    await remove('releases/'+release.id);
    if(!await absent('releases/'+release.id)||!await absent(tagPath))throw Error('旧Release或Tag删除未确认');
   }
   await remove('actions/runs/'+row.id);if(!await absent('actions/runs/'+row.id))throw Error('旧Run删除未确认');deleted.push(row.id);
  }
- const remaining=await rowsFor(platform,read),expected=retainedRuns(remaining);if(remaining.some(row=>row.status==='completed'&&!expected.has(row.id)))throw Error('旧记录清理未完成');
- return {completed:true,deleted};
+ const remaining=await rowsFor(platform,read);
+ if(completedRun){const index=remaining.findIndex(row=>row.id===completedRun.id);if(index<0)remaining.push(completedRun);else remaining[index]=completedRun;}
+ const expected=retainedRuns(remaining);
+ if(blocked)throw blocked;
+ if(remaining.some(row=>row.status==='completed'&&!expected.has(row.id)))throw Error('旧记录清理未完成');
+ return {completed:true,deleted,kept:[...expected]};
 }
 export async function automate(platform,{token,read=path=>github(path,{token}),dispatch=spec=>github('actions/workflows/'+spec.workflow+'/dispatches',{method:'POST',body:{ref:spec.ref,inputs:spec.inputs},token}),notify=report,wait=ms=>new Promise(done=>setTimeout(done,ms))}={}){
  automationDisplayName(platform,initialVersion);const base=directory(join(root,'target/automation')),lock=join(base,platform);mkdirSync(lock);
@@ -142,17 +152,107 @@ export async function automate(platform,{token,read=path=>github(path,{token}),d
   for(;;){
    let value;try{value=await read('actions/runs/'+runID);}catch(error){if(!/HTTP (408|429|500|502|503|504)/u.test(error.message))throw error;await wait(3000);continue;}
    if(value.id!==runID||value.path!=='.github/workflows/'+platform+'.yml'||value.head_branch!=='main')throw Error('原Run身份不符');
-   if(value.status==='completed'){await cleanupRuns(platform,{token,read});notify({event:'run',run:value});break;}
-   notify({event:'run',run:value});notify({event:'jobs',jobs:await read('actions/runs/'+runID+'/jobs?per_page=100')});await wait(3000);
+   // 真实终态先交付界面，清理失败不能把已结束Run变成未确认。
+   notify({event:'run',run:value});
+   if(value.status==='completed'){
+    try{const result=await cleanupRuns(platform,{token,read,completedRun:value});notify({event:'output',stream:'stdout',data:Buffer.from('清理完成：最新成功、最新失败各最多一条；实际删除旧Run '+result.deleted.length+' 条\n').toString('base64')});}
+    catch(error){notify({event:'output',stream:'stderr',data:Buffer.from('清理未完成：'+error.message+'\n').toString('base64')});throw error;}
+    break;
+   }
+   notify({event:'jobs',jobs:await read('actions/runs/'+runID+'/jobs?per_page=100')});await wait(3000);
   }return {runID};
  }finally{rmdirSync(lock);}
 }
-// 控制台仅引用本产品入口；独立CLI与调度共用这些函数。
+// 对应平台最近一次成功Run决定正式包，不能使用跨平台latest别名。
+export async function latestInstallAsset(platform,{token,read=path=>github(path,{token})}={}){
+ automationDisplayName(platform,initialVersion);
+ const latest=(await rowsFor(platform,read)).filter(row=>row.status==='completed'&&row.conclusion==='success').sort((a,b)=>Date.parse(b.updated_at)-Date.parse(a.updated_at)||b.id-a.id)[0];
+ if(!latest)throw Error('对应平台没有成功正式版');
+ const prefix=productTitle+'·'+platforms[platform]+'·v',version=latest.display_title?.startsWith(prefix)?latest.display_title.slice(prefix.length):'';
+ if(automationDisplayName(platform,version)!==latest.display_title||!Number.isSafeInteger(latest.run_number)||latest.run_number<=0)throw Error('正式Run身份或构建号无效');
+ const encoded=encodeURIComponent(latest.display_title),release=await read('releases/tags/'+encoded),tag=await read('git/ref/tags/'+encoded);
+ if(release.draft||release.prerelease||release.tag_name!==latest.display_title||release.target_commitish!==latest.head_sha||tag.object?.type!=='commit'||tag.object.sha!==latest.head_sha)throw Error('正式Release与成功Run不一致');
+ const assets=release.assets?.filter(asset=>asset.name?.endsWith(platform==='ios'?'.ipa':'.apk'));
+ if(assets?.length!==1)throw Error('正式安装附件缺失或不唯一');const asset=assets[0];
+ if(!Number.isSafeInteger(asset.id)||asset.id<=0||!Number.isSafeInteger(asset.size)||asset.size<=0||asset.size>512*1024**2||!/^sha256:[0-9a-f]{64}$/u.test(asset.digest||'')||asset.name!==basename(asset.name)||/[\\/\x00-\x1f\x7f]/u.test(asset.name)||asset.name.startsWith('.'))throw Error('正式附件名称、大小或官方摘要无效');
+ return {asset,platform,version,buildNumber:String(latest.run_number)};
+}
+// GitHub官方附件端点；跨域下载不转发令牌，不接受HTTP或任意下载域名。
+export async function downloadInstallAsset(asset,path,{token,fetchImpl=fetch}={}){
+ let response=await fetchImpl('https://api.github.com/repos/'+repository+'/releases/assets/'+asset.id,{redirect:'manual',signal:controller.signal,headers:{Accept:'application/octet-stream','X-GitHub-Api-Version':'2026-03-10',...(token?{Authorization:'Bearer '+token}:{})}});
+ if(response.status===302){
+  const url=new URL(response.headers.get('location'));
+  if(url.protocol!=='https:'||url.username||url.password||!['release-assets.githubusercontent.com','objects.githubusercontent.com','github.com'].includes(url.hostname))throw Error('正式附件下载地址无效');
+  response=await fetchImpl(url,{redirect:'error',signal:controller.signal});
+ }
+ if(!response.ok||!response.body)throw Error('正式附件下载失败，HTTP '+response.status);
+ const fd=openSync(path,'wx',0o600);let size=0;
+ try{for await(const bytes of response.body){size+=bytes.length;if(size>asset.size)throw Error('正式附件下载大小超限');writeSync(fd,bytes);}}finally{closeSync(fd);}
+}
+function installRoot(base=join(root,'target')){if(base!==join(root,'target')&&!insideTarget(base))throw Error('安装现场不属于本产品target');mkdirSync(base,{recursive:true});if(lstatSync(base).isSymbolicLink()||realpathSync(base)!==base)throw Error('target经过链接');return base;}
+function validInstallFile(path,asset){
+ const stat=lstatSync(path,{throwIfNoEntry:false});if(!stat)return false;
+ if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw Error('安装包不是独立普通文件');
+ return stat.size===asset.size&&'sha256:'+sha(readFileSync(path))===asset.digest;
+}
+export async function ensureInstallPackage(platform,{token,read,base=join(root,'target'),download=(asset,path)=>downloadInstallAsset(asset,path,{token})}={}){
+ const selected=await latestInstallAsset(platform,{token,read});installRoot(base);const path=join(base,selected.asset.name);
+ if(!validInstallFile(path,selected.asset)){
+  const partial=join(base,selected.asset.name+'.'+randomUUID()+'.part');
+  try{await download(selected.asset,partial);if(!validInstallFile(partial,selected.asset))throw Error('正式附件大小或官方摘要不一致');renameSync(partial,path);}finally{rmSync(partial,{force:true});}
+ }
+ // 只替换本仓target直属的同平台旧正式包，另一平台和编译现场不动。
+ const owned=platform==='ios'?/^(?:公民钱包·iOS·v|citizenwallet-ios-v)(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.ipa$/u:/^(?:公民钱包·Android·v|citizenwallet-android-v)(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.apk$/u;
+ for(const name of readdirSync(base))if(name!==selected.asset.name&&owned.test(name)){const old=join(base,name),stat=lstatSync(old);if(!stat.isFile()||stat.nlink!==1)throw Error('旧安装包不是独立普通文件');rmSync(old);}
+ return {...selected,path};
+}
+// 官方设备工具实际安装并回读版本；不卸载、不降级、不重签名、不编译。
+export async function installProduct(platform,{token,read,download,prepare=ensureInstallPackage,execute=run,environment:env=process.env,notify=report}={}){
+ automationDisplayName(platform,initialVersion);const base=installRoot(),lock=join(base,'.citizenwallet-'+platform+'.lock');let fd;
+ try{fd=openSync(lock,'wx',0o600);}catch(error){if(error.code==='EEXIST')throw Error('对应平台已有安装任务，禁止并发覆盖');throw error;}
+ let work,safe=true;
+ try{
+  const selected=await prepare(platform,{token,read,download}),capture={capture:true,env};
+  notify({event:'output',stream:'stdout',data:Buffer.from('安装正式版：'+selected.asset.name+'；安装包位置：'+selected.path+'\n').toString('base64')});
+  if(platform==='android'){
+   const sdk=env.ANDROID_HOME||env.ANDROID_SDK_ROOT||join(env.HOME||process.env.HOME,'Library/Android/sdk'),adb=join(sdk,'platform-tools/adb'),analyzer=join(sdk,'cmdline-tools/latest/bin/apkanalyzer');
+   const java=env.JAVA_HOME||'/Applications/Android Studio.app/Contents/jbr/Contents/Home',android={...capture,env:{...env,JAVA_HOME:java,PATH:join(java,'bin')+':'+(env.PATH||'/usr/bin:/bin')}};
+   const rows=(await execute(adb,['devices'],capture)).split('\n').map(line=>line.trim().split(/\s+/u)),devices=rows.filter(row=>row.length===2&&row[1]==='device'&&!row[0].startsWith('emulator-')&&(!env.ANDROID_SERIAL||row[0]===env.ANDROID_SERIAL));
+   if(devices.length!==1)throw Error('需要且只能有一台已授权的Android手机');const device=devices[0][0],identity='com.crcfrcn.citizenwallet';
+   const app=await execute(analyzer,['manifest','application-id',selected.path],android),version=await execute(analyzer,['manifest','version-name',selected.path],android),number=await execute(analyzer,['manifest','version-code',selected.path],android);
+   if(app!==identity||version!==selected.version||number!==selected.buildNumber)throw Error('正式APK应用标识或版本不一致');
+   await execute(join(sdk,'build-tools/36.0.0/apksigner'),['verify',selected.path],android);
+   await execute(adb,['-s',device,'install','-r',selected.path],capture);
+   const installed=await execute(adb,['-s',device,'shell','dumpsys','package',identity],capture);
+   if(!new RegExp('(?:^|\\s)versionName='+selected.version.replaceAll('.','\\.')+'(?:\\s|$)','u').test(installed)||!new RegExp('(?:^|\\s)versionCode='+selected.buildNumber+'(?:\\s|$)','u').test(installed))throw Error('Android安装后版本回读不一致');
+  }else{
+   const data=JSON.parse(await execute('/usr/bin/xcrun',['devicectl','list','devices','--json-output','-','--omit-deprecated-fields-in-json','--quiet'],capture));
+   const devices=data.result?.devices?.filter(device=>device.properties?.hardware?.platform==='iOS'&&device.properties.hardware.reality==='physical'&&device.properties.connection?.state==='connected'&&device.properties.connection.pairingState==='paired');
+   if(devices?.length!==1)throw Error('需要且只能有一台已连接并配对的iOS手机');const device=devices[0].identifier,identity='ios.citizenwallet';
+   work=mkdtempSync(join(base,'.citizenwallet-ios-'));
+   const entries=(await execute('/usr/bin/unzip',['-Z','-1',selected.path],capture)).split('\n');
+   if(entries.some(name=>name.startsWith('/')||name.includes('\\')||name.split('/').includes('..')))throw Error('IPA成员路径越界');
+   await execute('/usr/bin/unzip',['-q',selected.path,'-d',work],capture);
+   const payload=join(work,'Payload'),apps=readdirSync(payload).filter(name=>name.endsWith('.app'));if(apps.length!==1)throw Error('IPA应用缺失或不唯一');const app=join(payload,apps[0]);
+   const info=JSON.parse(await execute('/usr/bin/plutil',['-convert','json','-o','-',join(app,'Info.plist')],capture));
+   if(info.CFBundleIdentifier!==identity||info.CFBundleShortVersionString!==selected.version||String(info.CFBundleVersion)!==selected.buildNumber)throw Error('正式IPA应用标识或版本不一致');
+   await execute('/usr/bin/codesign',['--verify','--deep','--strict',app],capture);
+   await execute('/usr/bin/xcrun',['devicectl','device','install','app','--device',device,app,'--quiet'],capture);
+   const installed=JSON.parse(await execute('/usr/bin/xcrun',['devicectl','device','info','apps','--device',device,'--bundle-id',identity,'--include-all-apps','--json-output','-','--quiet'],capture));
+   const found=installed.result?.apps?.filter(value=>value.bundleIdentifier===identity);
+   if(found?.length!==1||found[0].version!==selected.version||String(found[0].bundleVersion)!==selected.buildNumber)throw Error('iOS安装后版本回读不一致');
+  }
+  return {completed:true,platform,version:selected.version,path:selected.path};
+ }catch(error){safe=!error.keepWork;throw error;}
+ finally{closeSync(fd);if(safe){if(work)rmSync(work,{recursive:true,force:true});rmSync(lock);}}
+}
+// 控制台蓝色build动作调用本仓安装；CLI build保留为自动化与独立编译入口。
 export function describeAction({flow,platform,inputs={}}){
  automationDisplayName(platform,initialVersion);
  if(flow==='release')return {repository,launch:options=>automate(platform,options)};
  if(flow==='cleanup')return {repository,launch:options=>cleanupRuns(platform,options)};
- if(['test','build','dev'].includes(flow)&&!(flow==='dev'&&platform!=='web'))return {command:process.execPath,args:[fileURLToPath(import.meta.url),flow,platform],cwd:root,env:{...process.env,...inputs.environment}};
+ if(flow==='build')return {repository,launch:async options=>{try{const result=await installProduct(platform,{...options,environment:{...process.env,...inputs.environment}});report({event:'exit',code:0});return result;}catch(error){report({event:'exit',code:1,error:error.message});throw error;}}};
+ if(flow==='test')return {command:process.execPath,args:[fileURLToPath(import.meta.url),flow,platform],cwd:root,env:{...process.env,...inputs.environment}};
  throw Error('本产品尚未声明该流程：'+flow);
 }
 
@@ -313,7 +413,7 @@ export async function packageProduct(platform){
 }
 async function main(){
  const [command,platform='android',...extra]=process.argv.slice(2);if(extra.length)throw Error('参数过多');
- if(command==='test')return testProduct(platform);if(command==='build')return buildProduct(platform);if(command==='package')return packageProduct(platform);
+ if(command==='test')return testProduct(platform);if(command==='build')return buildProduct(platform);if(command==='package')return packageProduct(platform);if(command==='install')return installProduct(platform,{token:process.env.GH_TOKEN||process.env.GITHUB_TOKEN});
  if(command==='candidate')return candidate(platform);if(command==='automate')return automate(platform,{token:process.env.GH_TOKEN});if(command==='cleanup')return cleanupRuns(platform);
  throw Error('未知产品命令');
 }
