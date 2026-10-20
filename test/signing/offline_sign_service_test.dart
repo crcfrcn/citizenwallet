@@ -549,7 +549,7 @@ void main() {
         ChainConstants.genesisHash,
       );
       expect(verification.decoded!.reviewFields['spec_version'], '1');
-      expect(verification.decoded!.reviewFields['transaction_version'], '0');
+      expect(verification.decoded!.reviewFields['transaction_version'], ChainConstants.transactionVersion.toString());
     });
 
     test('链交易严格拒绝错创世、错交易版本和裸 call data，但不锁 spec_version', () {
@@ -572,7 +572,7 @@ void main() {
         SignDecisionStatus.reject,
       );
       expect(
-        verify(_withSigningTailHex(callData, transactionVersion: 1)),
+        verify(_withSigningTailHex(callData, transactionVersion: ChainConstants.transactionVersion + 1)),
         SignDecisionStatus.reject,
       );
       expect(verify(callData), SignDecisionStatus.reject);

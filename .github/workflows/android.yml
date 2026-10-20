@@ -1,141 +1,190 @@
+# 产品自己的唯一自动化工作流；配置文件不执行编译或GitHub操作。
 name: 公民钱包·Android
 run-name: 公民钱包·Android·v${{ inputs.version }}
-on:
+'on':
   workflow_dispatch:
     inputs:
       version:
-        description: 本平台自动化候选版本
+        description: 最新成功版本计算的候选版本，失败不占号
         required: true
         type: string
 concurrency:
-  group: "${{ github.repository }}-android"
+  group: citizenwallet-android
   cancel-in-progress: false
 permissions:
   contents: write
-  actions: read
+  actions: write
+defaults:
+  run:
+    shell: bash
+env:
+  PLATFORM: android
+  PRODUCT_VERSION: ${{ inputs.version }}
+  PRODUCT_WORK: ${{ github.workspace }}/target/build/${{ github.run_id }}-${{ github.run_attempt }}
+  SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
 jobs:
-  release:
+  compile:
     name: 公民钱包·Android·v${{ inputs.version }}
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.repository == 'crcfrcn/citizenwallet'
     runs-on: xcode-27
     timeout-minutes: 360
-    env:
-      GH_TOKEN: "${{ github.token }}"
-      CITIZENWALLET_AUTOMATION_VERSION: "${{ inputs.version }}"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: "${{ github.sha }}"
-          fetch-depth: 0
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 25.2.1
-      - name: 清理本平台上轮失败候选
-        run: node scripts/build.mjs ci-reconcile-failed-candidate android
-      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
-        with:
-          toolchain: 1.97.1
-          targets: aarch64-linux-android
-          components: rust-src, clippy
-      - name: 准备本平台工具
-        shell: bash
-        run: |
-          set -euo pipefail
-          brew install bash
-          curl --fail --location --retry 3 -o "$RUNNER_TEMP/flutter.zip" https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_3.47.2-stable.zip
-          echo 'f456fd6733053d9301828a2e702d6cbec872923126809aa8c48eb0a696d6cc01  '"$RUNNER_TEMP/flutter.zip" | shasum -a 256 --check
-          ditto -x -k "$RUNNER_TEMP/flutter.zip" "$RUNNER_TEMP"
-          {
-            echo "FLUTTER_ROOT=$RUNNER_TEMP/flutter"
-            echo "JAVA_HOME=$JAVA_HOME_17_arm64"
-            echo "ANDROID_HOME=$HOME/Library/Android/sdk"
-            echo "ANDROID_SDK_ROOT=$HOME/Library/Android/sdk"
-            echo "ANDROID_JAVA_HOME=$JAVA_HOME_17_arm64"
-            echo "ANDROID_SDK_HOME=$HOME/Library/Android/sdk"
-            echo "PRODUCT_BASH_BIN=$(brew --prefix bash)/bin/bash"
-            echo "PRODUCT_GIT_BIN=$(command -v git)"
-          } >> "$GITHUB_ENV"
-          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
-          echo "$JAVA_HOME_17_arm64/bin" >> "$GITHUB_PATH"
-          if [ "android" = android ]; then
-            curl --fail --location --retry 3 -o "$RUNNER_TEMP/gradle.zip" https://services.gradle.org/distributions/gradle-9.1.0-bin.zip
-            echo 'a17ddd85a26b6a7f5ddb71ff8b05fc5104c0202c6e64782429790c933686c806  '"$RUNNER_TEMP/gradle.zip" | shasum -a 256 --check
-            unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
-            echo "CITIZENWALLET_GRADLE_BIN=$RUNNER_TEMP/gradle-9.1.0/bin/gradle" >> "$GITHUB_ENV"
-            "$HOME/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0' 'platforms;android-36' 'ndk;28.2.13676358' 'cmake;3.31.6'
-            echo "ANDROID_NDK_HOME=$HOME/Library/Android/sdk/ndk/28.2.13676358" >> "$GITHUB_ENV"
-            echo "$HOME/Library/Android/sdk/cmake/3.31.6/bin" >> "$GITHUB_PATH"
-          fi
-      - name: 准备产品锁定的 Flutter Android 修订
-        shell: bash
-        run: node scripts/build.mjs ci-prepare-flutter android
-      - name: 恢复 Android Cargo 增量缓存
-        continue-on-error: true
-        uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57
-        with:
-          path: |
-            target/cache/cargo/android
-            target/cache/build/android
-          key: citizenwallet-cargo-android-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: citizenwallet-cargo-android-
-      - name: 本 Runner 编译、签名并验收
+      - name: 核对准确候选与活动Run
         env:
-          APP_KEY: "${{ secrets.APP_KEY }}"
-        shell: bash
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test -n "$APP_KEY"
-          node scripts/build.mjs ci-build android > "$RUNNER_TEMP/citizenwallet-android-result.json"
-      - name: 保存 Android Cargo 增量缓存
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node --input-type=module -e 'import {automationDisplayName} from "./scripts/build.mjs"; automationDisplayName(process.env.PLATFORM,process.env.PRODUCT_VERSION);'
+          expected="$(node scripts/build.mjs candidate "$PLATFORM")"
+          test "$expected" = "$PRODUCT_VERSION"
+      - name: 恢复官方缓存
+        id: cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+        timeout-minutes: 2
         continue-on-error: true
-        uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57
         with:
           path: |
-            target/cache/cargo/android
-            target/cache/build/android
-          key: citizenwallet-cargo-android-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: 创建并回读本平台正式 GitHub Release
-        shell: bash
-        run: node scripts/build.mjs ci-release android
-      - name: 清理本平台编译现场
-        if: always()
-        shell: bash
-        run: |
-          if [ -d "target/build/android" ]; then node scripts/build.mjs finish android; fi
-  cleanup:
-    name: 公民钱包·Android·v${{ inputs.version }}
-    if: always()
-    needs: release
-    runs-on: xcode-27
-    timeout-minutes: 15
-    permissions:
-      actions: write
-      contents: write
-    env:
-      GH_TOKEN: "${{ github.token }}"
-      CITIZENWALLET_AUTOMATION_VERSION: "${{ inputs.version }}"
-      CITIZENWALLET_RELEASE_RESULT: "${{ needs.release.result }}"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-        with:
-          ref: "${{ github.sha }}"
-          persist-credentials: false
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
-        with:
-          node-version: 25.2.1
-      - name: 清理 Android 旧 Run 与 Cargo 缓存
-        if: always()
-        shell: bash
+            target/cache
+          key: citizenwallet-android-official-25.2.1-1.97.1-3.47.2-${{ hashFiles('pubspec.lock', 'Podfile.lock', 'signing/Cargo.lock', 'package-lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: citizenwallet-android-official-25.2.1-1.97.1-3.47.2-${{ hashFiles('pubspec.lock', 'Podfile.lock', 'signing/Cargo.lock', 'package-lock.json') }}-
+      - name: 准备官方Android工具
         run: |
           set -euo pipefail
-          if ! node scripts/build.mjs ci-cleanup android; then
-            echo '::error::Android Run/Cargo 缓存清理失败；构建与 Release 结果保持原回执。'
-            exit 1
-          fi
-          if [[ "$CITIZENWALLET_RELEASE_RESULT" == success ]]; then
-            if ! node scripts/build.mjs ci-retain-releases android; then
-              echo '::error::Android 旧 Release/Tag 清理失败；不得报告本轮自动化成功。'
-              exit 1
+          echo "JAVA_HOME=$JAVA_HOME_17_arm64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_arm64/bin" >> "$GITHUB_PATH"
+          sdk="$HOME/Library/Android/sdk"
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$sdk/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "$sdk/build-tools/36.0.0" >> "$GITHUB_PATH"
+          echo "$sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+      - name: 真实代码回归与严格分析
+        run: |
+          node scripts/build.mjs test "$PLATFORM"
+      - name: 准备本轮正式Android签名
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$PRODUCT_WORK/signing"
+          node --input-type=module <<'JS'
+          import {writeFileSync,appendFileSync} from 'node:fs';
+          const fields={};
+          for(const raw of (process.env.APP_KEY||'').split(/\r?\n/u)){
+           const line=raw.trim();if(!line||line.startsWith('#'))continue;const at=line.indexOf('=');
+           if(at<1||Object.hasOwn(fields,line.slice(0,at)))throw Error('APP_KEY字段无效');fields[line.slice(0,at)]=line.slice(at+1);
+          }
+          if(Object.keys(fields).some(key=>!['keystore','password','alias','keyPassword'].includes(key))||!fields.keystore||!fields.password||!/^[A-Za-z0-9._-]{1,128}$/u.test(fields.alias||'upload'))throw Error('正式签名字段缺失或无效');
+          const bytes=Buffer.from(fields.keystore,'base64');if(bytes.toString('base64')!==fields.keystore||bytes.length<1024)throw Error('正式签名库无效');
+          const dir=process.env.PRODUCT_WORK+'/signing',escape=value=>[...value].map(c=>c.charCodeAt(0)>126?'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'):/[\\:=#!\s]/u.test(c)?'\\'+c:c).join('');
+          writeFileSync(dir+'/upload.jks',bytes,{mode:0o600});writeFileSync(dir+'/password',fields.password,{mode:0o600});writeFileSync(dir+'/alias',fields.alias||'upload',{mode:0o600});
+          writeFileSync(dir+'/key.properties',Object.entries({storeFile:dir+'/upload.jks',storePassword:fields.password,keyAlias:fields.alias||'upload',keyPassword:fields.keyPassword||fields.password}).map(([key,value])=>key+'='+escape(value)).join('\n')+'\n',{mode:0o600});
+          appendFileSync(process.env.GITHUB_ENV,'ANDROID_KEY_PROPERTIES='+dir+'/key.properties\n');
+          JS
+          keytool -exportcert -alias "$(cat "$PRODUCT_WORK/signing/alias")" -keystore "$PRODUCT_WORK/signing/upload.jks" -storepass:file "$PRODUCT_WORK/signing/password" -file "$PRODUCT_WORK/signing/expected.der" >/dev/null
+      - name: 编译本平台正式产物
+        run: |
+          node scripts/build.mjs build "$PLATFORM"
+      - name: 验收正式APK和AAB
+        run: |
+          set -euo pipefail
+          name="公民钱包·Android·v$PRODUCT_VERSION"
+          artifact="$PRODUCT_WORK/artifact"
+          apksigner verify --verbose --print-certs "$artifact/$name.apk" > "$PRODUCT_WORK/signing/apk.txt"
+          zipalign -c -P 16 -v 4 "$artifact/$name.apk" > "$PRODUCT_WORK/zipalign.txt"
+          test "$(apkanalyzer manifest application-id "$artifact/$name.apk")" = com.crcfrcn.citizenwallet
+          test "$(apkanalyzer manifest version-name "$artifact/$name.apk")" = "$PRODUCT_VERSION"
+          test "$(apkanalyzer manifest version-code "$artifact/$name.apk")" = "$GITHUB_RUN_NUMBER"
+          jarsigner -verify "$artifact/$name.aab" > "$PRODUCT_WORK/signing/aab.txt"
+          grep -Fq 'jar verified.' "$PRODUCT_WORK/signing/aab.txt"
+          keytool -printcert -jarfile "$artifact/$name.aab" -rfc > "$PRODUCT_WORK/signing/aab.pem"
+          openssl x509 -in "$PRODUCT_WORK/signing/aab.pem" -outform DER -out "$PRODUCT_WORK/signing/aab.der"
+          cmp "$PRODUCT_WORK/signing/expected.der" "$PRODUCT_WORK/signing/aab.der"
+          openssl x509 -inform DER -in "$PRODUCT_WORK/signing/expected.der" -noout -fingerprint -sha256 | tr -d ':' | cut -d= -f2 | tr '[:upper:]' '[:lower:]' > "$PRODUCT_WORK/signing/expected.sha"
+          grep -Fq "certificate SHA-256 digest: $(cat "$PRODUCT_WORK/signing/expected.sha")" "$PRODUCT_WORK/signing/apk.txt"
+          node --input-type=module <<'JS'
+          import {execFileSync} from 'node:child_process';import {mkdirSync,readdirSync} from 'node:fs';
+          const title='公民钱包·Android·v'+process.env.PRODUCT_VERSION,work=process.env.PRODUCT_WORK;
+          for(const suffix of ['apk','aab']){
+           const file=work+'/artifact/'+title+'.'+suffix,prefix=suffix==='apk'?'lib/':'base/lib/',names=execFileSync('unzip',['-Z1',file],{encoding:'utf8'}).trim().split('\n');
+           if(!names.includes(prefix+'arm64-v8a/libcitizenwallet_signer.so')||names.some(name=>name.startsWith(prefix)&&name.endsWith('.so')&&!name.startsWith(prefix+'arm64-v8a/')))throw Error('正式包原生库或ABI无效');
+           const output=work+'/verify-'+suffix;mkdirSync(output);execFileSync('unzip',['-q',file,prefix+'*','-d',output]);
+           for(const name of names.filter(name=>name.startsWith(prefix)&&name.endsWith('.so'))){const text=execFileSync(process.env.ANDROID_NDK_HOME+'/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-readelf',['-lW',output+'/'+name],{encoding:'utf8'}),loads=text.split('\n').filter(line=>/^\s*LOAD\s/u.test(line));if(!loads.length||loads.some(line=>parseInt(line.trim().split(/\s+/u).at(-1),16)<16384))throw Error('正式包ELF不满足16KB对齐');}
+          }
+          JS
+      - name: 装配并核对正式附件
+        run: |
+          node scripts/build.mjs package "$PLATFORM"
+      - name: 公民钱包·Android·v${{ inputs.version }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: 公民钱包·Android·v${{ inputs.version }}
+          path: ${{ env.PRODUCT_WORK }}/artifact/*
+          if-no-files-found: error
+      - name: 创建正式Tag和Release并逐件回读
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          name="公民钱包·Android·v$PRODUCT_VERSION"
+          encoded="$(printf '%s' "$name" | jq -sRr @uri)"
+          node --input-type=module <<'JS'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const proof=JSON.parse(readFileSync(process.env.PRODUCT_WORK+'/proof.json'));
+          writeFileSync(process.env.PRODUCT_WORK+'/notes.md','<!-- automation:'+JSON.stringify(proof)+' -->\n');
+          JS
+          created_tag=0
+          rollback() {
+            code=$?
+            if [ "$code" -ne 0 ] && [ "$created_tag" = 1 ]; then
+              if gh release view "$name" --repo "$GITHUB_REPOSITORY" --json body > "$PRODUCT_WORK/rollback.json"; then
+                if jq -er --arg id "$GITHUB_RUN_ID" '.body|capture("automation:(?<proof>[^\n]*) -->").proof|fromjson|select(.run_id==($id|tonumber))' "$PRODUCT_WORK/rollback.json" >/dev/null; then
+                  gh release delete "$name" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || echo '本轮正式候选撤销失败' >&2
+                fi
+              else
+                gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$encoded" || echo '本轮Tag撤销失败' >&2
+              fi
             fi
-          fi
+            exit "$code"
+          }
+          trap rollback EXIT
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$name" -f "sha=$GITHUB_SHA" > "$PRODUCT_WORK/tag.json"
+          created_tag=1
+          assets=("$PRODUCT_WORK"/artifact/*)
+          gh release create "$name" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$name" --notes-file "$PRODUCT_WORK/notes.md"
+          mkdir "$PRODUCT_WORK/readback"
+          gh release download "$name" --repo "$GITHUB_REPOSITORY" --dir "$PRODUCT_WORK/readback"
+          for file in "${assets[@]}"; do cmp "$file" "$PRODUCT_WORK/readback/$(basename "$file")"; done
+          gh release edit "$name" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest=false
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$encoded" > "$PRODUCT_WORK/release.json"
+          jq -e --arg name "$name" --arg sha "$GITHUB_SHA" --argjson count 4 '.name==$name and .tag_name==$name and .target_commitish==$sha and .draft==false and .prerelease==false and (.assets|length)==$count' "$PRODUCT_WORK/release.json" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$encoded" | jq -e --arg sha "$GITHUB_SHA" '.object.type=="commit" and .object.sha==$sha' >/dev/null
+      - name: 保存官方缓存
+        if: always()
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          path: target/cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: 清理本轮现场与签名输入
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,os,shlex,subprocess,shutil
+          p=pathlib.Path(os.environ['PRODUCT_WORK']);signing=p/'signing'
+          if (signing/'keychains').exists():subprocess.run(['security','list-keychains','-d','user','-s',*shlex.split((signing/'keychains').read_text())],check=True)
+          if (signing/'release.keychain-db').exists():subprocess.run(['security','delete-keychain',str(signing/'release.keychain-db')],check=True)
+          if (signing/'installed-profile').exists():pathlib.Path((signing/'installed-profile').read_text()).unlink(missing_ok=True)
+          if p.exists():shutil.rmtree(p)
+          PY

@@ -145,13 +145,13 @@ void main() {
     final androidBuild = sourceFile('android/app/build.gradle.kts')
         .readAsStringSync();
     final androidEntry = sourceFile(
-      'android/source/MainActivity.kt',
+      'android/app/src/main/kotlin/com/crcfrcn/citizenwallet/MainActivity.kt',
     ).readAsStringSync();
-    final iosProject = sourceFile('ios/project/Runner.pbxproj')
+    final iosProject = sourceFile('ios/Runner.xcodeproj/project.pbxproj')
         .readAsStringSync();
-    final iosEntry = sourceFile('ios/source/AppDelegate.swift')
+    final iosEntry = sourceFile('ios/Runner/AppDelegate.swift')
         .readAsStringSync();
-    final infoPlist = sourceFile('ios/source/Info.plist').readAsStringSync();
+    final infoPlist = sourceFile('ios/Runner/Info.plist').readAsStringSync();
     final podfile = sourceFile('ios/Podfile').readAsStringSync();
 
     expect(
@@ -179,21 +179,16 @@ void main() {
       contains('<key>ITSAppUsesNonExemptEncryption</key>\n\t<false/>'),
     );
     expect(infoPlist, isNot(contains('ITSEncryptionExportComplianceCode')));
+    // 使用CocoaPods官方选项，不再手写Isar脚本输出清单。
     expect(
       podfile,
-      contains(
-        r'${PODS_XCFRAMEWORKS_BUILD_DIR}/isar_community_flutter_libs/libisar.a',
-      ),
+      contains("install! 'cocoapods', :disable_input_output_paths => true"),
     );
-    // 首次 pod install 的 post_install 阶段可能尚无 Isar 支持目录。
-    expect(podfile, contains('FileUtils.mkdir_p(isar_support_dir)'));
+    expect(podfile, isNot(contains('isar_output_list')));
+    expect(podfile, isNot(contains('FileUtils.mkdir_p(isar_support_dir)')));
     expect(podfile, contains('flutter_install_all_ios_pods File.dirname(__FILE__)'));
     expect(podfile, isNot(contains("target 'RunnerTests'")));
     expect(podfile, isNot(contains('File.dirname(File.realpath(__FILE__))')));
-    expect(
-      podfile.indexOf('FileUtils.mkdir_p(isar_support_dir)'),
-      lessThan(podfile.indexOf('File.write(\n    isar_output_list')),
-    );
     expect(podfile, isNot(contains('isar.framework')));
   });
 }

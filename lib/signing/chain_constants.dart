@@ -18,7 +18,8 @@ class ChainConstants {
 
   /// 当前钱包支持的 Substrate `transaction_version`。
   ///
-  /// `spec_version` 会随 Runtime 业务升级而变化，钱包只解析展示；只有交易编码格式
-  /// 变化时才提高 `transaction_version`，届时旧钱包必须拒签并升级。
+  /// 按公民链版本政策，每次正式 Runtime 升级，两个版本各自在此前部署值上加1；
+  /// 本值同步为该次 Runtime 的 transaction_version，旧钱包继续严格拒签。
+  /// 钱包对 spec_version 仍只解析展示；编辑或重复编译不触发版本递增。
   static const int transactionVersion = 0;
 }

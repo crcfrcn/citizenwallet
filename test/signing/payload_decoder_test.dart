@@ -3057,7 +3057,7 @@ void main() {
       final callData = [
         25, 0,
         1, // tier = National(1)
-        ...u32Le(110000), // scope_code
+        0, 0, 0, 0, // 全国地域固定四零字节
         ...compactU32(2), // houses 2 项
         ...compactVec(firstHouseCid),
         ...compactVec(secondHouseCid),
@@ -3076,6 +3076,7 @@ void main() {
       expect(decoded!.action, 'propose_enact_law');
       expect(decoded.fields['title'], '教育法');
       expect(decoded.fields['tier'], '国家级');
+      expect(decoded.fields['scope_code'], 'CN');
       expect(decoded.fields['vote_type'], '重要案');
       expect(decoded.fields['chapter_count'], '1');
       expect(decoded.fields['article_count'], '1');
@@ -3084,6 +3085,32 @@ void main() {
       expect(decoded.fields['actor_cid_number'], nrcActorCid);
       expect(decoded.fields['proposer_role_code'], proposerRoleCode);
       expect(decoded.fields['executive_cid_number'], executiveCid);
+
+      // 复用相同载荷，只替换固定地域槽；院序列和后续字段位置必须保持。
+      for (final entry in [
+        (2, [71, 68, 0, 0], 'GD'),
+        (3, [71, 68, 1, 0], 'GD001'),
+        (3, [71, 90, 1, 0], 'GZ001'),
+        (3, [71, 68, 231, 3], 'GD999'),
+      ]) {
+        final regional = List<int>.of(callData)..[2] = entry.$1;
+        regional.setRange(3, 7, entry.$2);
+        final result = PayloadDecoder.decode(hexOf(withSigningTail(regional)));
+        expect(result?.fields['scope_code'], entry.$3);
+        expect(result?.fields['houses'], decoded.fields['houses']);
+        expect(result?.fields['effective_at'], '5000');
+      }
+      for (final entry in [
+        (1, [71, 68, 0, 0]), // 全国不能携省码。
+        (2, [0, 0, 0, 0]), // 省级不能回退为全国。
+        (2, [103, 100, 0, 0]), // 小写省码拒绝。
+        (2, [71, 68, 1, 0]), // 省级不携市号。
+        (3, [71, 68, 232, 3]), // 超出原三位市号形状。
+      ]) {
+        final invalid = List<int>.of(callData)..[2] = entry.$1;
+        invalid.setRange(3, 7, entry.$2);
+        expect(PayloadDecoder.decode(hexOf(withSigningTail(invalid))), isNull);
+      }
     });
 
     test('rejects propose_enact_law with tier=Constitution(0)', () {

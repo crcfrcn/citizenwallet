@@ -2389,7 +2389,7 @@ class PayloadDecoder {
   }
 
   // LegislationYuan(25) / propose_enact_law(0)
-  // SCALE: [25][0][tier:u8][scope_code:u32_le][houses:Vec<CidNumber>]
+  // SCALE: [25][0][tier:u8][region:province[2]+city:u16_le][houses:Vec<CidNumber>]
   //        [actor_cid_number][proposer_role_code][executive_cid_number]
   //        [legislature_cid_number:Option<CidNumber>]
   //        [vote_type:u8][title][title_en][chapters][effective_at:u64_le]
@@ -2403,9 +2403,19 @@ class PayloadDecoder {
     final tierLabel = _tierLabel(tierIndex);
     if (tierLabel == null || tierIndex == 0) return null;
 
-    // scope_code: u32 LE
+    // 固定四字节地域；不把字母省码变成整数，不对非法值使用默认值。
     if (offset + 4 > bytes.length) return null;
-    final scopeCode = _readU32Le(bytes, offset);
+    final province = bytes.sublist(offset, offset + 2);
+    final cityNumber = bytes[offset + 2] | (bytes[offset + 3] << 8);
+    final nationwide = tierIndex == 1;
+    if (nationwide
+        ? province.any((byte) => byte != 0) || cityNumber != 0
+        : province.any((byte) => byte < 65 || byte > 90) || cityNumber > 999 ||
+          (tierIndex == 2 && cityNumber != 0)) {
+      return null;
+    }
+    final regionText = nationwide ? 'CN' : String.fromCharCodes(province) +
+        (tierIndex == 3 ? cityNumber.toString().padLeft(3, '0') : '');
     offset += 4;
 
     // houses
@@ -2470,7 +2480,7 @@ class PayloadDecoder {
         'title': title,
         'tier': tierLabel,
         'vote_type': voteTypeLabel,
-        'scope_code': scopeCode.toString(),
+        'scope_code': regionText, // 复用原确认页字段及标签，省市保持原码。
         'houses': houseCidNumbers.join('、'),
         'actor_cid_number': actorRead.$1,
         'proposer_role_code': roleRead.$1,
@@ -3947,7 +3957,9 @@ class PayloadDecoder {
         !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(nodeId) ||
         !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(version) ||
         InternetAddress.tryParse(ip)?.address != ip ||
-        offset + 20 + 32 + 9 + 8 + 32 != bytes.length) return null;
+        offset + 20 + 32 + 9 + 8 + 32 != bytes.length) {
+      return null;
+    }
     final sourceBytes = bytes.sublist(offset, offset + 20);
     final source = _bytesToLowerHex(sourceBytes); offset += 20;
     final artifactBytes = bytes.sublist(offset, offset + 32);
@@ -3960,7 +3972,9 @@ class PayloadDecoder {
     if (sourceBytes.every((value) => value == 0) ||
         artifactBytes.every((value) => value == 0) ||
         nonceBytes.every((value) => value == 0) ||
-        !RegExp(r'^[1-9][0-9]{8}$').hasMatch(taskId) || expiresAt <= 0) return null;
+        !RegExp(r'^[1-9][0-9]{8}$').hasMatch(taskId) || expiresAt <= 0) {
+      return null;
+    }
     final kindName = kind == 1 ? '权威节点' : '权益节点';
     final fields = <String,String>{
       'product_id': product, 'deployment_kind': kindName, 'node_id': nodeId,
