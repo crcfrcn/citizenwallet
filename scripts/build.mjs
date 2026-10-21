@@ -12,6 +12,8 @@ export function automationDisplayName(platform,version){
  if(!Object.hasOwn(platforms,platform)||typeof version!=='string'||version.length>64||!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version))throw Error('产品平台或版本无效');
  return productTitle+'·'+platforms[platform]+'·v'+version;
 }
+// GitHub附件文件名使用稳定ASCII；中文名称只作为Run/Tag/Release及附件label显示。
+export function artifactBaseName(platform,version){automationDisplayName(platform,version);return 'citizenwallet-'+platform+'-v'+version;}
 export function nextVersion(platform,rows){
  automationDisplayName(platform,initialVersion);
  const latest=[...rows].filter(row=>row.status==='completed'&&row.conclusion==='success'&&row.display_title?.startsWith(productTitle+'·'+platforms[platform]+'·v')).sort((a,b)=>Date.parse(b.updated_at)-Date.parse(a.updated_at)||b.id-a.id)[0];
@@ -202,7 +204,7 @@ export async function ensureInstallPackage(platform,{token,read,base=join(root,'
   try{await download(selected.asset,partial);if(!validInstallFile(partial,selected.asset))throw Error('正式附件大小或官方摘要不一致');renameSync(partial,path);}finally{rmSync(partial,{force:true});}
  }
  // 只替换本仓target直属的同平台旧正式包，另一平台和编译现场不动。
- const owned=platform==='ios'?/^(?:公民钱包·iOS·v|citizenwallet-ios-v)(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.ipa$/u:/^(?:公民钱包·Android·v|citizenwallet-android-v)(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.apk$/u;
+ const owned=platform==='ios'?/^citizenwallet-ios-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.ipa$/u:/^citizenwallet-android-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.apk$/u;
  for(const name of readdirSync(base))if(name!==selected.asset.name&&owned.test(name)){const old=join(base,name),stat=lstatSync(old);if(!stat.isFile()||stat.nlink!==1)throw Error('旧安装包不是独立普通文件');rmSync(old);}
  return {...selected,path};
 }
@@ -383,7 +385,7 @@ export async function buildProduct(platform){
  try{
   await prepareTools(work,platform,env);const project=await prepare(work,platform,env);await native(platform,project,work,env);
   const version=process.env.PRODUCT_VERSION||initialVersion,number=process.env.GITHUB_RUN_NUMBER||'1',formal=process.env.GITHUB_ACTIONS==='true';
-  const args=['--release','--build-name',version,'--build-number',number,'--no-pub'];const output=directory(join(work,'artifact')),title=automationDisplayName(platform,version);
+  const args=['--release','--build-name',version,'--build-number',number,'--no-pub'];const output=directory(join(work,'artifact')),title=artifactBaseName(platform,version);
   if(platform==='android'){
    if(formal&&!process.env.ANDROID_KEY_PROPERTIES)throw Error('正式Android签名输入缺失');
    for(const [format,path,suffix]of [['apk','flutter-apk/app-release.apk','apk'],['appbundle','bundle/release/app-release.aab','aab']]){
@@ -403,10 +405,10 @@ export async function buildProduct(platform){
  }catch(error){safe=!error.keepWork;throw error;}finally{if(safe){cache.release();if(!complete)rmSync(work,{recursive:true,force:true});}}
 }
 export async function packageProduct(platform){
- const work=process.env.PRODUCT_WORK;if(!insideTarget(work))throw Error('正式产物现场无效');const output=join(work,'artifact'),version=process.env.PRODUCT_VERSION,title=automationDisplayName(platform,version);
+ const work=process.env.PRODUCT_WORK;if(!insideTarget(work))throw Error('正式产物现场无效');const output=join(work,'artifact'),version=process.env.PRODUCT_VERSION,title=artifactBaseName(platform,version);
  const expected=platform==='ios'?['ipa']:['apk','aab'];for(const suffix of expected)if(lstatSync(join(output,title+'.'+suffix)).size<=0)throw Error('正式产物为空');
  const proof={schema:1,product_id:'citizenwallet',platform,version,run_id:Number(process.env.GITHUB_RUN_ID),run_attempt:Number(process.env.GITHUB_RUN_ATTEMPT),source_sha:process.env.GITHUB_SHA};
- proof.assets=expected.map(suffix=>{const name=title+'.'+suffix,bytes=readFileSync(join(output,name));return {name,size:bytes.length,sha256:sha(bytes)};});
+ proof.assets=expected.map(suffix=>{const name=title+'.'+suffix,bytes=readFileSync(join(output,name));return {name,label:automationDisplayName(platform,version)+'.'+suffix,size:bytes.length,sha256:sha(bytes)};});
  put(join(output,title+'.json'),JSON.stringify(proof,null,2)+'\n');
  put(join(output,title+'.sha256'),readdirSync(output).sort().map(name=>sha(readFileSync(join(output,name)))+'  '+name).join('\n')+'\n');put(join(work,'proof.json'),JSON.stringify(proof));
  return {output};

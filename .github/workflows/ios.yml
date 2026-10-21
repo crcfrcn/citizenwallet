@@ -114,7 +114,7 @@ jobs:
           set -euo pipefail
           phase='解包正式IPA'
           trap 'printf "IPA验收失败：%s，第%s行\n" "$phase" "$LINENO" >&2' ERR
-          name="公民钱包·iOS·v$PRODUCT_VERSION"
+          name="$(node --input-type=module -e 'import {artifactBaseName} from "./scripts/build.mjs"; console.log(artifactBaseName(process.env.PLATFORM,process.env.PRODUCT_VERSION));')"
           unzip -q "$PRODUCT_WORK/artifact/$name.ipa" -d "$PRODUCT_WORK/verify"
           apps=("$PRODUCT_WORK"/verify/Payload/*.app)
           phase='唯一应用'
@@ -174,7 +174,10 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$name" -f "sha=$GITHUB_SHA" > "$PRODUCT_WORK/tag.json"
           created_tag=1
           assets=("$PRODUCT_WORK"/artifact/*)
-          gh release create "$name" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$name" --notes-file "$PRODUCT_WORK/notes.md"
+          # 官方file#label语法保留中文显示名，实际附件文件名不触发GitHub重命名。
+          uploads=()
+          for file in "${assets[@]}"; do uploads+=("$file#$name.${file##*.}"); done
+          gh release create "$name" "${uploads[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$name" --notes-file "$PRODUCT_WORK/notes.md"
           mkdir "$PRODUCT_WORK/readback"
           gh release download "$name" --repo "$GITHUB_REPOSITORY" --dir "$PRODUCT_WORK/readback"
           for file in "${assets[@]}"; do cmp "$file" "$PRODUCT_WORK/readback/$(basename "$file")"; done

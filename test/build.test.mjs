@@ -1,10 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSync,readdirSync,symlinkSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSync,readdirSync,symlinkSync,chmodSync} from 'node:fs';
 import {join,dirname,basename} from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {root,automationDisplayName,nextVersion,retainedRuns,candidate,automate,cleanupRuns,run} from '../scripts/build.mjs';
+import {root,automationDisplayName,nextVersion,retainedRuns,candidate,automate,cleanupRuns,run,artifactBaseName,packageProduct} from '../scripts/build.mjs';
 import {initialVersion,platforms} from '../scripts/config.mjs';
 const platform=Object.keys(platforms)[0];
 const row=(id,conclusion,status='completed')=>({id,status,conclusion,updated_at:new Date(id*1000).toISOString(),head_sha:'a'.repeat(40),path:'.github/workflows/'+platform+'.yml',head_branch:'main',run_attempt:1,display_title:automationDisplayName(platform,'1.2.3')});
@@ -153,7 +153,7 @@ const {latestInstallAsset,ensureInstallPackage,downloadInstallAsset,installProdu
 function installFixture(t,selectedPlatform='android'){
  const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const base=mkdtempSync(join(parent,'installation-'));t.after(()=>rmSync(base,{recursive:true,force:true}));
  const bytes=Buffer.from('synthetic signed package'),latest={...row(1,'success'),display_title:automationDisplayName(selectedPlatform,'1.2.3'),path:'.github/workflows/'+selectedPlatform+'.yml',run_number:42};
- const asset={id:100,name:latest.display_title+(selectedPlatform==='ios'?'.ipa':'.apk'),size:bytes.length,digest:'sha256:'+createHash('sha256').update(bytes).digest('hex')};
+ const asset={id:100,name:artifactBaseName(selectedPlatform,'1.2.3')+(selectedPlatform==='ios'?'.ipa':'.apk'),size:bytes.length,digest:'sha256:'+createHash('sha256').update(bytes).digest('hex')};
  const release={tag_name:latest.display_title,target_commitish:latest.head_sha,draft:false,prerelease:false,assets:[asset]};
  const read=async path=>{if(path.startsWith('actions/workflows/'))return {workflow_runs:[latest,{...latest,id:2,conclusion:'failure',updated_at:new Date(3000).toISOString(),display_title:automationDisplayName(selectedPlatform,'1.2.4')}]};if(path.startsWith('releases/tags/'))return release;if(path.startsWith('git/ref/tags/'))return {object:{type:'commit',sha:latest.head_sha}};throw Error('不允许的合成读取');};
  return {base,bytes,latest,asset,release,read,selected:{asset,platform:selectedPlatform,version:'1.2.3',buildNumber:'42',path:join(base,asset.name)}};
@@ -167,12 +167,12 @@ test('缺包下载、最新复用、内容损坏替换，文件直接归指定ta
  assert.deepEqual(readdirSync(f.base),[f.asset.name]);
 });
 test('下载校验失败保留原包，不留下半包或提前删除旧版',async t=>{
- const f=installFixture(t),old=join(f.base,automationDisplayName('android','1.2.2')+'.apk');writeFileSync(old,'old');writeFileSync(f.selected.path,'previous');
+ const f=installFixture(t),old=join(f.base,artifactBaseName('android','1.2.2')+'.apk');writeFileSync(old,'old');writeFileSync(f.selected.path,'previous');
  await assert.rejects(ensureInstallPackage('android',{base:f.base,read:f.read,download:async(_asset,path)=>writeFileSync(path,'bad')}),/摘要不一致/u);
  assert.equal(readFileSync(old,'utf8'),'old');assert.equal(readFileSync(f.selected.path,'utf8'),'previous');assert.equal(readdirSync(f.base).some(name=>name.endsWith('.part')),false);
 });
 test('新包验真后只删除同平台旧包，保留另一平台',async t=>{
- const f=installFixture(t),old=join(f.base,automationDisplayName('android','1.2.2')+'.apk'),other=join(f.base,automationDisplayName('ios','1.2.2')+'.ipa');writeFileSync(old,'old');writeFileSync(other,'other');
+ const f=installFixture(t),old=join(f.base,artifactBaseName('android','1.2.2')+'.apk'),other=join(f.base,artifactBaseName('ios','1.2.2')+'.ipa');writeFileSync(old,'old');writeFileSync(other,'other');
  await ensureInstallPackage('android',{base:f.base,read:f.read,download:async(_asset,path)=>writeFileSync(path,f.bytes)});
  assert.equal(existsSync(old),false);assert.equal(readFileSync(other,'utf8'),'other');
 });
@@ -230,4 +230,49 @@ test('iOS使用官方安装和版本回读；签名、安装或回读失败不�
   assert.equal(existsSync(join(root,'target/.citizenwallet-ios.lock')),false);
  }
  const declared=describeAction({flow:'build',platform:'ios'});assert.equal(typeof declared.launch,'function');assert.equal(declared.command,undefined);
+});
+
+
+// 执行真实工作流的附件回读片段；仅用本仓假GitHub模拟官方文件名规范化，不访问网络。
+test('两平台ASCII附件、中文label及原逐字节回读同时生效，损坏附件仍失败并撤回候选',async t=>{
+ for(const target of ['ios','android'])for(const corrupt of [false,true]){
+  const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const work=mkdtempSync(join(parent,'release-'));t.after(()=>rmSync(work,{recursive:true,force:true}));
+  const version='1.2.3',title=automationDisplayName(target,version),base=artifactBaseName(target,version),output=join(work,'artifact');mkdirSync(output);
+  for(const suffix of target==='ios'?['ipa']:['apk','aab'])writeFileSync(join(output,base+'.'+suffix),'synthetic '+suffix);
+  const settings={PRODUCT_WORK:work,PRODUCT_VERSION:version,GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_NUMBER:'42',GITHUB_SHA:'a'.repeat(40)},saved=Object.fromEntries(Object.keys(settings).map(key=>[key,process.env[key]]));
+  try{Object.assign(process.env,settings);await packageProduct(target);}finally{for(const [key,value]of Object.entries(saved))if(value===undefined)delete process.env[key];else process.env[key]=value;}
+  const names=readdirSync(output).sort(),proof=JSON.parse(readFileSync(join(work,'proof.json')));
+  assert.equal(names.length,target==='ios'?3:4);assert.ok(names.every(name=>/^[A-Za-z0-9._-]+$/u.test(name)));
+  for(const asset of proof.assets){assert.equal(asset.label,title+'.'+asset.name.split('.').at(-1));assert.equal(asset.sha256,createHash('sha256').update(readFileSync(join(output,asset.name))).digest('hex'));}
+  const source=join(work,'gh.mjs'),state=join(work,'state.json'),server=join(work,'server');mkdirSync(server);writeFileSync(state,JSON.stringify({tag:false,release:null}));
+  writeFileSync(source,`
+import {readFileSync,writeFileSync,copyFileSync,readdirSync,rmSync,statSync} from 'node:fs';
+import {join,basename} from 'node:path';
+const args=process.argv.slice(2),path=process.env.MOCK_STATE,server=process.env.MOCK_SERVER,state=JSON.parse(readFileSync(path));
+const save=()=>writeFileSync(path,JSON.stringify(state)),emit=value=>process.stdout.write(JSON.stringify(value));
+if(args[0]==='api'){
+ const route=args.find(value=>value.startsWith('repos/'));
+ if(args.includes('POST')){state.tag=true;save();emit({});}
+ else if(args.includes('DELETE')){state.tag=false;save();emit({});}
+ else if(route.includes('/releases/tags/'))emit(state.release);
+ else if(route.includes('/git/ref/tags/'))emit({object:{type:'commit',sha:process.env.GITHUB_SHA}});
+ else throw Error('不允许的合成API');
+}else if(args[0]==='release'&&args[1]==='create'){
+ const assets=[];
+ for(const input of args.slice(3).filter(value=>value.includes('#'))){const [file,label]=input.split('#');const name=basename(file).replace(/[^A-Za-z0-9._-]/gu,'').replace(/^\\.+|\\.+$/gu,'');copyFileSync(file,join(server,name));assets.push({name,label,size:statSync(file).size});}
+ state.release={name:args[2],tag_name:args[2],target_commitish:process.env.GITHUB_SHA,draft:true,prerelease:false,assets,body:readFileSync(args[args.indexOf('--notes-file')+1],'utf8')};save();
+}else if(args[0]==='release'&&args[1]==='download'){
+ const destination=args[args.indexOf('--dir')+1];for(const name of readdirSync(server))copyFileSync(join(server,name),join(destination,name));if(process.env.MOCK_CORRUPT==='1')writeFileSync(join(destination,readdirSync(server)[0]),'corrupt');
+}else if(args[0]==='release'&&args[1]==='edit'){state.release.draft=false;save();}
+else if(args[0]==='release'&&args[1]==='view'){if(!state.release)process.exit(1);emit({body:state.release.body});}
+else if(args[0]==='release'&&args[1]==='delete'){state.release=null;state.tag=false;save();}
+else throw Error('不允许的合成GitHub命令');
+`);
+  const executable=join(work,'gh');writeFileSync(executable,['#!/bin/sh','exec "$NODE_BINARY" "$MOCK_SOURCE" "$@"',''].join(String.fromCharCode(10)));chmodSync(executable,0o700);
+  const workflow=readFileSync(join(root,'.github/workflows',target+'.yml'),'utf8'),start=workflow.indexOf('      - name: 创建正式Tag和Release并逐件回读'),end=workflow.indexOf('      - name: 保存官方缓存',start),block=workflow.slice(start,end),marker='        run: |'+String.fromCharCode(10);
+  const script=block.slice(block.indexOf(marker)+marker.length).split(String.fromCharCode(10)).map(line=>line.startsWith('          ')?line.slice(10):line).join(String.fromCharCode(10));
+  const options={env:{...settings,PLATFORM:target,GITHUB_REPOSITORY:'crcfrcn/citizenwallet',NODE_BINARY:process.execPath,MOCK_SOURCE:source,MOCK_STATE:state,MOCK_SERVER:server,MOCK_CORRUPT:corrupt?'1':'0',PATH:work+':'+dirname(process.execPath)+':'+process.env.PATH},capture:true};
+  if(corrupt){await assert.rejects(run('/bin/bash',['-c',script],options),/执行失败/u);const result=JSON.parse(readFileSync(state));assert.equal(result.release,null);assert.equal(result.tag,false);}
+  else{await run('/bin/bash',['-c',script],options);const result=JSON.parse(readFileSync(state));assert.equal(result.release.draft,false);assert.deepEqual(result.release.assets.map(asset=>asset.name).sort(),names);for(const asset of result.release.assets)assert.equal(asset.label,title+'.'+asset.name.split('.').at(-1));}
+ }
 });

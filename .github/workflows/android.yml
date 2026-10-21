@@ -97,7 +97,7 @@ jobs:
       - name: 验收正式APK和AAB
         run: |
           set -euo pipefail
-          name="公民钱包·Android·v$PRODUCT_VERSION"
+          name="$(node --input-type=module -e 'import {artifactBaseName} from "./scripts/build.mjs"; console.log(artifactBaseName(process.env.PLATFORM,process.env.PRODUCT_VERSION));')"
           artifact="$PRODUCT_WORK/artifact"
           apksigner verify --verbose --print-certs "$artifact/$name.apk" > "$PRODUCT_WORK/signing/apk.txt"
           zipalign -c -P 16 -v 4 "$artifact/$name.apk" > "$PRODUCT_WORK/zipalign.txt"
@@ -113,7 +113,8 @@ jobs:
           grep -Fq "certificate SHA-256 digest: $(cat "$PRODUCT_WORK/signing/expected.sha")" "$PRODUCT_WORK/signing/apk.txt"
           node --input-type=module <<'JS'
           import {execFileSync} from 'node:child_process';import {mkdirSync,readdirSync} from 'node:fs';
-          const title='公民钱包·Android·v'+process.env.PRODUCT_VERSION,work=process.env.PRODUCT_WORK;
+          import {artifactBaseName} from './scripts/build.mjs';
+          const title=artifactBaseName('android',process.env.PRODUCT_VERSION),work=process.env.PRODUCT_WORK;
           for(const suffix of ['apk','aab']){
            const file=work+'/artifact/'+title+'.'+suffix,prefix=suffix==='apk'?'lib/':'base/lib/',names=execFileSync('unzip',['-Z1',file],{encoding:'utf8'}).trim().split('\n');
            if(!names.includes(prefix+'arm64-v8a/libcitizenwallet_signer.so')||names.some(name=>name.startsWith(prefix)&&name.endsWith('.so')&&!name.startsWith(prefix+'arm64-v8a/')))throw Error('正式包原生库或ABI无效');
@@ -160,7 +161,10 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$name" -f "sha=$GITHUB_SHA" > "$PRODUCT_WORK/tag.json"
           created_tag=1
           assets=("$PRODUCT_WORK"/artifact/*)
-          gh release create "$name" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$name" --notes-file "$PRODUCT_WORK/notes.md"
+          # 官方file#label语法保留中文显示名，实际附件文件名不触发GitHub重命名。
+          uploads=()
+          for file in "${assets[@]}"; do uploads+=("$file#$name.${file##*.}"); done
+          gh release create "$name" "${uploads[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$name" --notes-file "$PRODUCT_WORK/notes.md"
           mkdir "$PRODUCT_WORK/readback"
           gh release download "$name" --repo "$GITHUB_REPOSITORY" --dir "$PRODUCT_WORK/readback"
           for file in "${assets[@]}"; do cmp "$file" "$PRODUCT_WORK/readback/$(basename "$file")"; done

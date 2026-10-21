@@ -218,7 +218,7 @@ scripts/config.mjs仅声明产品、工具、平台、配置需求与公开入�
 
 产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。恢复只连接原Run，cleanup可在不重跑业务的情况下重试终态收尾。成功版本补丁加一，失败不加。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
 
-固定Workflow为产品·平台；Run、Job、Artifact、正式Tag、Release及附件为产品·平台·vX.Y.Z，必要文件扩展名保留。Workflow创建准确源码Tag，正式附件先逐个下载比较再确认正式Release；清理按本产品平台最新成功和非成功终态各留一条，活动任务保留，删除后回查。淘汰旧成功前必须确认新正式Release/Tag与Artifact；不按界面隐藏代替实际删除。
+固定Workflow为产品·平台；Run、Job、Artifact、正式Tag、Release及附件显示标签为产品·平台·vX.Y.Z，必要文件扩展名保留。Workflow创建准确源码Tag，正式附件先逐个下载比较再确认正式Release；清理按本产品平台最新成功和非成功终态各留一条，活动任务保留，删除后回查。淘汰旧成功前必须确认新正式Release/Tag与Artifact；不按界面隐藏代替实际删除。
 
 本机测试及编译、塔塔鹿鹿和自动化均通过控制台发起。顺序为开发、测试、编译、塔塔鹿鹿、自动化；应用商店提交和官网部署另行授权，编译或自动化不触发它们。任何失败先查原因、报告推荐方案，待用户确认后修复并继续。
 
@@ -253,3 +253,6 @@ Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-gl
 Android用官方APK分析器、apksigner、adb install -r及安装后版本回读；iOS用系统unzip、plutil、codesign、devicectl及安装后版本回读，设备适用性由Apple官方安装流程实际检查。无唯一已授权手机、包身份或版本不符、工具失败和回读不符均失败；不卸载、不降级、不重签名、不编译。每个平台以target直属锁文件排除并发覆盖，工具退出未确认则保留现场和锁。配置与发布文件不承载安装功能，控制台不拥有产品安装实现。
 
 GitHub请求统一使用产品自己的官方REST实现，不依赖控制台PATH中的gh；令牌仅存在调用内存。先输出原Run真实终态再清理，按产品平台保留最新成功、最新失败各最多一条，活动任务保留；新成功资产保护只阻止旧成功删除，不阻止旧失败清理。旧Run、日志、Artifact和按归属核验的旧Release/Tag实际删除并回查；清理失败明确输出清理未完成，cleanup仅重试清理，不重新派发、测试或编译。官网沿同一原则独立实现。iOS工作流只补充IPA验收阶段和行号诊断，原业务、安全与产物断言全部保留。
+
+
+GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。
