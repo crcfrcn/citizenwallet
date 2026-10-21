@@ -389,8 +389,10 @@ test('iOS验收成功后上传同一IPA，上传失败与缺少凭据均失败�
 test('钱包两平台不再声明独立发布动作或发布文件',()=>{
  for(const platform of ['ios','android'])assert.throws(()=>describeAction({flow:'publish',platform}),/尚未声明/u);
  assert.equal(existsSync(join(root,'scripts/publish.mjs')),false);
- const config=readFileSync(join(root,'scripts/config.mjs'),'utf8');assert.match(config,/"name": "PLAY_KEY"/u);
+ // 商店凭据复用控制台现有受保护自定义配置，不重复声明或沿用失效账号。
+ const config=readFileSync(join(root,'scripts/config.mjs'),'utf8');assert.doesNotMatch(config,/PLAY_KEY|GOOGLE_PLAY_SERVICE_ACCOUNT/u);
  const workflow=readFileSync(join(root,'.github/workflows/android.yml'),'utf8');
+ assert.match(workflow,/credentials_json: \$\{\{ secrets\.GOOGLE_PLAY_SERVICE_ACCOUNT \}\}/u);assert.doesNotMatch(workflow,/secrets\.PLAY_KEY\b/u);
  assert.ok(workflow.indexOf('      - name: Google官方认证')>workflow.indexOf('      - name: 创建正式Tag和Release并逐件回读'));
  assert.match(workflow,/google-github-actions\/auth@[a-f0-9]{40}/u);assert.match(workflow,/create_credentials_file: false/u);
  assert.match(workflow,/access_token_scopes: https:\/\/www.googleapis.com\/auth\/androidpublisher/u);
