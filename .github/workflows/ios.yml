@@ -177,7 +177,7 @@ jobs:
           # 官方file#label语法保留中文显示名，实际附件文件名不触发GitHub重命名。
           uploads=()
           for file in "${assets[@]}"; do uploads+=("$file#$name.${file##*.}"); done
-          gh release create "$name" "${uploads[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$name" --notes-file "$PRODUCT_WORK/notes.md"
+          gh release create "$name" "${uploads[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --verify-tag --draft --title "$name" --notes-file "$PRODUCT_WORK/notes.md"
           mkdir "$PRODUCT_WORK/readback"
           gh release download "$name" --repo "$GITHUB_REPOSITORY" --dir "$PRODUCT_WORK/readback"
           for file in "${assets[@]}"; do cmp "$file" "$PRODUCT_WORK/readback/$(basename "$file")"; done

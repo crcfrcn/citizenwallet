@@ -233,9 +233,9 @@ test('iOS使用官方安装和版本回读；签名、安装或回读失败不�
 });
 
 
-// 执行真实工作流的附件回读片段；仅用本仓假GitHub模拟官方文件名规范化，不访问网络。
-test('两平台ASCII附件、中文label及原逐字节回读同时生效，损坏附件仍失败并撤回候选',async t=>{
- for(const target of ['ios','android'])for(const corrupt of [false,true]){
+// 执行真实工作流的附件回读片段；本仓假GitHub沿用官方文件名及默认分支行为，不访问网络。
+test('两平台准确SHA、ASCII附件及中文label生效，损坏附件和默认分支均失败并撤回候选',async t=>{
+ for(const target of ['ios','android'])for(const failure of ['', 'corrupt', 'default-target']){
   const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const work=mkdtempSync(join(parent,'release-'));t.after(()=>rmSync(work,{recursive:true,force:true}));
   const version='1.2.3',title=automationDisplayName(target,version),base=artifactBaseName(target,version),output=join(work,'artifact');mkdirSync(output);
   for(const suffix of target==='ios'?['ipa']:['apk','aab'])writeFileSync(join(output,base+'.'+suffix),'synthetic '+suffix);
@@ -260,7 +260,7 @@ if(args[0]==='api'){
 }else if(args[0]==='release'&&args[1]==='create'){
  const assets=[];
  for(const input of args.slice(3).filter(value=>value.includes('#'))){const [file,label]=input.split('#');const name=basename(file).replace(/[^A-Za-z0-9._-]/gu,'').replace(/^\\.+|\\.+$/gu,'');copyFileSync(file,join(server,name));assets.push({name,label,size:statSync(file).size});}
- state.release={name:args[2],tag_name:args[2],target_commitish:process.env.GITHUB_SHA,draft:true,prerelease:false,assets,body:readFileSync(args[args.indexOf('--notes-file')+1],'utf8')};save();
+ state.release={name:args[2],tag_name:args[2],target_commitish:args.includes('--target')?args[args.indexOf('--target')+1]:'main',draft:true,prerelease:false,assets,body:readFileSync(args[args.indexOf('--notes-file')+1],'utf8')};save();
 }else if(args[0]==='release'&&args[1]==='download'){
  const destination=args[args.indexOf('--dir')+1];for(const name of readdirSync(server))copyFileSync(join(server,name),join(destination,name));if(process.env.MOCK_CORRUPT==='1')writeFileSync(join(destination,readdirSync(server)[0]),'corrupt');
 }else if(args[0]==='release'&&args[1]==='edit'){state.release.draft=false;save();}
@@ -270,9 +270,10 @@ else throw Error('不允许的合成GitHub命令');
 `);
   const executable=join(work,'gh');writeFileSync(executable,['#!/bin/sh','exec "$NODE_BINARY" "$MOCK_SOURCE" "$@"',''].join(String.fromCharCode(10)));chmodSync(executable,0o700);
   const workflow=readFileSync(join(root,'.github/workflows',target+'.yml'),'utf8'),start=workflow.indexOf('      - name: 创建正式Tag和Release并逐件回读'),end=workflow.indexOf('      - name: 保存官方缓存',start),block=workflow.slice(start,end),marker='        run: |'+String.fromCharCode(10);
-  const script=block.slice(block.indexOf(marker)+marker.length).split(String.fromCharCode(10)).map(line=>line.startsWith('          ')?line.slice(10):line).join(String.fromCharCode(10));
-  const options={env:{...settings,PLATFORM:target,GITHUB_REPOSITORY:'crcfrcn/citizenwallet',NODE_BINARY:process.execPath,MOCK_SOURCE:source,MOCK_STATE:state,MOCK_SERVER:server,MOCK_CORRUPT:corrupt?'1':'0',PATH:work+':'+dirname(process.execPath)+':'+process.env.PATH},capture:true};
-  if(corrupt){await assert.rejects(run('/bin/bash',['-c',script],options),/执行失败/u);const result=JSON.parse(readFileSync(state));assert.equal(result.release,null);assert.equal(result.tag,false);}
-  else{await run('/bin/bash',['-c',script],options);const result=JSON.parse(readFileSync(state));assert.equal(result.release.draft,false);assert.deepEqual(result.release.assets.map(asset=>asset.name).sort(),names);for(const asset of result.release.assets)assert.equal(asset.label,title+'.'+asset.name.split('.').at(-1));}
+  let script=block.slice(block.indexOf(marker)+marker.length).split(String.fromCharCode(10)).map(line=>line.startsWith('          ')?line.slice(10):line).join(String.fromCharCode(10));
+  if(failure==='default-target'){assert.ok(script.includes('--target "$GITHUB_SHA"'));script=script.replace('--target "$GITHUB_SHA"','');}
+  const options={env:{...settings,PLATFORM:target,GITHUB_REPOSITORY:'crcfrcn/citizenwallet',NODE_BINARY:process.execPath,MOCK_SOURCE:source,MOCK_STATE:state,MOCK_SERVER:server,MOCK_CORRUPT:failure==='corrupt'?'1':'0',PATH:work+':'+dirname(process.execPath)+':'+process.env.PATH},capture:true};
+  if(failure){await assert.rejects(run('/bin/bash',['-c',script],options),/执行失败/u);const result=JSON.parse(readFileSync(state));assert.equal(result.release,null);assert.equal(result.tag,false);}
+  else{await run('/bin/bash',['-c',script],options);const result=JSON.parse(readFileSync(state));assert.equal(result.release.draft,false);assert.equal(result.release.target_commitish,settings.GITHUB_SHA);assert.deepEqual(result.release.assets.map(asset=>asset.name).sort(),names);for(const asset of result.release.assets)assert.equal(asset.label,title+'.'+asset.name.split('.').at(-1));}
  }
 });

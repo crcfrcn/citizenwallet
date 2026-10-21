@@ -256,3 +256,5 @@ GitHub请求统一使用产品自己的官方REST实现，不依赖控制台PATH
 
 
 GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。
+
+创建Release使用GitHub CLI官方--target "$GITHUB_SHA"，明确将target_commitish设为本次编译提交；已有Tag仍通过--verify-tag及原Tag SHA回读独立核验。回归模拟GitHub默认目标为main，覆盖省略--target时原准确SHA断言失败并撤回候选，保留附件逐字节回读及损坏附件撤回断言。配置、业务、发布文件和控制台不变。
