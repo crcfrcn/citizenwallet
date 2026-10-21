@@ -124,7 +124,8 @@ export async function cleanupRuns(platform,{token=process.env.GH_TOKEN||process.
   const index=rows.findIndex(row=>row.id===currentRun);if(index<0)rows.push(current);else rows[index]=current;
  }
  const keep=retainedRuns(rows,{currentRun,result}),stale=rows.filter(row=>row.status==='completed'&&row.id!==currentRun&&!keep.has(row.id));
- if(!stale.length)return {completed:true,deleted:[],kept:[...keep]};
+ const withdraw=current&&result!=='success';
+ if(!stale.length&&!withdraw)return {completed:true,deleted:[],kept:[...keep]};
  const releases=[];for(let page=1;;page++){const values=await read('releases?per_page=100&page='+page);releases.push(...values);if(values.length<100)break;}
  const absent=async path=>{try{await read(path);return false;}catch(error){if(error.status===404||/HTTP 404/u.test(error.message))return true;throw error;}};
  const success=rows.find(row=>keep.has(row.id)&&(row.id===currentRun?result==='success':row.conclusion==='success'&&row.status==='completed'));let blocked;
@@ -135,14 +136,16 @@ export async function cleanupRuns(platform,{token=process.env.GH_TOKEN||process.
   const artifacts=await read('actions/runs/'+success.id+'/artifacts?per_page=100');if(artifacts.artifacts?.filter(value=>value.name===success.display_title&&!value.expired&&value.size_in_bytes>0).length!==1)throw Error('最新成功Artifact未确认，保留旧成功');
  }catch(error){blocked=error;}
  const deleted=[];
- for(const row of stale){
+ // 商店上传失败时撤回本轮正式候选，让同版本可以重试；本轮Run及日志仍保留。
+ for(const row of [...(withdraw?[current]:[]),...stale]){
   // 保护旧成功不阻挡旧失败清理；真正DELETE失败立即停止，不冒充清理完成。
   if(blocked&&row.conclusion==='success')continue;
-  const fresh=await read('actions/runs/'+row.id);if(fresh.status!=='completed'||fresh.head_sha!==row.head_sha||fresh.path!==row.path||fresh.head_branch!==row.head_branch||fresh.run_attempt!==row.run_attempt||fresh.event!==row.event||fresh.conclusion!==row.conclusion)throw Error('删除前Run身份或终态变化');
+  const fresh=await read('actions/runs/'+row.id);if((row.id!==currentRun&&fresh.status!=='completed')||fresh.head_sha!==row.head_sha||fresh.path!==row.path||fresh.head_branch!==row.head_branch||fresh.run_attempt!==row.run_attempt||fresh.event!==row.event||fresh.conclusion!==row.conclusion)throw Error('删除前Run身份或终态变化');
   for(const release of releases){
    const proof=releaseProof(release);
    const historical=Object.keys(platforms).length===1&&release.body===`Source: ${row.head_sha}\nRun: ${row.id} / ${row.run_attempt}`;
    if(!(proof?.run_id===row.id&&proof.platform===platform)&&!historical)continue;
+   if(row.id===currentRun&&(proof.run_attempt!==row.run_attempt||proof.source_sha!==row.head_sha||release.tag_name!==row.display_title))throw Error('本轮失败候选归属不符');
    if(release.target_commitish!==row.head_sha)throw Error('旧Release提交不符');
    const tagPath='git/ref/tags/'+encodeURIComponent(release.tag_name);
    // 先删Tag后删Release，失败重试仍以原Release回执确认归属。
@@ -150,6 +153,7 @@ export async function cleanupRuns(platform,{token=process.env.GH_TOKEN||process.
    await remove('releases/'+release.id);
    if(!await absent('releases/'+release.id)||!await absent(tagPath))throw Error('旧Release或Tag删除未确认');
   }
+  if(row.id===currentRun)continue;
   await remove('actions/runs/'+row.id);if(!await absent('actions/runs/'+row.id))throw Error('旧Run删除未确认');
   if(!await absent('actions/runs/'+row.id+'/logs'))throw Error('旧Run日志删除未确认');
   try{const assets=await read('actions/runs/'+row.id+'/artifacts?per_page=100');if(!Array.isArray(assets.artifacts)||assets.artifacts.length)throw Error('旧Run附件删除未确认');}catch(error){if(error.status!==404&&!/HTTP 404/u.test(error.message))throw error;}

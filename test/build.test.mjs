@@ -430,3 +430,29 @@ test('Google上传同一验收AAB并提交后回读，缺配置或任一步失�
   assert.equal(calls.some(value=>value[1].includes('/tracks')),false);assert.deepEqual(readFileSync(join(work,'artifact',name)),bytes);
  }
 });
+
+test('商店上传失败只撤回本轮准确候选，保留失败Run和日志且不占用重试版本',async()=>{
+ for(const target of ['ios','android'])for(const failure of ['', 'attempt','source','title','tag','delete']){
+  const current={...row(3,null,'in_progress'),repository:{full_name:repository},event:'workflow_dispatch',path:'.github/workflows/'+target+'.yml',display_title:automationDisplayName(target,'1.2.3')},previous={...row(1,'success'),path:current.path};
+  const proof={run_id:current.id,platform:target,run_attempt:failure==='attempt'?2:1,source_sha:failure==='source'?'b'.repeat(40):current.head_sha};
+  const release={id:10,target_commitish:current.head_sha,tag_name:failure==='title'?'other':current.display_title,body:'<!-- automation:'+JSON.stringify(proof)+' -->'};
+  let present=true,tag=true;const deleted=[];
+  const missing=()=>{throw Object.assign(Error('HTTP 404'),{status:404});};
+  const read=async path=>{
+   if(path.startsWith('actions/workflows/'))return {workflow_runs:[previous,current]};
+   if(path==='actions/runs/3')return current;
+   if(path.startsWith('releases?'))return present?[release]:[];
+   if(path==='releases/10')return present?release:missing();
+   if(path.startsWith('git/ref/tags/'))return tag?{object:{type:'commit',sha:failure==='tag'?'b'.repeat(40):current.head_sha}}:missing();
+   assert.fail('不应读取或删除本轮日志、Artifact或其他Run');
+  };
+  const remove=async path=>{
+   if(failure==='delete')throw Error('HTTP 403');deleted.push(path);
+   if(path.startsWith('git/refs/tags/'))tag=false;else if(path==='releases/10')present=false;else assert.fail('禁止删除本轮Run或日志');
+  };
+  const invoke=()=>cleanupRuns(target,{read,remove,currentRun:3,result:'failure',sourceSha:current.head_sha,attempt:1});
+  if(failure){await assert.rejects(invoke);assert.equal(deleted.length,0);}
+  else{const receipt=await invoke();assert.equal(receipt.completed,true);assert.deepEqual(receipt.deleted,[]);assert.deepEqual([...receipt.kept].sort(),[1,3]);assert.equal(present,false);assert.equal(tag,false);}
+  assert.equal(current.status,'in_progress');assert.equal(current.conclusion,null);
+ }
+});
