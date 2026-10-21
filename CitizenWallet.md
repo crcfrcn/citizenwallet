@@ -216,7 +216,7 @@ scripts/config.mjs仅声明产品、工具、平台、配置需求与公开入�
 
 本机与GitHub均沿原始依赖锁执行，缺缓存按原锁正常取得；真实下载、测试、编译、签名或验收失败必须失败。官方缓存只存可再生依赖与编译状态，不含签名材料；恢复/保存故障不阻塞。每轮现场归target/test或target/build的唯一目录，缓存原子领取且不等待，取消等待本轮进程组退出后清理；无法确认退出则保留现场并明确失败。
 
-产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。恢复只连接原Run，cleanup可在不重跑业务的情况下重试终态收尾。成功版本补丁加一，失败不加。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
+产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。控制台恢复只观察原Run，产品cleanup命令独立执行历史收尾。成功版本补丁加一，失败不加。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
 
 固定Workflow为产品·平台；Run、Job、Artifact、正式Tag、Release及附件显示标签为产品·平台·vX.Y.Z，必要文件扩展名保留。Workflow创建准确源码Tag，正式附件先逐个下载比较再确认正式Release；清理按本产品平台最新成功和非成功终态各留一条，活动任务保留，删除后回查。淘汰旧成功前必须确认新正式Release/Tag与Artifact；不按界面隐藏代替实际删除。
 
@@ -252,7 +252,7 @@ Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-gl
 
 Android用官方APK分析器、apksigner、adb install -r及安装后版本回读；iOS用系统unzip、plutil、codesign、devicectl及安装后版本回读，设备适用性由Apple官方安装流程实际检查。无唯一已授权手机、包身份或版本不符、工具失败和回读不符均失败；不卸载、不降级、不重签名、不编译。每个平台以target直属锁文件排除并发覆盖，工具退出未确认则保留现场和锁。配置与发布文件不承载安装功能，控制台不拥有产品安装实现。
 
-GitHub请求统一使用产品自己的官方REST实现，不依赖控制台PATH中的gh；令牌仅存在调用内存。先输出原Run真实终态再清理，按产品平台保留最新成功、最新失败各最多一条，活动任务保留；新成功资产保护只阻止旧成功删除，不阻止旧失败清理。旧Run、日志、Artifact和按归属核验的旧Release/Tag实际删除并回查；清理失败明确输出清理未完成，cleanup仅重试清理，不重新派发、测试或编译。官网沿同一原则独立实现。iOS工作流只补充IPA验收阶段和行号诊断，原业务、安全与产物断言全部保留。
+GitHub历史清理由本产品现有编译工作流末尾的always步骤调用scripts/build.mjs cleanup执行，使用本仓GITHUB_TOKEN及已有contents: write、actions: write权限；控制台只派发和观察原Run，独立CLI automate同样派发后返回准确Run ID，不在客户端轮询或删除GitHub对象。客户端不再公开直接执行GitHub删除的cleanup动作；独立cleanup命令保留在产品内。控制台数据库记录仍归控制台管理。清理先核验本轮仓库、main、工作流、提交及attempt，以收尾前job.status独立计算本轮候选类别并保护本轮；不修改API返回的status或conclusion，Run最终结果由GitHub确认。历史清理查询覆盖本平台main工作流全部触发事件并逐页读取，包含旧push记录；候选版本及正式包选择仍只查询workflow_dispatch，保持原版本与安装合同。每个平台最新成功与最新失败各最多保留一条，其他活动Run保留；仅删除已结束旧Run及其准确归属的Tag、Release、日志和Artifact并回查。替代正式产物未验真时保留旧成功，不阻止旧失败清理；权限、网络、删除或回查失败均真实失败，不吞错、不冒充清理完成、不取消另一平台。配置、发布文件、业务、依赖及控制台不变，不新增文件、Job、工作流或框架。
 
 
 GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。

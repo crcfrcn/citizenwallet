@@ -192,3 +192,9 @@ jobs:
           if (signing/'installed-profile').exists():pathlib.Path((signing/'installed-profile').read_text()).unlink(missing_ok=True)
           if p.exists():shutil.rmtree(p)
           PY
+      - name: 清理本平台历史记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCT_RESULT: ${{ job.status }}
+        run: node scripts/build.mjs cleanup "$PLATFORM"
