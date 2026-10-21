@@ -243,6 +243,8 @@ Android在官方android DSL中声明testBuildType = "release"，使AGP9仅为选
 
 iOS签名静态库的符号验收使用现有Apple nm -g --no-llvm-bc，只读取已生成机器码的导出，避免Apple LLVM读取较新Rust LLVM的上游bitcode。四个必需sr25519导出断言、工具非零退出失败处理均保留；不安装其他LLVM工具，不调整Rust编译参数，宿主及Android检查不变。通过实际iOS编译入口验收，不以文本匹配测试代替真实符号检查。
 
+Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-global"，正式归档保留全局符号并继续裁剪非全局符号，避免默认All Symbols裁剪影响FFI验收；Debug配置、Rust实现、签名及四个导出断言不变。现有装配回归通过官方plutil解析真实物化工程，核对该声明只落在Runner Release配置；正式IPA仍执行原符号验收。
+
 
 ## 正式包安装与终态清理
 

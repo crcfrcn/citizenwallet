@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSync,readdirSync,symlinkSync} from 'node:fs';
 import {join,dirname,basename} from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {root,automationDisplayName,nextVersion,retainedRuns,candidate,automate,cleanupRuns,run} from '../scripts/build.mjs';
 import {initialVersion,platforms} from '../scripts/config.mjs';
 const platform=Object.keys(platforms)[0];
@@ -62,6 +63,11 @@ if(platform!=='web'){
   for(const name of ['ios','android','icons','Podfile.lock'])cpSync(join(root,name),join(project,name),{recursive:true});materializeInputs(root,project);
   for(const name of ['ios/Runner.xcodeproj/project.pbxproj','ios/Runner/HardwareSecretvaultPlugin.swift','ios/signer/citizenwallet_signer.podspec','android/app/src/test/kotlin/com/crcfrcn/citizenwallet/HardwareSecretvaultPluginTest.kt'])assert.ok(existsSync(join(project,name)),name);
   // 此处验证工程装配；iOS四个机器码导出仍由真实编译入口调用nm验收，工具失败不能通过。
+  const xcode=JSON.parse(execFileSync('/usr/bin/plutil',['-convert','json','-o','-',join(project,'ios/Runner.xcodeproj/project.pbxproj')],{encoding:'utf8'})),objects=xcode.objects;
+  const runner=Object.values(objects).find(value=>value.isa==='PBXNativeTarget'&&value.name==='Runner');
+  const configurations=objects[runner.buildConfigurationList].buildConfigurations.map(id=>objects[id]);
+  assert.equal(configurations.find(value=>value.name==='Release').buildSettings.STRIP_STYLE,'non-global');
+  assert.equal(configurations.find(value=>value.name==='Debug').buildSettings.STRIP_STYLE,undefined);
   assert.ok(readFileSync(join(project,'ios/Podfile.lock')).equals(readFileSync(join(root,'Podfile.lock'))));
   // 物化工程必须声明Release测试类型，与真实Gradle入口一致。
   assert.match(readFileSync(join(project,'android/app/build.gradle.kts'),'utf8'),/^\s*testBuildType = "release"$/mu);

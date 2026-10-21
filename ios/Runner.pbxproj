@@ -651,6 +651,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = ios.citizenwallet;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				/* 静态FFI按Flutter官方建议保留全局符号，归档继续裁剪非全局符号。 */
+				STRIP_STYLE = "non-global";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
