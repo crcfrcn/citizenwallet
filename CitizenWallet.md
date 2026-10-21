@@ -130,10 +130,10 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
   编号、过期时间和 nonce；任何未知组合、截断、尾随字节或信封过期时间不一致都红色拒签。
   签名字节使用全仓 `OP_SIGN_PUBLISH=0x24` 哈希域，不建立第二套扫码协议。
 - 公民链权威或权益节点部署使用同一 QR_V1 信封中的独立 `node_deploy=16` 链下动作。钱包完整解码并审阅节点类别、编号、目标 IP、版本、源码和产物摘要、本次任务、期限与随机挑战；签名字节只使用共享 QR 协议的 `GMB\0TATA_NODE_DEPLOY_V1\0` 独立域。错误产品、类别、尾字节、信封期限不一致及已签请求均拒绝。节点部署签名不提交链交易，也不借用发布动作签名。
-- 生产发布授权闭集固定为十三个产品端：`citizenapp/ios|android`、
-  `citizenwallet/ios|android`、`citizenserve/cloudflare`、`citizenweb`、
+- 生产发布授权闭集固定为十一个产品端：`citizenapp/ios|android`、
+  `citizenserve/cloudflare`、`citizenweb/web`、
   `tuyulove/ios|android`、`tuyuserve/cloudflare`、`tuyuweb`、
-  `tuyubooking/macos|linux|windows`。审阅摘要必须显示准确中文产品名“公民”“公民钱包”
+  `tuyubooking/macos|linux|windows`。钱包自身不再接受iOS或Android独立发布冷签请求，完整旧请求同样拒绝；不保留自身发布展示名或兼容映射。审阅摘要必须显示准确中文产品名“公民”
   “公民服务端”“公民官网”“途遇”“途遇服务端”“途遇官网”“途遇商家端”；旧产品标识、
   非法产品端交叉组合和调用端自带展示名一律拒绝，不保留兼容映射。
 
@@ -198,12 +198,6 @@ SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction�
 
 签名域唯一为 `OP_SIGN_MLS_DEVICE_BIND = 0x1C`，签署 `blake2_256(GMB ‖ 0x1C ‖ SCALE)`。二维码码型闭集为1至5，不提供额外应用密钥的派生、加密交付或响应。原生签名库只导出4个既有 sr25519 接口；钱包私钥保存、认证与其他扫码签名能力保持各自既有合同。登记端只接收公开 MLS 公钥，不接收 MLS 私钥或协议状态。
 
-### 产品只读商店身份公开边界（2026-10-07）
-
-本产品自己选择唯一原始iOS Runner工程与唯一Android应用Gradle配置。iOS使用PBXProject中的唯一Runner应用目标，分别取项目与目标唯一Release配置，目标覆盖项目，与本产品已有签名验真使用的配置关系一致；缺失、歧义、未解析变量或非法标识均失败。Android沿用本产品原有applicationId读取规则，不更改Build签名、安装或完成条件。
-
-回执固定为schema=1、product_id、bundle_id、package_name、source_files。每个source_files元素仅含本仓相对path与SHA-256，列出 `pubspec.yaml`、`scripts/publish.mjs` 及两个原始应用配置。父目录和文件均拒绝链接，原始文件必须是单链接、非空、至多1MiB的普通文件；同一描述符有界读取，核验inode/大小/时间及当前路径，解析后再次验真全部来源。入口或配置缺失、重复、被替换或摘要变化均失败，不回退到控制台静态产品登记。
-
 ### 新法地域解码
 
 propose_enact_law的原四字节地域槽按两字节原省码加u16小端原省内市号解码，不再按u32数字省码展示。全国明确四零字节；省级为两位大写字母和零市号；市级为原省码及原三位市号数值，展示补齐原前导零。非法层级、字母或地域形状拒签，不回退全国。复用原确认页scope_code字段及行政区代码标签显示CN、原省码或原省码加市号，不新增控件或扫码交互。CID、CN、现有省市规则及宪法修改流程保持。
@@ -220,7 +214,7 @@ scripts/config.mjs仅声明产品、工具、平台、配置需求与公开入�
 
 固定Workflow为产品·平台；Run、Job、Artifact、正式Tag、Release及附件显示标签为产品·平台·vX.Y.Z，必要文件扩展名保留。Workflow创建准确源码Tag，正式附件先逐个下载比较再确认正式Release；清理按本产品平台最新成功和非成功终态各留一条，活动任务保留，删除后回查。淘汰旧成功前必须确认新正式Release/Tag与Artifact；不按界面隐藏代替实际删除。
 
-本机测试及编译、塔塔鹿鹿和自动化均通过控制台发起。顺序为开发、测试、编译、塔塔鹿鹿、自动化；应用商店提交和官网部署另行授权，编译或自动化不触发它们。任何失败先查原因、报告推荐方案，待用户确认后修复并继续。
+产品测试、塔塔鹿鹿和自动化均通过控制台发起，编译仅在GitHub执行。钱包不设独立发布文件、命令或控制台发布按钮。iOS在同一Run的测试、编译、正式附件验收及逐字节回读成功后，沿公民App现有方式调用xcrun altool --upload-package --wait，将同一份IPA上传App Store Connect；上传失败即失败，自动化不提交审核或公开上架。上传复用控制台中已获准的公民App App Store Connect配置，通过现有保密流程交付钱包仓库的APP_STORE_KEY_ID、APP_STORE_ISSUER_ID、APP_STORE_PRIVATE_KEY，不新增密钥或将值写入源码。私钥仅写本轮signing/appstore现场，上传成败均立即删除，不进入正式附件；原always签名清理和GitHub历史清理保持。IOS_KEY、WALLET_PROFILE及导出方式不变，不为上传修改描述文件或重签。Android复用已有PLAY_KEY，由Google官方认证Action取得仅androidpublisher作用域的短期令牌，不生成凭据文件；现有scripts/build.mjs的upload android入口调用Google Play官方API，核对本轮proof、AAB字节与版本后创建edit、上传AAB、核对摘要、提交保存，再从新edit回读版本和摘要并删除回读edit，不修改轨道、不公开投放。有审核中的变更、权限、网络或回读失败均明确失败，不自动重发。任何失败先查原因、报告推荐方案，待用户确认后修复并继续。
 
 钱包平台为ios、android；宿主Rust签名库只作为真实Flutter测试输入。编译使用Flutter 3.47.2、Rust 1.97.1、Gradle 9.1.0、AGP 9.0.1、KGP 2.2.20、NDK 28.2.13676358、CocoaPods 1.17.0。Android使用官方Flutter插件加载器和当前原锁插件支持的KGP/DSL设置，不修订Flutter、Gradle或插件缓存；工程和硬件金库单测按官方布局装配到本轮source-view。图标使用macOS sips与既有原件、尺寸声明，不包含自编图片编解码器。
 
@@ -248,13 +242,13 @@ Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-gl
 
 ## 正式包安装与终态清理
 
-控制台公民页的钱包两个蓝色按钮沿用公开flow=build调用，产品入口实际执行安装；独立CLI的build仍供官方编译使用，install供独立安装使用。安装只选对应平台最新成功Run及同一正式Release/Tag，附件沿GitHub实际名称、大小和官方digest核对。IPA/APK直接保存于/Users/rhett/citizenwallet/target/，不建安装缓存子目录或索引；缺包或内容不符先下载到该目录直属临时文件，校验成功后替换，旧同平台正式包随后清除，最新包直接复用。下载失败保留原包且不安装旧包。临时iOS解包现场仅满足Apple工具要求，确认工具退出后清理，正式IPA始终留在target直属位置。
+控制台公民页的钱包两个蓝色按钮沿用公开flow=build调用，与公民App一样启动本仓scripts/build.mjs install的独立子进程；只交付PATH和HOME，不向控制台领取GitHub令牌、不派发工作流。公开正式包由钱包读取；普通安装日志交付界面，完成与失败以安装进程真实退出码报告，不手动输出控制台退出事件。独立CLI的build保留原实现，按钮只调用install。安装只选对应平台最新成功Run及同一正式Release/Tag，附件沿GitHub实际名称、大小和官方digest核对。IPA/APK直接保存于/Users/rhett/citizenwallet/target/，不建安装缓存子目录或索引；缺包或内容不符先下载到该目录直属临时文件，校验成功后替换，旧同平台正式包随后清除，最新包直接复用。下载失败保留原包且不安装旧包。临时iOS解包现场仅满足Apple工具要求，确认工具退出后清理，正式IPA始终留在target直属位置。
 
-Android用官方APK分析器、apksigner、adb install -r及安装后版本回读；iOS用系统unzip、plutil、codesign、devicectl及安装后版本回读，设备适用性由Apple官方安装流程实际检查。无唯一已授权手机、包身份或版本不符、工具失败和回读不符均失败；不卸载、不降级、不重签名、不编译。每个平台以target直属锁文件排除并发覆盖，工具退出未确认则保留现场和锁。配置与发布文件不承载安装功能，控制台不拥有产品安装实现。
+Android用官方APK分析器、apksigner、adb -d install -r及安装后版本回读；-d在install之前，只选择USB设备，禁止在install之后使用允许降级的-d。iOS用系统unzip、plutil、codesign、devicectl及安装后版本回读，沿公民App筛选唯一已配对、有线且非unavailable的iOS真机；设备适用性由Apple官方安装流程实际检查。无唯一已授权手机、包身份或版本不符、工具失败和回读不符均失败；不卸载、不降级、不重签名、不编译。每个平台以target直属锁文件排除并发覆盖，工具退出未确认则保留现场和锁。配置不承载安装功能，控制台不拥有产品安装实现。
 
-GitHub历史清理由本产品现有编译工作流末尾的always步骤调用scripts/build.mjs cleanup执行，使用本仓GITHUB_TOKEN及已有contents: write、actions: write权限；控制台只派发和观察原Run，独立CLI automate同样派发后返回准确Run ID，不在客户端轮询或删除GitHub对象。客户端不再公开直接执行GitHub删除的cleanup动作；独立cleanup命令保留在产品内。控制台数据库记录仍归控制台管理。清理先核验本轮仓库、main、工作流、提交及attempt，以收尾前job.status独立计算本轮候选类别并保护本轮；不修改API返回的status或conclusion，Run最终结果由GitHub确认。历史清理查询覆盖本平台main工作流全部触发事件并逐页读取，包含旧push记录；候选版本及正式包选择仍只查询workflow_dispatch，保持原版本与安装合同。每个平台最新成功与最新失败各最多保留一条，其他活动Run保留；仅删除已结束旧Run及其准确归属的Tag、Release、日志和Artifact并回查。替代正式产物未验真时保留旧成功，不阻止旧失败清理；权限、网络、删除或回查失败均真实失败，不吞错、不冒充清理完成、不取消另一平台。配置、发布文件、业务、依赖及控制台不变，不新增文件、Job、工作流或框架。
+GitHub历史清理由本产品现有编译工作流末尾的always步骤调用scripts/build.mjs cleanup执行，使用本仓GITHUB_TOKEN及已有contents: write、actions: write权限；控制台只派发和观察原Run，独立CLI automate同样派发后返回准确Run ID，不在客户端轮询或删除GitHub对象。客户端不再公开直接执行GitHub删除的cleanup动作；独立cleanup命令保留在产品内。控制台数据库记录仍归控制台管理。清理先核验本轮仓库、main、工作流、提交及attempt，以收尾前job.status独立计算本轮候选类别并保护本轮；不修改API返回的status或conclusion，Run最终结果由GitHub确认。历史清理查询覆盖本平台main工作流全部触发事件并逐页读取，包含旧push记录；候选版本及正式包选择仍只查询workflow_dispatch，保持原版本与安装合同。每个平台最新成功与最新失败各最多保留一条，其他活动Run保留；仅删除已结束旧Run及其准确归属的Tag、Release、日志和Artifact并回查。替代正式产物未验真时保留旧成功，不阻止旧失败清理；权限、网络、删除或回查失败均真实失败，不吞错、不冒充清理完成、不取消另一平台。历史清理不改业务和依赖，不新增文件、Job、工作流或框架。
 
 
 GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。
 
-创建Release使用GitHub CLI官方--target "$GITHUB_SHA"，明确将target_commitish设为本次编译提交；已有Tag仍通过--verify-tag及原Tag SHA回读独立核验。回归模拟GitHub默认目标为main，覆盖省略--target时原准确SHA断言失败并撤回候选，保留附件逐字节回读及损坏附件撤回断言。配置、业务、发布文件和控制台不变。
+创建Release使用GitHub CLI官方--target "$GITHUB_SHA"，明确将target_commitish设为本次编译提交；已有Tag仍通过--verify-tag及原Tag SHA回读独立核验。回归模拟GitHub默认目标为main，覆盖省略--target时原准确SHA断言失败并撤回候选，保留附件逐字节回读及损坏附件撤回断言。该附件修复不改业务和控制台。

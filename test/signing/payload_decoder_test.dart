@@ -269,7 +269,6 @@ void main() {
 
       const validProductPlatforms = <String, List<String>>{
         'citizenapp': ['ios', 'android'],
-        'citizenwallet': ['ios', 'android'],
         'citizenserve': ['cloudflare'],
         'citizenweb': ['web'],
         'tuyulove': ['ios', 'android'],
@@ -279,7 +278,6 @@ void main() {
       };
       const productNamesZh = <String, String>{
         'citizenapp': '公民',
-        'citizenwallet': '公民钱包',
         'citizenserve': '公民服务端',
         'citizenweb': '公民官网',
         'tuyulove': '途遇',
@@ -325,6 +323,9 @@ void main() {
       }
 
       const invalidProductPlatforms = <(String, String)>[
+        // 钱包自身两端已取消独立发布冷签，完整的旧请求也必须拒绝。
+        ('citizenwallet', 'ios'),
+        ('citizenwallet', 'android'),
         ('citizenweb', 'cloudflare'),
         ('citizenserve', 'web'),
         ('tuyulove', 'web'),

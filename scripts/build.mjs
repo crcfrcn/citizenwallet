@@ -5,6 +5,7 @@ import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,copyFileSync,cpSync,rmS
 import {join,dirname,resolve,relative,sep,basename} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
+import {homedir} from 'node:os';
 import {tools,repository,platforms,initialVersion} from './config.mjs';
 export const root=fileURLToPath(new URL('../',import.meta.url));
 const controller=new AbortController();
@@ -109,7 +110,6 @@ export async function candidate(platform,{token=process.env.GH_TOKEN,read=path=>
  const rows=await rowsFor(platform,read);
  if(rows.some(row=>row.status!=='completed'&&row.id!==currentRun))throw Error('同平台已有活动Run，禁止重复派发');return nextVersion(platform,rows);
 }
-function report(value){if(!process.stdout.listenerCount('error'))process.stdout.on('error',()=>{});try{process.stdout.write(JSON.stringify(value)+'\n',()=>{});}catch{}}
 function releaseProof(release){
  try{return JSON.parse(/^<!-- automation:(\{[^\n]*\}) -->$/mu.exec(release.body||'')?.[1]||'null');}catch{return null;}
 }
@@ -202,40 +202,42 @@ function validInstallFile(path,asset){
  if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw Error('安装包不是独立普通文件');
  return stat.size===asset.size&&'sha256:'+sha(readFileSync(path))===asset.digest;
 }
-export async function ensureInstallPackage(platform,{token,read,base=join(root,'target'),download=(asset,path)=>downloadInstallAsset(asset,path,{token})}={}){
+export async function ensureInstallPackage(platform,{token,read,base=join(root,'target'),download=(asset,path)=>downloadInstallAsset(asset,path,{token}),notify=message=>console.log(message)}={}){
  const selected=await latestInstallAsset(platform,{token,read});installRoot(base);const path=join(base,selected.asset.name);
  if(!validInstallFile(path,selected.asset)){
+  notify('下载最新正式包：'+selected.asset.name);
   const partial=join(base,selected.asset.name+'.'+randomUUID()+'.part');
   try{await download(selected.asset,partial);if(!validInstallFile(partial,selected.asset))throw Error('正式附件大小或官方摘要不一致');renameSync(partial,path);}finally{rmSync(partial,{force:true});}
- }
+ }else notify('本地包与最新正式版一致，直接安装：'+selected.asset.name);
  // 只替换本仓target直属的同平台旧正式包，另一平台和编译现场不动。
  const owned=platform==='ios'?/^citizenwallet-ios-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.ipa$/u:/^citizenwallet-android-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.apk$/u;
  for(const name of readdirSync(base))if(name!==selected.asset.name&&owned.test(name)){const old=join(base,name),stat=lstatSync(old);if(!stat.isFile()||stat.nlink!==1)throw Error('旧安装包不是独立普通文件');rmSync(old);}
  return {...selected,path};
 }
 // 官方设备工具实际安装并回读版本；不卸载、不降级、不重签名、不编译。
-export async function installProduct(platform,{token,read,download,prepare=ensureInstallPackage,execute=run,environment:env=process.env,notify=report}={}){
+export async function installProduct(platform,{token,read,download,prepare=ensureInstallPackage,execute=run,environment:env=process.env,notify=message=>console.log(message)}={}){
  automationDisplayName(platform,initialVersion);const base=installRoot(),lock=join(base,'.citizenwallet-'+platform+'.lock');let fd;
  try{fd=openSync(lock,'wx',0o600);}catch(error){if(error.code==='EEXIST')throw Error('对应平台已有安装任务，禁止并发覆盖');throw error;}
  let work,safe=true;
  try{
-  const selected=await prepare(platform,{token,read,download}),capture={capture:true,env};
-  notify({event:'output',stream:'stdout',data:Buffer.from('安装正式版：'+selected.asset.name+'；安装包位置：'+selected.path+'\n').toString('base64')});
+  const selected=await prepare(platform,{token,read,download,notify}),capture={capture:true,env};
+  notify('安装正式版：'+selected.asset.name+'；安装包位置：'+selected.path);
   if(platform==='android'){
    const sdk=env.ANDROID_HOME||env.ANDROID_SDK_ROOT||join(env.HOME||process.env.HOME,'Library/Android/sdk'),adb=join(sdk,'platform-tools/adb'),analyzer=join(sdk,'cmdline-tools/latest/bin/apkanalyzer');
    const java=env.JAVA_HOME||'/Applications/Android Studio.app/Contents/jbr/Contents/Home',android={...capture,env:{...env,JAVA_HOME:java,PATH:join(java,'bin')+':'+(env.PATH||'/usr/bin:/bin')}};
-   const rows=(await execute(adb,['devices'],capture)).split('\n').map(line=>line.trim().split(/\s+/u)),devices=rows.filter(row=>row.length===2&&row[1]==='device'&&!row[0].startsWith('emulator-')&&(!env.ANDROID_SERIAL||row[0]===env.ANDROID_SERIAL));
-   if(devices.length!==1)throw Error('需要且只能有一台已授权的Android手机');const device=devices[0][0],identity='com.crcfrcn.citizenwallet';
+   // 与公民App一致，由adb的-d选择唯一USB真机；不使用无线设备或模拟器。
+   const device=await execute(adb,['-d','get-serialno'],capture),identity='com.crcfrcn.citizenwallet';
+   if(!device||device==='unknown')throw Error('需要且只能有一台已授权的USB Android手机');
    const app=await execute(analyzer,['manifest','application-id',selected.path],android),version=await execute(analyzer,['manifest','version-name',selected.path],android),number=await execute(analyzer,['manifest','version-code',selected.path],android);
    if(app!==identity||version!==selected.version||number!==selected.buildNumber)throw Error('正式APK应用标识或版本不一致');
    await execute(join(sdk,'build-tools/36.0.0/apksigner'),['verify',selected.path],android);
-   await execute(adb,['-s',device,'install','-r',selected.path],capture);
-   const installed=await execute(adb,['-s',device,'shell','dumpsys','package',identity],capture);
+   await execute(adb,['-d','install','-r',selected.path],capture);
+   const installed=await execute(adb,['-d','shell','dumpsys','package',identity],capture);
    if(!new RegExp('(?:^|\\s)versionName='+selected.version.replaceAll('.','\\.')+'(?:\\s|$)','u').test(installed)||!new RegExp('(?:^|\\s)versionCode='+selected.buildNumber+'(?:\\s|$)','u').test(installed))throw Error('Android安装后版本回读不一致');
   }else{
    const data=JSON.parse(await execute('/usr/bin/xcrun',['devicectl','list','devices','--json-output','-','--omit-deprecated-fields-in-json','--quiet'],capture));
-   const devices=data.result?.devices?.filter(device=>device.properties?.hardware?.platform==='iOS'&&device.properties.hardware.reality==='physical'&&device.properties.connection?.state==='connected'&&device.properties.connection.pairingState==='paired');
-   if(devices?.length!==1)throw Error('需要且只能有一台已连接并配对的iOS手机');const device=devices[0].identifier,identity='ios.citizenwallet';
+   const devices=data.result?.devices?.filter(device=>device.properties?.hardware?.platform==='iOS'&&device.properties.hardware.reality==='physical'&&device.properties.connection?.pairingState==='paired'&&device.properties.connection.transportType==='wired'&&device.properties.connection.state!=='unavailable');
+   if(devices?.length!==1)throw Error('请连接并信任唯一一台要安装的iPhone');const device=devices[0].identifier,identity='ios.citizenwallet';
    work=mkdtempSync(join(base,'.citizenwallet-ios-'));
    const entries=(await execute('/usr/bin/unzip',['-Z','-1',selected.path],capture)).split('\n');
    if(entries.some(name=>name.startsWith('/')||name.includes('\\')||name.split('/').includes('..')))throw Error('IPA成员路径越界');
@@ -249,6 +251,7 @@ export async function installProduct(platform,{token,read,download,prepare=ensur
    const found=installed.result?.apps?.filter(value=>value.bundleIdentifier===identity);
    if(found?.length!==1||found[0].version!==selected.version||String(found[0].bundleVersion)!==selected.buildNumber)throw Error('iOS安装后版本回读不一致');
   }
+  notify('已安装：'+selected.asset.name);
   return {completed:true,platform,version:selected.version,path:selected.path};
  }catch(error){safe=!error.keepWork;throw error;}
  finally{closeSync(fd);if(safe){if(work)rmSync(work,{recursive:true,force:true});rmSync(lock);}}
@@ -257,7 +260,8 @@ export async function installProduct(platform,{token,read,download,prepare=ensur
 export function describeAction({flow,platform,inputs={}}){
  automationDisplayName(platform,initialVersion);
  if(flow==='release')return {repository,launch:options=>automate(platform,options)};
- if(flow==='build')return {repository,launch:async options=>{try{const result=await installProduct(platform,{...options,environment:{...process.env,...inputs.environment}});report({event:'exit',code:0});return result;}catch(error){report({event:'exit',code:1,error:error.message});throw error;}}};
+ // 沿用公民App公开入口：独立install进程，不领取GitHub令牌、不派发工作流。
+ if(flow==='build')return {command:process.execPath,args:[fileURLToPath(import.meta.url),'install',platform],cwd:root,env:{PATH:'/usr/bin:/bin',HOME:homedir()}};
  if(flow==='test')return {command:process.execPath,args:[fileURLToPath(import.meta.url),flow,platform],cwd:root,env:{...process.env,...inputs.environment}};
  throw Error('本产品尚未声明该流程：'+flow);
 }
@@ -362,7 +366,7 @@ export async function native(target,project,work,env){
  return file;
 }
 export async function testProduct(platform='android'){
- nodeCheck();await run(process.execPath,['--test','test/build.test.mjs','scripts/publish.mjs'],{cwd:root});
+ nodeCheck();await run(process.execPath,['--test','test/build.test.mjs'],{cwd:root});
  const work=task('test',platform),cache=claimCache(work),env=environment(work,cache);let safe=true;
  try{
   await prepareTools(work,platform,env);const project=await prepare(work,platform,env);
@@ -417,8 +421,42 @@ export async function packageProduct(platform){
  put(join(output,title+'.sha256'),readdirSync(output).sort().map(name=>sha(readFileSync(join(output,name)))+'  '+name).join('\n')+'\n');put(join(work,'proof.json'),JSON.stringify(proof));
  return {output};
 }
+// Google官方认证Action提供短期访问令牌；这里只上传本轮已验收AAB，不改变发布轨道。
+export async function uploadAndroid({token=process.env.PLAY_ACCESS_TOKEN,fetchImpl=fetch,work=process.env.PRODUCT_WORK,version=process.env.PRODUCT_VERSION,number=process.env.GITHUB_RUN_NUMBER,runID=process.env.GITHUB_RUN_ID,sourceSha=process.env.GITHUB_SHA}={}){
+ automationDisplayName('android',version);
+ if(!insideTarget(work)||!token||!/^\d+$/u.test(number||'')||!/^\d+$/u.test(runID||'')||!/^([a-f0-9]{40})$/u.test(sourceSha||''))throw Error('Google上传输入缺失或无效');
+ const name=artifactBaseName('android',version)+'.aab',path=join(work,'artifact',name),info=lstatSync(path);
+ if(!info.isFile()||info.isSymbolicLink()||info.size<1)throw Error('Google上传AAB无效');
+ const bytes=readFileSync(path),digest=sha(bytes),proof=JSON.parse(readFileSync(join(work,'proof.json'))),asset=proof.assets?.find(value=>value.name===name);
+ if(proof.product_id!=='citizenwallet'||proof.platform!=='android'||proof.version!==version||String(proof.run_id)!==runID||proof.source_sha!==sourceSha||asset?.sha256!==digest||asset.size!==bytes.length)throw Error('Google上传AAB与本轮验收不一致');
+ const base='https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.crcfrcn.citizenwallet/edits';
+ async function request(method,url,body,media=false){
+  let response;try{response=await fetchImpl(url,{method,redirect:'error',signal:AbortSignal.any([controller.signal,AbortSignal.timeout(120000)]),headers:{Authorization:'Bearer '+token,'Content-Type':media?'application/octet-stream':'application/json'},...(body===undefined?{}:{body:media?body:JSON.stringify(body)})});}catch{throw Error('Google上传网络请求未确认，禁止自动重发');}
+  if(!response.ok)throw Error('Google上传HTTP '+response.status);
+  return response.status===204?null:response.json();
+ }
+ const edit=await request('POST',base,{});
+ if(typeof edit.id!=='string'||!/^\d+$/u.test(edit.id))throw Error('Google编辑编号无效');
+ let committed=false;
+ try{
+  const bundle=await request('POST','https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/com.crcfrcn.citizenwallet/edits/'+edit.id+'/bundles?uploadType=media',bytes,true);
+  if(String(bundle.versionCode)!==number||bundle.sha256!==digest)throw Error('Google上传AAB版本或摘要回读不符');
+  // 只保存上传，不指定轨道或提交面向用户的发行；有审核中的变更则明确失败。
+  const result=await request('POST',base+'/'+edit.id+':commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW');
+  if(result.id!==edit.id)throw Error('Google上传保存回执不符');
+  committed=true;
+ }finally{if(!committed)await request('DELETE',base+'/'+edit.id);}
+ const readback=await request('POST',base,{});
+ if(typeof readback.id!=='string'||!/^\d+$/u.test(readback.id))throw Error('Google回读编辑编号无效');
+ try{
+  const result=await request('GET',base+'/'+readback.id+'/bundles'),matches=result.bundles?.filter(value=>String(value.versionCode)===number);
+  if(matches?.length!==1||matches[0].sha256!==digest)throw Error('Google已保存AAB回读不符');
+ }finally{await request('DELETE',base+'/'+readback.id);}
+ return {uploaded:true,platform:'android',version,buildNumber:number};
+}
 async function main(){
  const [command,platform='android',...extra]=process.argv.slice(2);if(extra.length)throw Error('参数过多');
+ if(command==='upload'&&platform==='android')return uploadAndroid();
  if(command==='test')return testProduct(platform);if(command==='build')return buildProduct(platform);if(command==='package')return packageProduct(platform);if(command==='install')return installProduct(platform,{token:process.env.GH_TOKEN||process.env.GITHUB_TOKEN});
  if(command==='candidate')return candidate(platform);if(command==='automate')return automate(platform,{token:process.env.GH_TOKEN});if(command==='cleanup')return cleanupRuns(platform,{currentRun:Number(process.env.GITHUB_RUN_ID||0),result:process.env.PRODUCT_RESULT,sourceSha:process.env.GITHUB_SHA,attempt:process.env.GITHUB_RUN_ATTEMPT===undefined?undefined:Number(process.env.GITHUB_RUN_ATTEMPT)});
  throw Error('未知产品命令');

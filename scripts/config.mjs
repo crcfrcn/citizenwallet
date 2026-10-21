@@ -35,6 +35,14 @@ export const manifest=Object.freeze({
         "revealable": true,
         "accessLevel": "protected",
         "kind": "ios-signing"
+      },
+      {
+        "environment": "appstore",
+        "name": "PLAY_KEY",
+        "title": "PLAY_KEY",
+        "description": "Google Play已有服务账号，用于自动化上传正式AAB",
+        "revealable": false,
+        "accessLevel": "protected"
       }
     ]
   }

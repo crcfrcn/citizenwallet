@@ -3841,9 +3841,9 @@ class PayloadDecoder {
     }
     offset = version.$2;
 
+    // 钱包自身不提供独立发布冷签，只接受这里明确登记的其他产品端。
     const productPlatforms = <String, Set<String>>{
       'citizenapp': {'ios', 'android'},
-      'citizenwallet': {'ios', 'android'},
       // 产品端与部署供应商必须分离：公民网的端是 web，Cloudflare Pages
       // 只是部署实现；公民服务端的正式端才是 cloudflare。
       'citizenweb': {'web'},
@@ -3862,7 +3862,6 @@ class PayloadDecoder {
     // 不接受调用端提供展示文案，避免签名内容与用户看到的产品身份分离。
     const productNamesZh = <String, String>{
       'citizenapp': '公民',
-      'citizenwallet': '公民钱包',
       'citizenserve': '公民服务端',
       'citizenweb': '公民官网',
       'tuyulove': '途遇',

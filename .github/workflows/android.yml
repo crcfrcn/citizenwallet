@@ -172,6 +172,21 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$encoded" > "$PRODUCT_WORK/release.json"
           jq -e --arg name "$name" --arg sha "$GITHUB_SHA" --argjson count 4 '.name==$name and .tag_name==$name and .target_commitish==$sha and .draft==false and .prerelease==false and (.assets|length)==$count' "$PRODUCT_WORK/release.json" >/dev/null
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$encoded" | jq -e --arg sha "$GITHUB_SHA" '.object.type=="commit" and .object.sha==$sha' >/dev/null
+      # 复用已有服务账号；官方认证Action只交付短期令牌，不落盘凭据。
+      - name: Google官方认证
+        id: google
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          credentials_json: ${{ secrets.PLAY_KEY }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: 上传正式AAB到Google Play
+        timeout-minutes: 10
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
+        run: node scripts/build.mjs upload android
       - name: 保存官方缓存
         if: always()
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
