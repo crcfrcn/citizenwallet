@@ -216,21 +216,24 @@ void main() {
 
   group('PayloadDecoder', () {
     test('节点部署批准逐项审阅目标并拒绝异产品、类别和尾字节', () {
-      final payload = <int>[
+      // 使用正式中文标签及UTF-8字节长度，保留原产品、类别、尾字节安全断言。
+      List<int> nodePayload(String version) => <int>[
         1, ...'citizenchain'.codeUnits, 1,
         6, ...'prczss'.codeUnits,
         10, ...'192.0.2.10'.codeUnits,
-        15, ...'citizenchain-v1'.codeUnits,
+        utf8.encode(version).length, ...utf8.encode(version),
         ...List<int>.filled(20, 0x11), ...List<int>.filled(32, 0x22),
         ...'123456789'.codeUnits, ...u64Le(1800000000),
         ...List<int>.filled(32, 0x33),
       ];
+      final payload = nodePayload('公民链·LinuxARM·v1.0.1');
       final decoded = PayloadDecoder.decode(hexOf(payload), expectedAction:'node_deploy');
       expect(decoded?.action, 'node_deploy');
       expect(decoded?.fields['deployment_kind'], '权威节点');
       expect(decoded?.fields['node_id'], 'prczss');
       expect(decoded?.fields['server_ip'], '192.0.2.10');
       expect(decoded?.fields['task_id'], '123456789');
+      expect(decoded?.fields['version_tag'], '公民链·LinuxARM·v1.0.1');
       expect(decoded?.summary, '授权部署 权威节点 prczss 到 192.0.2.10');
       expect(PayloadDecoder.decode(hexOf(payload)), isNull);
       expect(PayloadDecoder.decode(hexOf([...payload,0]),expectedAction:'node_deploy'),isNull);
@@ -238,6 +241,25 @@ void main() {
       expect(PayloadDecoder.decode(hexOf(wrongProduct),expectedAction:'node_deploy'),isNull);
       final wrongKind=List<int>.from(payload)..[1+'citizenchain'.length]=3;
       expect(PayloadDecoder.decode(hexOf(wrongKind),expectedAction:'node_deploy'),isNull);
+      const boundary = '公民链·LinuxARM·v18446744073709551615.9999999999999999999.0';
+      expect(utf8.encode(boundary), hasLength(64));
+      for (final version in ['公民链·LinuxARM·v0.0.0', boundary]) {
+        expect(PayloadDecoder.decode(hexOf(nodePayload(version)), expectedAction:'node_deploy')?.fields['version_tag'], version);
+      }
+      for (final version in [
+        '', 'citizenchain-v1', '公民链·LinuxAMD·v1.0.1',
+        '公民链·LinuxARM·v01.0.1', '公民链·LinuxARM·v1.0',
+        '公民链·LinuxARM·v1.0.1-beta', '公民链·LinuxARM·v1.0.1\n',
+        '公民链·LinuxARM·v18446744073709551616.0.0', '${boundary}0',
+      ]) {
+        expect(PayloadDecoder.decode(hexOf(nodePayload(version)), expectedAction:'node_deploy'), isNull, reason:version);
+      }
+      // 非法UTF-8和字符数代替字节数的旧编码仍须拒绝。
+      final versionOffset = 1 + 'citizenchain'.length + 1 + 1 + 6 + 1 + 10;
+      final malformed = List<int>.from(payload)..[versionOffset + 1] = 0xff;
+      expect(PayloadDecoder.decode(hexOf(malformed), expectedAction:'node_deploy'), isNull);
+      final wrongLength = List<int>.from(payload)..[versionOffset] = '公民链·LinuxARM·v1.0.1'.length;
+      expect(PayloadDecoder.decode(hexOf(wrongLength), expectedAction:'node_deploy'), isNull);
     });
     // 发布授权必须按链端定义完整消费所有 SCALE 字段；同时覆盖 action 绑定与尾字节拒绝，
     // 防止钱包把其它动作或带有未解释附加数据的载荷展示成可签名发布请求。

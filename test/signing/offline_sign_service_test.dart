@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -146,12 +147,12 @@ List<int> _publishAuthorizationPayload({
   ...List<int>.filled(32, 0x66),
 ];
 
-// 与公民链独立 QR 库的固定节点批准布局逐字节对应，不借用发布载荷。
+// 正式中文标签按UTF-8字节计长，与控制台节点批准布局对应，不借用发布载荷。
 List<int> _nodeDeployPayload(int expiresAt) => <int>[
   1, ...'citizenchain'.codeUnits, 1,
   6, ...'prczss'.codeUnits,
   10, ...'192.0.2.10'.codeUnits,
-  15, ...'citizenchain-v1'.codeUnits,
+  utf8.encode('公民链·LinuxARM·v1.0.1').length, ...utf8.encode('公民链·LinuxARM·v1.0.1'),
   ...List<int>.filled(20, 0x11), ...List<int>.filled(32, 0x22),
   ...'123456789'.codeUnits, ..._u64Le(expiresAt),
   ...List<int>.filled(32, 0x33),
@@ -350,6 +351,7 @@ void main() {
       expect(verified.actionLabel,'节点部署批准');
       expect(verified.decoded?.fields['node_id'],'prczss');
       expect(verified.decoded?.fields['server_ip'],'192.0.2.10');
+      expect(verified.decoded?.fields['version_tag'],'公民链·LinuxARM·v1.0.1');
       final response=await service.signParsedRequest(accountId:signingAccount.accountId,request:request);
       expect(_verifySr25519(signerPublicKeyHex:response.body.signerPublicKeyHex,
         message:QrSigner.signingBytesFor(request.body),signatureHex:response.body.signatureHex),isTrue);

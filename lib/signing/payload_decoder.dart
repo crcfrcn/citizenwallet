@@ -3954,9 +3954,17 @@ class PayloadDecoder {
     final version = readText(64);
     if (nodeId == null || ip == null || version == null ||
         !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(nodeId) ||
-        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(version) ||
         InternetAddress.tryParse(ip)?.address != ip ||
         offset + 20 + 32 + 9 + 8 + 32 != bytes.length) {
+      return null;
+    }
+    // 与控制台节点部署的正式标签一致；readText按UTF-8限制64字节，各版本段保持UInt64范围。
+    final versionMatch = RegExp(
+      r'^公民链·LinuxARM·v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$',
+    ).firstMatch(version);
+    final versionLimit = BigInt.one << 64;
+    if (versionMatch == null || versionMatch.end != version.length ||
+        [1, 2, 3].any((index) => BigInt.parse(versionMatch.group(index)!) >= versionLimit)) {
       return null;
     }
     final sourceBytes = bytes.sublist(offset, offset + 20);

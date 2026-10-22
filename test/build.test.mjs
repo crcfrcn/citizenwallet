@@ -4,7 +4,7 @@ import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSyn
 import {join,dirname,basename} from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {root,automationDisplayName,nextVersion,retainedRuns,candidate,automate,cleanupRuns,run,artifactBaseName,packageProduct,uploadAndroid} from '../scripts/build.mjs';
+import {root,automationDisplayName,nextVersion,retainedRuns,candidate,automate,cleanupRuns,run,artifactBaseName,packageProduct,uploadAndroid,describeAction} from '../scripts/build.mjs';
 import {initialVersion,platforms,repository} from '../scripts/config.mjs';
 const platform=Object.keys(platforms)[0];
 const row=(id,conclusion,status='completed')=>({id,status,conclusion,updated_at:new Date(id*1000).toISOString(),head_sha:'a'.repeat(40),path:'.github/workflows/'+platform+'.yml',head_branch:'main',run_attempt:1,display_title:automationDisplayName(platform,'1.2.3')});
@@ -192,93 +192,13 @@ test('清理权限失败真实抛出，不改写本轮状态或触发编译派�
 
 
 
-// 安装回归只使用本仓合成附件和设备回执，不接触真实手机或正式包。
-const {latestInstallAsset,ensureInstallPackage,downloadInstallAsset,installProduct,describeAction}=await import('../scripts/build.mjs');
-function installFixture(t,selectedPlatform='android'){
- const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const base=mkdtempSync(join(parent,'installation-'));t.after(()=>rmSync(base,{recursive:true,force:true}));
- const bytes=Buffer.from('synthetic signed package'),latest={...row(1,'success'),display_title:automationDisplayName(selectedPlatform,'1.2.3'),path:'.github/workflows/'+selectedPlatform+'.yml',run_number:42};
- const asset={id:100,name:artifactBaseName(selectedPlatform,'1.2.3')+(selectedPlatform==='ios'?'.ipa':'.apk'),size:bytes.length,digest:'sha256:'+createHash('sha256').update(bytes).digest('hex')};
- const release={tag_name:latest.display_title,target_commitish:latest.head_sha,draft:false,prerelease:false,assets:[asset]};
- const read=async path=>{if(path.startsWith('actions/workflows/'))return {workflow_runs:[latest,{...latest,id:2,conclusion:'failure',updated_at:new Date(3000).toISOString(),display_title:automationDisplayName(selectedPlatform,'1.2.4')}]};if(path.startsWith('releases/tags/'))return release;if(path.startsWith('git/ref/tags/'))return {object:{type:'commit',sha:latest.head_sha}};throw Error('不允许的合成读取');};
- return {base,bytes,latest,asset,release,read,selected:{asset,platform:selectedPlatform,version:'1.2.3',buildNumber:'42',path:join(base,asset.name)}};
-}
-test('缺包下载、最新复用、内容损坏替换，文件直接归指定target现场',async t=>{
- const f=installFixture(t);let downloads=0;const download=async(asset,path)=>{downloads++;assert.equal(dirname(path),f.base);writeFileSync(path,f.bytes);};
- const messages=[],options={base:f.base,read:f.read,download,notify:message=>messages.push(message)};
- const first=await ensureInstallPackage('android',options);assert.equal(dirname(first.path),f.base);assert.equal(basename(first.path),f.asset.name);assert.equal(downloads,1);
- await ensureInstallPackage('android',options);assert.equal(downloads,1);
- writeFileSync(first.path,'broken');await ensureInstallPackage('android',options);assert.equal(downloads,2);assert.ok(readFileSync(first.path).equals(f.bytes));
- assert.deepEqual(readdirSync(f.base),[f.asset.name]);assert.match(messages[0],/下载最新正式包/u);assert.match(messages[1],/直接安装/u);assert.match(messages[2],/下载最新正式包/u);
+// 本机安装已归控制台；产品公开流程不得恢复安装或下载入口。
+test('产品只声明自动化和测试，拒绝旧build安装入口',async()=>{
+ const {describeAction}=await import('../scripts/build.mjs');
+ assert.throws(()=>describeAction({flow:'build',platform:'android'}),/未声明/u);
+ assert.throws(()=>describeAction({flow:'install',platform:'ios'}),/未声明/u);
+ const declaration=describeAction({flow:'release',platform:'android'});assert.equal(declaration.repository,repository);
 });
-test('下载校验失败保留原包，不留下半包或提前删除旧版',async t=>{
- const f=installFixture(t),old=join(f.base,artifactBaseName('android','1.2.2')+'.apk');writeFileSync(old,'old');writeFileSync(f.selected.path,'previous');
- await assert.rejects(ensureInstallPackage('android',{base:f.base,read:f.read,download:async(_asset,path)=>writeFileSync(path,'bad')}),/摘要不一致/u);
- assert.equal(readFileSync(old,'utf8'),'old');assert.equal(readFileSync(f.selected.path,'utf8'),'previous');assert.equal(readdirSync(f.base).some(name=>name.endsWith('.part')),false);
-});
-test('新包验真后只删除同平台旧包，保留另一平台',async t=>{
- const f=installFixture(t),old=join(f.base,artifactBaseName('android','1.2.2')+'.apk'),other=join(f.base,artifactBaseName('ios','1.2.2')+'.ipa');writeFileSync(old,'old');writeFileSync(other,'other');
- await ensureInstallPackage('android',{base:f.base,read:f.read,download:async(_asset,path)=>writeFileSync(path,f.bytes)});
- assert.equal(existsSync(old),false);assert.equal(readFileSync(other,'utf8'),'other');
-});
-test('草稿、错误Tag、缺失摘要、重复或越界附件均拒绝',async t=>{
- for(const mutate of [f=>{f.release.draft=true;},f=>{f.release.target_commitish='b'.repeat(40);},f=>{f.asset.digest='';},f=>{f.release.assets.push({...f.asset,id:101});},f=>{f.asset.name='../escape.apk';}]){
-  const f=installFixture(t);mutate(f);await assert.rejects(latestInstallAsset('android',{read:f.read}));
- }
-});
-test('安装包链接不能被覆盖或当成最新包使用',async t=>{
- const f=installFixture(t),outside=join(f.base,'source');writeFileSync(outside,f.bytes);symlinkSync(outside,f.selected.path);
- await assert.rejects(ensureInstallPackage('android',{base:f.base,read:f.read,download:()=>assert.fail('不得下载覆盖链接')}),/独立普通文件/u);assert.ok(readFileSync(outside).equals(f.bytes));
-});
-test('官方附件重定向不转发令牌，禁止HTTP下载',async t=>{
- const f=installFixture(t),path=join(f.base,'download.part');let calls=0;
- await downloadInstallAsset(f.asset,path,{token:'synthetic',fetchImpl:async(_url,options)=>{calls++;if(calls===1){assert.equal(options.headers.Authorization,'Bearer synthetic');return new Response(null,{status:302,headers:{location:'https://release-assets.githubusercontent.com/synthetic'}});}assert.equal(options.headers,undefined);return new Response(f.bytes);}});
- assert.ok(readFileSync(path).equals(f.bytes));assert.equal(calls,2);
- await assert.rejects(downloadInstallAsset(f.asset,path+'.bad',{fetchImpl:async()=>new Response(null,{status:302,headers:{location:'http://example.invalid/file'}})}),/下载地址无效/u);
-});
-function androidTool(f,calls,{devices='synthetic-device\tdevice',wrongIdentity=false,wrongReadback=false,failInstall=false}={}){
- return async(command,args)=>{
-  calls.push([basename(command),...args]);
-  if(basename(command)==='apkanalyzer')return args[1]==='application-id'?(wrongIdentity?'other.app':'com.crcfrcn.citizenwallet'):args[1]==='version-name'?'1.2.3':'42';
-  if(basename(command)==='apksigner')return '';
-  if(args[0]==='-d'&&args[1]==='get-serialno'){const rows=devices.split('\n').map(row=>row.trim().split(/\s+/u)).filter(row=>row.length===2&&row[1]==='device'&&!row[0].startsWith('emulator-')&&!row[0].includes(':'));if(rows.length!==1)throw Error('adb没有唯一USB设备');return rows[0][0];}
-  if(args.includes('install')){if(failInstall)throw Error('合成安装失败');return 'Success';}
-  if(args.includes('dumpsys'))return wrongReadback?'versionCode=41 versionName=1.2.2':'versionCode=42 minSdk=24\n versionName=1.2.3';
-  throw Error('不允许的合成工具调用');
- };
-}
-test('Android保留数据安装并回读版本，零设备、多设备、身份与回读异常均失败',async t=>{
- for(const options of [{},{devices:''},{devices:'one\tdevice\ntwo\tdevice'},{devices:'emulator-5554\tdevice'},{devices:'192.0.2.1:5555\tdevice'},{wrongIdentity:true},{wrongReadback:true},{failInstall:true}]){
-  const f=installFixture(t),calls=[],invoke=()=>installProduct('android',{prepare:async()=>f.selected,execute:androidTool(f,calls,options),notify:()=>{}});
-  if(Object.keys(options).length)await assert.rejects(invoke());else {assert.equal((await invoke()).completed,true);assert.ok(calls.some(args=>args[0]==='adb'&&args[1]==='-d'&&args[2]==='install'&&args[3]==='-r'));assert.ok(calls.some(args=>args[0]==='adb'&&args[1]==='-d'&&args.includes('dumpsys')));}
-  if(options.wrongIdentity||Object.hasOwn(options,'devices'))assert.equal(calls.some(args=>args.includes('install')),false);
-  assert.equal(calls.some(args=>args.includes('uninstall')||(args.includes('install')&&args.slice(args.indexOf('install')+1).includes('-d'))),false);assert.equal(existsSync(join(root,'target/.citizenwallet-android.lock')),false);
- }
-});
-test('iOS使用官方安装和版本回读；签名、安装或回读失败不冒充成功',async t=>{
- for(const failure of ['', 'signature','installation','readback','no-device','multiple','wireless','unpaired','unavailable','simulator']){
-  const f=installFixture(t,'ios'),calls=[];
-  const execute=async(command,args)=>{
-   calls.push([basename(command),...args]);
-   if(args[0]==='devicectl'&&args[1]==='list'){
-    const device={identifier:'synthetic-device',properties:{hardware:{platform:'iOS',reality:failure==='simulator'?'simulated':'physical'},connection:{state:failure==='unavailable'?'unavailable':'connected',pairingState:failure==='unpaired'?'unpaired':'paired',transportType:failure==='wireless'?'network':'wired'}}};
-    return JSON.stringify({result:{devices:failure==='no-device'?[]:failure==='multiple'?[device,{...device,identifier:'second-device'}]:[device]}});
-   }
-   if(command==='/usr/bin/unzip'&&args[0]==='-Z')return 'Payload/Runner.app/Info.plist';
-   if(command==='/usr/bin/unzip'){mkdirSync(join(args.at(-1),'Payload/Runner.app'),{recursive:true});return '';}
-   if(command==='/usr/bin/plutil')return JSON.stringify({CFBundleIdentifier:'ios.citizenwallet',CFBundleShortVersionString:'1.2.3',CFBundleVersion:'42'});
-   if(command==='/usr/bin/codesign'){if(failure==='signature')throw Error('合成签名失败');return '';}
-   if(args.includes('install')){if(failure==='installation')throw Error('合成安装失败');return '';}
-   if(args.includes('apps'))return JSON.stringify({result:{apps:[{bundleIdentifier:'ios.citizenwallet',version:failure==='readback'?'1.2.2':'1.2.3',bundleVersion:'42'}]}});
-   throw Error('不允许的合成工具调用');
-  };
-  const invoke=()=>installProduct('ios',{prepare:async()=>f.selected,execute,notify:()=>{}});
-  if(failure)await assert.rejects(invoke());else assert.equal((await invoke()).completed,true);
-  if(['signature','no-device','multiple','wireless','unpaired','unavailable','simulator'].includes(failure))assert.equal(calls.some(args=>args.includes('install')),false);
-  assert.equal(existsSync(join(root,'target/.citizenwallet-ios.lock')),false);
- }
-
-});
-
 
 // 执行真实工作流的附件回读片段；本仓假GitHub沿用官方文件名及默认分支行为，不访问网络。
 test('两平台准确SHA、ASCII附件及中文label生效，损坏附件和默认分支均失败并撤回候选',async t=>{
@@ -351,17 +271,6 @@ test('清理拒绝其他仓库、平台或分支记录，不删除归属不符�
  for(const invalid of [{path:'.github/workflows/other.yml'},{head_branch:'other'},{repository:{full_name:'other/repo'}}]){
   let deleted=0;await assert.rejects(cleanupRuns(platform,{read:async()=>({workflow_runs:[{...row(1,'failure'),...invalid}]}),remove:async()=>{deleted++;}}),/归属不符/u);assert.equal(deleted,0);
  }
-});
-
-// 蓝色按钮只启动所属产品的独立安装进程，不取得控制台GitHub凭据或运行编译。
-test('两平台按钮沿公民App方式声明独立install子进程',()=>{
- for(const platform of ['ios','android']){
-  const declared=describeAction({flow:'build',platform});assert.equal(declared.command,process.execPath);assert.deepEqual(declared.args,[join(root,'scripts/build.mjs'),'install',platform]);assert.equal(declared.cwd,root);
-  assert.deepEqual(Object.keys(declared.env).sort(),['HOME','PATH']);assert.equal(declared.env.PATH,'/usr/bin:/bin');assert.equal(declared.env.HOME,process.env.HOME);assert.equal(declared.repository,undefined);assert.equal(declared.launch,undefined);
- }
-});
-test('独立install失败沿真实进程退出码交付，不输出伪造退出事件',async()=>{
- await assert.rejects(run(process.execPath,[join(root,'scripts/build.mjs'),'install','invalid'],{env:{NODE_TEST_CONTEXT:''},capture:true}),error=>{assert.match(error.message,/退出码=1/u);assert.match(error.message,/产品平台或版本无效/u);return true;});
 });
 
 // 执行真实上传步骤，Apple工具仅用本仓合成命令模拟，不读取现有凭据或访问Apple。

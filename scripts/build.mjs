@@ -82,11 +82,6 @@ export async function run(command,args,{cwd=root,env={},capture=false,input,sign
  });
 }
 function nodeCheck(){if(process.versions.node!==tools.node)throw Error('Node版本不符合本产品声明');}
-function claimCache(work){
- const base=join(root,'target/cache'),lock=join(base,'lock');let owned=false;
- try{directory(base);mkdirSync(lock);owned=true;for(const name of ['rust','pub','npm','gradle'])directory(join(base,name));return {base,release(){rmdirSync(lock);}};}
- catch{if(owned)rmdirSync(lock);const base=directory(join(work,'cache'));return {base,release(){}};}
-}
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 // 产品直接使用GitHub官方REST；控制台只交付短期令牌，不依赖宿主PATH中的gh。
 export async function github(path,{method='GET',body,token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN,fetchImpl=fetch}={}){
@@ -174,98 +169,10 @@ export async function automate(platform,{token,read=path=>github(path,{token}),d
   if(!Number.isSafeInteger(runID)||runID<=0)throw Error('派发回执不确定，禁止再次派发');return {runID};
  }finally{rmdirSync(lock);}
 }
-// 对应平台最近一次成功Run决定正式包，不能使用跨平台latest别名。
-export async function latestInstallAsset(platform,{token,read=path=>github(path,{token})}={}){
- automationDisplayName(platform,initialVersion);
- const latest=(await rowsFor(platform,read)).filter(row=>row.status==='completed'&&row.conclusion==='success').sort((a,b)=>Date.parse(b.updated_at)-Date.parse(a.updated_at)||b.id-a.id)[0];
- if(!latest)throw Error('对应平台没有成功正式版');
- const prefix=productTitle+'·'+platforms[platform]+'·v',version=latest.display_title?.startsWith(prefix)?latest.display_title.slice(prefix.length):'';
- if(automationDisplayName(platform,version)!==latest.display_title||!Number.isSafeInteger(latest.run_number)||latest.run_number<=0)throw Error('正式Run身份或构建号无效');
- const encoded=encodeURIComponent(latest.display_title),release=await read('releases/tags/'+encoded),tag=await read('git/ref/tags/'+encoded);
- if(release.draft||release.prerelease||release.tag_name!==latest.display_title||release.target_commitish!==latest.head_sha||tag.object?.type!=='commit'||tag.object.sha!==latest.head_sha)throw Error('正式Release与成功Run不一致');
- const assets=release.assets?.filter(asset=>asset.name?.endsWith(platform==='ios'?'.ipa':'.apk'));
- if(assets?.length!==1)throw Error('正式安装附件缺失或不唯一');const asset=assets[0];
- if(!Number.isSafeInteger(asset.id)||asset.id<=0||!Number.isSafeInteger(asset.size)||asset.size<=0||asset.size>512*1024**2||!/^sha256:[0-9a-f]{64}$/u.test(asset.digest||'')||asset.name!==basename(asset.name)||/[\\/\x00-\x1f\x7f]/u.test(asset.name)||asset.name.startsWith('.'))throw Error('正式附件名称、大小或官方摘要无效');
- return {asset,platform,version,buildNumber:String(latest.run_number)};
-}
-// GitHub官方附件端点；跨域下载不转发令牌，不接受HTTP或任意下载域名。
-export async function downloadInstallAsset(asset,path,{token,fetchImpl=fetch}={}){
- let response=await fetchImpl('https://api.github.com/repos/'+repository+'/releases/assets/'+asset.id,{redirect:'manual',signal:controller.signal,headers:{Accept:'application/octet-stream','X-GitHub-Api-Version':'2026-03-10',...(token?{Authorization:'Bearer '+token}:{})}});
- if(response.status===302){
-  const url=new URL(response.headers.get('location'));
-  if(url.protocol!=='https:'||url.username||url.password||!['release-assets.githubusercontent.com','objects.githubusercontent.com','github.com'].includes(url.hostname))throw Error('正式附件下载地址无效');
-  response=await fetchImpl(url,{redirect:'error',signal:controller.signal});
- }
- if(!response.ok||!response.body)throw Error('正式附件下载失败，HTTP '+response.status);
- const fd=openSync(path,'wx',0o600);let size=0;
- try{for await(const bytes of response.body){size+=bytes.length;if(size>asset.size)throw Error('正式附件下载大小超限');writeSync(fd,bytes);}}finally{closeSync(fd);}
-}
-function installRoot(base=join(root,'target')){if(base!==join(root,'target')&&!insideTarget(base))throw Error('安装现场不属于本产品target');mkdirSync(base,{recursive:true});if(lstatSync(base).isSymbolicLink()||realpathSync(base)!==base)throw Error('target经过链接');return base;}
-function validInstallFile(path,asset){
- const stat=lstatSync(path,{throwIfNoEntry:false});if(!stat)return false;
- if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw Error('安装包不是独立普通文件');
- return stat.size===asset.size&&'sha256:'+sha(readFileSync(path))===asset.digest;
-}
-export async function ensureInstallPackage(platform,{token,read,base=join(root,'target'),download=(asset,path)=>downloadInstallAsset(asset,path,{token}),notify=message=>console.log(message)}={}){
- const selected=await latestInstallAsset(platform,{token,read});installRoot(base);const path=join(base,selected.asset.name);
- if(!validInstallFile(path,selected.asset)){
-  notify('下载最新正式包：'+selected.asset.name);
-  const partial=join(base,selected.asset.name+'.'+randomUUID()+'.part');
-  try{await download(selected.asset,partial);if(!validInstallFile(partial,selected.asset))throw Error('正式附件大小或官方摘要不一致');renameSync(partial,path);}finally{rmSync(partial,{force:true});}
- }else notify('本地包与最新正式版一致，直接安装：'+selected.asset.name);
- // 只替换本仓target直属的同平台旧正式包，另一平台和编译现场不动。
- const owned=platform==='ios'?/^citizenwallet-ios-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.ipa$/u:/^citizenwallet-android-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.apk$/u;
- for(const name of readdirSync(base))if(name!==selected.asset.name&&owned.test(name)){const old=join(base,name),stat=lstatSync(old);if(!stat.isFile()||stat.nlink!==1)throw Error('旧安装包不是独立普通文件');rmSync(old);}
- return {...selected,path};
-}
-// 官方设备工具实际安装并回读版本；不卸载、不降级、不重签名、不编译。
-export async function installProduct(platform,{token,read,download,prepare=ensureInstallPackage,execute=run,environment:env=process.env,notify=message=>console.log(message)}={}){
- automationDisplayName(platform,initialVersion);const base=installRoot(),lock=join(base,'.citizenwallet-'+platform+'.lock');let fd;
- try{fd=openSync(lock,'wx',0o600);}catch(error){if(error.code==='EEXIST')throw Error('对应平台已有安装任务，禁止并发覆盖');throw error;}
- let work,safe=true;
- try{
-  const selected=await prepare(platform,{token,read,download,notify}),capture={capture:true,env};
-  notify('安装正式版：'+selected.asset.name+'；安装包位置：'+selected.path);
-  if(platform==='android'){
-   const sdk=env.ANDROID_HOME||env.ANDROID_SDK_ROOT||join(env.HOME||process.env.HOME,'Library/Android/sdk'),adb=join(sdk,'platform-tools/adb'),analyzer=join(sdk,'cmdline-tools/latest/bin/apkanalyzer');
-   const java=env.JAVA_HOME||'/Applications/Android Studio.app/Contents/jbr/Contents/Home',android={...capture,env:{...env,JAVA_HOME:java,PATH:join(java,'bin')+':'+(env.PATH||'/usr/bin:/bin')}};
-   // 与公民App一致，由adb的-d选择唯一USB真机；不使用无线设备或模拟器。
-   const device=await execute(adb,['-d','get-serialno'],capture),identity='com.crcfrcn.citizenwallet';
-   if(!device||device==='unknown')throw Error('需要且只能有一台已授权的USB Android手机');
-   const app=await execute(analyzer,['manifest','application-id',selected.path],android),version=await execute(analyzer,['manifest','version-name',selected.path],android),number=await execute(analyzer,['manifest','version-code',selected.path],android);
-   if(app!==identity||version!==selected.version||number!==selected.buildNumber)throw Error('正式APK应用标识或版本不一致');
-   await execute(join(sdk,'build-tools/36.0.0/apksigner'),['verify',selected.path],android);
-   await execute(adb,['-d','install','-r',selected.path],capture);
-   const installed=await execute(adb,['-d','shell','dumpsys','package',identity],capture);
-   if(!new RegExp('(?:^|\\s)versionName='+selected.version.replaceAll('.','\\.')+'(?:\\s|$)','u').test(installed)||!new RegExp('(?:^|\\s)versionCode='+selected.buildNumber+'(?:\\s|$)','u').test(installed))throw Error('Android安装后版本回读不一致');
-  }else{
-   const data=JSON.parse(await execute('/usr/bin/xcrun',['devicectl','list','devices','--json-output','-','--omit-deprecated-fields-in-json','--quiet'],capture));
-   const devices=data.result?.devices?.filter(device=>device.properties?.hardware?.platform==='iOS'&&device.properties.hardware.reality==='physical'&&device.properties.connection?.pairingState==='paired'&&device.properties.connection.transportType==='wired'&&device.properties.connection.state!=='unavailable');
-   if(devices?.length!==1)throw Error('请连接并信任唯一一台要安装的iPhone');const device=devices[0].identifier,identity='ios.citizenwallet';
-   work=mkdtempSync(join(base,'.citizenwallet-ios-'));
-   const entries=(await execute('/usr/bin/unzip',['-Z','-1',selected.path],capture)).split('\n');
-   if(entries.some(name=>name.startsWith('/')||name.includes('\\')||name.split('/').includes('..')))throw Error('IPA成员路径越界');
-   await execute('/usr/bin/unzip',['-q',selected.path,'-d',work],capture);
-   const payload=join(work,'Payload'),apps=readdirSync(payload).filter(name=>name.endsWith('.app'));if(apps.length!==1)throw Error('IPA应用缺失或不唯一');const app=join(payload,apps[0]);
-   const info=JSON.parse(await execute('/usr/bin/plutil',['-convert','json','-o','-',join(app,'Info.plist')],capture));
-   if(info.CFBundleIdentifier!==identity||info.CFBundleShortVersionString!==selected.version||String(info.CFBundleVersion)!==selected.buildNumber)throw Error('正式IPA应用标识或版本不一致');
-   await execute('/usr/bin/codesign',['--verify','--deep','--strict',app],capture);
-   await execute('/usr/bin/xcrun',['devicectl','device','install','app','--device',device,app,'--quiet'],capture);
-   const installed=JSON.parse(await execute('/usr/bin/xcrun',['devicectl','device','info','apps','--device',device,'--bundle-id',identity,'--include-all-apps','--json-output','-','--quiet'],capture));
-   const found=installed.result?.apps?.filter(value=>value.bundleIdentifier===identity);
-   if(found?.length!==1||found[0].version!==selected.version||String(found[0].bundleVersion)!==selected.buildNumber)throw Error('iOS安装后版本回读不一致');
-  }
-  notify('已安装：'+selected.asset.name);
-  return {completed:true,platform,version:selected.version,path:selected.path};
- }catch(error){safe=!error.keepWork;throw error;}
- finally{closeSync(fd);if(safe){if(work)rmSync(work,{recursive:true,force:true});rmSync(lock);}}
-}
-// 控制台蓝色build动作调用本仓安装；CLI build保留为自动化与独立编译入口。
+// 产品只拥有编译与GitHub自动化；本机安装由控制台统一执行。
 export function describeAction({flow,platform,inputs={}}){
  automationDisplayName(platform,initialVersion);
  if(flow==='release')return {repository,launch:options=>automate(platform,options)};
- // 沿用公民App公开入口：独立install进程，不领取GitHub令牌、不派发工作流。
- if(flow==='build')return {command:process.execPath,args:[fileURLToPath(import.meta.url),'install',platform],cwd:root,env:{PATH:'/usr/bin:/bin',HOME:homedir()}};
  if(flow==='test')return {command:process.execPath,args:[fileURLToPath(import.meta.url),flow,platform],cwd:root,env:{...process.env,...inputs.environment}};
  throw Error('本产品尚未声明该流程：'+flow);
 }
@@ -307,8 +214,10 @@ function flutterExecutable(env=process.env){return join(env.FLUTTER_ROOT||join(r
 async function flutterCheck(env){
  const result=JSON.parse(await run(flutterExecutable(env),['--version','--machine'],{env,capture:true}));if(result.frameworkVersion!==tools.flutter)throw Error('Flutter版本不符合本产品声明');
 }
-function environment(work,cache){
- const env={PUB_CACHE:join(cache.base,'pub'),GRADLE_USER_HOME:join(cache.base,'gradle'),CARGO_TARGET_DIR:join(cache.base,'rust'),CARGO_HOME:join(cache.base,'cargo'),RUSTUP_HOME:join(cache.base,'rustup'),RUSTUP_TOOLCHAIN:tools.rust,CARGO_INCREMENTAL:'1',TMPDIR:directory(join(work,'tmp')),FLUTTER_ROOT:join(cache.base,'flutter'),FLUTTER_SUPPRESS_ANALYTICS:'true',DART_SUPPRESS_ANALYTICS:'true',CI:'true',ANDROID_USER_HOME:directory(join(work,'android-user')),CP_HOME_DIR:join(cache.base,'cocoapods'),GEM_HOME:join(cache.base,'gems'),GEM_SPEC_CACHE:join(cache.base,'gem-specs'),XDG_CACHE_HOME:directory(join(work,'xdg-cache')),XDG_CONFIG_HOME:directory(join(work,'xdg-config'))};
+function environment(work){
+ // 工具与包复用本仓现有缓存，缓存并发由官方工具管理；每端可写工程和临时文件仍归自己的work。
+ const base=directory(join(root,'target/cache'));
+ const env={PUB_CACHE:join(base,'pub'),GRADLE_USER_HOME:join(base,'gradle'),CARGO_TARGET_DIR:join(base,'rust'),CARGO_HOME:join(base,'cargo'),RUSTUP_HOME:join(base,'rustup'),RUSTUP_TOOLCHAIN:tools.rust,CARGO_INCREMENTAL:'1',TMPDIR:directory(join(work,'tmp')),FLUTTER_ROOT:join(base,'flutter'),FLUTTER_SUPPRESS_ANALYTICS:'true',DART_SUPPRESS_ANALYTICS:'true',CI:'true',ANDROID_USER_HOME:directory(join(work,'android-user')),CP_HOME_DIR:join(base,'cocoapods'),GEM_HOME:join(base,'gems'),GEM_SPEC_CACHE:join(base,'gem-specs'),XDG_CACHE_HOME:directory(join(work,'xdg-cache')),XDG_CONFIG_HOME:directory(join(work,'xdg-config'))};
  for(const key of ['PUB_CACHE','CARGO_HOME','RUSTUP_HOME','CP_HOME_DIR','GEM_HOME','GEM_SPEC_CACHE'])directory(env[key]);return env;
 }
 async function prepareTools(work,platform,env){
@@ -371,7 +280,7 @@ export async function native(target,project,work,env){
 }
 export async function testProduct(platform='android'){
  nodeCheck();await run(process.execPath,['--test','test/build.test.mjs'],{cwd:root});
- const work=task('test',platform),cache=claimCache(work),env=environment(work,cache);let safe=true;
+ const work=task('test',platform),env=environment(work);let safe=true;
  try{
   await prepareTools(work,platform,env);const project=await prepare(work,platform,env);
   await run('cargo',['test','--locked','--manifest-path',join(project,'signing/Cargo.toml')],{cwd:project,env});await native('host',project,work,env);
@@ -388,12 +297,12 @@ export async function testProduct(platform='android'){
   }catch(error){error.keepWork=true;error.message+='；Flutter报告：'+report;throw error;}
   if(platform==='android')await run(join(project,'android/gradlew'),['testReleaseUnitTest','--no-daemon'],{cwd:join(project,'android'),env});
   return {tests:finished.length,platform};
- }catch(error){safe=!error.keepWork;throw error;}finally{if(safe){cache.release();rmSync(work,{recursive:true,force:true});}}
+ }catch(error){safe=!error.keepWork;throw error;}finally{if(safe)rmSync(work,{recursive:true,force:true});}
 }
-export async function buildProduct(platform){
+export async function buildProduct(platform,{consume}={}){
  nodeCheck();automationDisplayName(platform,process.env.PRODUCT_VERSION||initialVersion);
  const supplied=process.env.PRODUCT_WORK;if(supplied&&!insideTarget(supplied))throw Error('编译现场不属于本产品target');
- const work=supplied?directory(supplied):task('build',platform),cache=claimCache(work),env=environment(work,cache);let safe=true,complete=false;
+ const work=supplied?directory(supplied):task('build',platform),env=environment(work);let safe=true,complete=false;
  try{
   await prepareTools(work,platform,env);const project=await prepare(work,platform,env);await native(platform,project,work,env);
   const version=process.env.PRODUCT_VERSION||initialVersion,number=process.env.GITHUB_RUN_NUMBER||'1',formal=process.env.GITHUB_ACTIONS==='true';
@@ -413,8 +322,8 @@ export async function buildProduct(platform){
     const dir=join(project,'build/ios/ipa'),files=readdirSync(dir).filter(name=>name.endsWith('.ipa'));if(files.length!==1)throw Error('IPA缺失或不唯一');copy(join(dir,files[0]),join(output,title+'.ipa'));
    }else{await run(flutterExecutable(env),['build','ios','--no-codesign',...args],{cwd:project,env});copy(join(project,'build/ios/iphoneos/Runner.app'),join(output,title+'.app'));}
   }
-  complete=true;return {work,output};
- }catch(error){safe=!error.keepWork;throw error;}finally{if(safe){cache.release();if(!complete)rmSync(work,{recursive:true,force:true});}}
+  complete=true;if(consume)await consume({work,output,env});return {work,output};
+ }catch(error){safe=!error.keepWork;throw error;}finally{if(safe&&!complete)rmSync(work,{recursive:true,force:true});}
 }
 export async function packageProduct(platform){
  const work=process.env.PRODUCT_WORK;if(!insideTarget(work))throw Error('正式产物现场无效');const output=join(work,'artifact'),version=process.env.PRODUCT_VERSION,title=artifactBaseName(platform,version);
@@ -458,10 +367,36 @@ export async function uploadAndroid({token=process.env.PLAY_ACCESS_TOKEN,fetchIm
  }finally{await request('DELETE',base+'/'+readback.id);}
  return {uploaded:true,platform:'android',version,buildNumber:number};
 }
+// ===== 控制台本机编译：node scripts/build.mjs compile ios|android =====
+// 本块只交付现有本机工具的环境，并复用上方唯一buildProduct执行官方编译，不复制编译流程。
+// stdout仅交付TATA_COMPILE回执；安装器消费期间保留本端现场，stdin EOF后清理本端产物。
+// 签名、设备安装和版本回读归控制台原生安装器；本块不派发GitHub或执行商店上传。
+export async function compile(platform){
+ if(process.env.GITHUB_ACTIONS==='true')throw Error('本机编译入口不接受GitHub环境');
+ // 原生调用方使用最小PATH；补齐已有Rustup启动器，版本及目标继续由本产品原声明约束。
+ process.env.PATH=[join(homedir(),'.cargo/bin'),process.env.PATH||'/usr/bin:/bin'].join(':');
+ if(platform==='android'){
+  process.env.ANDROID_HOME??=join(homedir(),'Library/Android/sdk');
+  process.env.JAVA_HOME??='/Applications/Android Studio.app/Contents/jbr/Contents/Home';
+ }
+ let owned;
+ try{await buildProduct(platform,{consume:async({work,output})=>{
+  owned=work;const suffix=platform==='ios'?'.app':'.apk',files=readdirSync(output).filter(name=>name.endsWith(suffix));
+  if(files.length!==1)throw Error('本机编译产物缺失或不唯一');
+  const sdk=process.env.ANDROID_HOME,androidTools=platform==='android'?{adb:join(sdk,'platform-tools/adb'),
+   apksigner:join(sdk,'build-tools',tools.buildTools,'apksigner'),apkanalyzer:join(sdk,'cmdline-tools/latest/bin/apkanalyzer')}:{};
+  process.stdout.write('TATA_COMPILE '+JSON.stringify({schema:1,product_id:'citizenwallet',platform,work,artifact:join(output,files[0]),tools:androidTools,
+   environment:platform==='android'?{JAVA_HOME:process.env.JAVA_HOME,ANDROID_HOME:sdk}:{}})+'\n');
+  for await(const part of process.stdin)if(part.length)throw Error('编译消费通道只接受EOF');controller.signal.throwIfAborted();
+ }});}finally{if(owned)rmSync(owned,{recursive:true,force:true});}
+}
+// ===== 控制台本机编译结束；下方为产品CLI命令选择 =====
+
 async function main(){
  const [command,platform='android',...extra]=process.argv.slice(2);if(extra.length)throw Error('参数过多');
+ if(command==='compile')return compile(platform);
  if(command==='upload'&&platform==='android')return uploadAndroid();
- if(command==='test')return testProduct(platform);if(command==='build')return buildProduct(platform);if(command==='package')return packageProduct(platform);if(command==='install')return installProduct(platform,{token:process.env.GH_TOKEN||process.env.GITHUB_TOKEN});
+ if(command==='test')return testProduct(platform);if(command==='build')return buildProduct(platform);if(command==='package')return packageProduct(platform);
  if(command==='candidate')return candidate(platform);if(command==='automate')return automate(platform,{token:process.env.GH_TOKEN});if(command==='cleanup')return cleanupRuns(platform,{currentRun:Number(process.env.GITHUB_RUN_ID||0),result:process.env.PRODUCT_RESULT,sourceSha:process.env.GITHUB_SHA,attempt:process.env.GITHUB_RUN_ATTEMPT===undefined?undefined:Number(process.env.GITHUB_RUN_ATTEMPT)});
  throw Error('未知产品命令');
 }
