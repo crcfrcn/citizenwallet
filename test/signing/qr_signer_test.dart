@@ -365,10 +365,11 @@ void main() {
 
   group('QrSigner.signingBytesFor', () {
     test('节点部署使用独立链下签名域，不与生产发布互认', () {
-      final payload = <int>[1,...'citizenchain'.codeUnits,1,6,...'prczss'.codeUnits,
-        10,...'192.0.2.10'.codeUnits,15,...'citizenchain-v1'.codeUnits,
-        ...List<int>.filled(20,0x11),...List<int>.filled(32,0x22),
-        ...'123456789'.codeUnits,..._u64Le(1800000000),...List<int>.filled(32,0x33)];
+      // 共享协议格式2公开金标，与Rust及Swift使用相同目标、包和挑战。
+      final payload = <int>[2,...'citizenchain'.codeUnits,1,7,...'node-01'.codeUnits,
+        10,...'192.0.2.10'.codeUnits,5,...'arm64'.codeUnits,5,...'1.0.0'.codeUnits,
+        ...List<int>.filled(32,0x22),...'123456789'.codeUnits,
+        ..._u64Le(1800000000),...List<int>.filled(32,0x33)];
       final node = SignRequestBody.fromHex(action:QrActions.nodeDeploy,
         signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
       final publish = SignRequestBody.fromHex(action:QrActions.publish,
@@ -376,7 +377,7 @@ void main() {
       final citizenserve = SignRequestBody.fromHex(action:QrActions.citizenserveCloudflarePublish,
         signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
       expect(_hexBytes(QrSigner.signingBytesFor(node)),
-        'eb42a7b0dbe8195a2e6269b2afb9ec32ff5b07abf90f921ef754c62f987acdce');
+        'cfe59b95d1bf3f53eedd4afc1a89ec408d52bed8c110e4e5c0489bfa639989c1');
       expect(QrSigner.signingBytesFor(node).toList(),isNot(QrSigner.signingBytesFor(publish).toList()));
       expect(QrSigner.signingBytesFor(citizenserve).toList(),QrSigner.signingBytesFor(publish).toList());
     });

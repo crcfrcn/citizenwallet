@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -147,13 +146,13 @@ List<int> _publishAuthorizationPayload({
   ...List<int>.filled(32, 0x66),
 ];
 
-// 正式中文标签按UTF-8字节计长，与控制台节点批准布局对应，不借用发布载荷。
+// 与共享协议及控制台使用同一公开样例；仅替换本轮期限，不要求Tag或源码提交。
 List<int> _nodeDeployPayload(int expiresAt) => <int>[
-  1, ...'citizenchain'.codeUnits, 1,
-  6, ...'prczss'.codeUnits,
+  2, ...'citizenchain'.codeUnits, 1,
+  7, ...'node-01'.codeUnits,
   10, ...'192.0.2.10'.codeUnits,
-  utf8.encode('公民链·LinuxARM·v1.0.1').length, ...utf8.encode('公民链·LinuxARM·v1.0.1'),
-  ...List<int>.filled(20, 0x11), ...List<int>.filled(32, 0x22),
+  5, ...'arm64'.codeUnits, 5, ...'1.0.0'.codeUnits,
+  ...List<int>.filled(32, 0x22),
   ...'123456789'.codeUnits, ..._u64Le(expiresAt),
   ...List<int>.filled(32, 0x33),
 ];
@@ -349,9 +348,11 @@ void main() {
       final verified=service.verifyPayload(request);
       expect(verified.status,SignDecisionStatus.normal);
       expect(verified.actionLabel,'节点部署批准');
-      expect(verified.decoded?.fields['node_id'],'prczss');
+      expect(verified.decoded?.fields['node_id'],'node-01');
       expect(verified.decoded?.fields['server_ip'],'192.0.2.10');
-      expect(verified.decoded?.fields['version_tag'],'公民链·LinuxARM·v1.0.1');
+      expect(verified.decoded?.fields['platform'],'arm64');
+      expect(verified.decoded?.fields['version'],'1.0.0');
+      expect(verified.decoded?.fields.containsKey('source_sha'),isFalse);
       final response=await service.signParsedRequest(accountId:signingAccount.accountId,request:request);
       expect(_verifySr25519(signerPublicKeyHex:response.body.signerPublicKeyHex,
         message:QrSigner.signingBytesFor(request.body),signatureHex:response.body.signatureHex),isTrue);

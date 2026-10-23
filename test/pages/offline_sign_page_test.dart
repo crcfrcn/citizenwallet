@@ -132,6 +132,37 @@ void main() {
     await releasePage(tester);
   });
 
+  testWidgets('节点部署格式2展示平台和实际版本并允许签名，旧格式红色拒绝', (tester) async {
+    final expires=DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
+    final payload=<int>[2,...'citizenchain'.codeUnits,1,7,...'node-01'.codeUnits,
+      10,...'192.0.2.10'.codeUnits,5,...'arm64'.codeUnits,5,...'1.0.0'.codeUnits,
+      ...List<int>.filled(32,0x22),...'123456789'.codeUnits,
+      ...List<int>.generate(8,(index)=>(expires>>(index*8))&0xff),...List<int>.filled(32,0x33)];
+    for (final format in [2,1]) {
+      payload[0]=format;
+      final request=QrEnvelope<SignRequestBody>(kind:QrKind.signRequest,
+        id:'offline-node-format-$format',expiresAt:expires,
+        body:SignRequestBody.fromHex(action:QrActions.nodeDeploy,signerPublicKeyHex:signerPk,
+          payloadHex:'0x${payload.map((b)=>b.toRadixString(16).padLeft(2,'0')).join()}'));
+      await tester.pumpWidget(MaterialApp(home:OfflineSignPage(
+        account:account,walletName:'钱包1',raw:QrSigner().encodeRequest(request))));
+      await ScreenshotGuard.waitForIdleForTest();await tester.pump();
+      if (format==2) {
+        expect(find.textContaining('可以签名'),findsWidgets);
+        expect(find.text('arm64'),findsWidgets);expect(find.text('1.0.0'),findsWidgets);
+        expect(find.text('安装包版本'),findsWidgets);expect(find.text('源码提交'),findsNothing);
+      } else {
+        expect(find.text('签名载荷无法解码，已拒绝签名'),findsWidgets);
+      }
+      // 完整节点明细比屏幕长，ListView按需构建底部按钮，先真实滚动再检查可用状态。
+      final buttonFinder=find.widgetWithText(FilledButton,'确认签名');
+      await tester.scrollUntilVisible(buttonFinder,250);
+      final button=tester.widget<FilledButton>(buttonFinder);
+      expect(button.onPressed,format==2 ? isNotNull:isNull);
+      expect(tester.takeException(),isNull);await releasePage(tester);
+    }
+  });
+
   testWidgets('占号请求(空 b.u)渲染签名页不崩溃,展示自选绑定账户', (tester) async {
     // 回归:占号/换绑请求 b.u 留空,曾因展示行无条件求值 signerPublicKeyHex
     // (对空 u 抛 FormatException)导致整页崩溃。

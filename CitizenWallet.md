@@ -129,7 +129,7 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
   载荷按固定 SCALE 字段序严格解码产品、平台、版本 Tag、源码 SHA、产物 SHA-256、上一部署
   编号、过期时间和 nonce；任何未知组合、截断、尾随字节或信封过期时间不一致都红色拒签。
   签名字节使用全仓 `OP_SIGN_PUBLISH=0x24` 哈希域，不建立第二套扫码协议。
-- 公民链权威或权益节点部署使用同一 QR_V1 信封中的独立 `node_deploy=16` 链下动作。钱包完整解码并审阅节点类别、编号、目标 IP、版本、源码和产物摘要、本次任务、期限与随机挑战；签名字节只使用共享 QR 协议的 `GMB\0TATA_NODE_DEPLOY_V1\0` 独立域。错误产品、类别、尾字节、信封期限不一致及已签请求均拒绝。节点部署签名不提交链交易，也不借用发布动作签名。
+- 公民链权威或权益节点部署使用同一 QR_V1 信封中的独立 `node_deploy=16` 链下动作。钱包只接受节点载荷格式2，完整解码并审阅节点类别、编号、目标IP、安装包平台、实际版本、SHA-256、本次任务、期限与随机挑战；节点动作不读取源码摘要，不要求中文Tag、Run或构建证明。共享编解码与动作声明真源归citizenchain/crates/protocol，签名字节只使用共享 QR 协议的 `GMB\0TATA_NODE_DEPLOY_V1\0` 独立域。错误产品、类别、尾字节、信封期限不一致及已签请求均拒绝。节点部署签名不提交链交易，也不借用发布动作签名。
 - 生产发布授权闭集固定为十一个产品端：`citizenapp/ios|android`、
   `citizenserve/cloudflare`、`citizenweb/web`、
   `tuyulove/ios|android`、`tuyuserve/cloudflare`、`tuyuweb`、
@@ -246,7 +246,6 @@ Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-gl
 
 scripts/build.mjs以中文注释明确标出控制台本机编译代码块，唯一入口为compile ios或compile android。本块交付已有~/.cargo/bin及Android SDK/JBR环境，复用同一buildProduct；经TATA_COMPILE和stdin EOF把本轮产物交给原生安装器消费并清场。各端工程和临时目录独立，工具与包复用本仓target/cache；删除自建整库锁、空缓存回退及无用release，沿官方工具自身并发机制处理缓存，避免双端并行时因改用空缓存重复下载Flutter。版本、原锁、正式编译及签名/商店上传流程保持。
 
-GitHub历史清理由本产品现有编译工作流末尾的always步骤调用scripts/build.mjs cleanup执行，使用本仓GITHUB_TOKEN及已有contents: write、actions: write权限；控制台只派发和观察原Run，独立CLI automate同样派发后返回准确Run ID，不在客户端轮询或删除GitHub对象。客户端不再公开直接执行GitHub删除的cleanup动作；独立cleanup命令保留在产品内。控制台数据库记录仍归控制台管理。清理先核验本轮仓库、main、工作流、提交及attempt，以收尾前job.status独立计算本轮候选类别并保护本轮；不修改API返回的status或conclusion，Run最终结果由GitHub确认。历史清理查询覆盖本平台main工作流全部触发事件并逐页读取，包含旧push记录；候选版本仍只查询workflow_dispatch，保持原版本合同。每个平台最新成功与最新失败各最多保留一条，其他活动Run保留；仅删除已结束旧Run及其准确归属的Tag、Release、日志和Artifact并回查。替代正式产物未验真时保留旧成功，不阻止旧失败清理；权限、网络、删除或回查失败均真实失败，不吞错、不冒充清理完成、不取消另一平台。历史清理不改业务和依赖，不新增文件、Job、工作流或框架。
 
 
 GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。
@@ -260,4 +259,7 @@ Android本机安装器沿用现有APP_KEY，与公民App共享原mobile-signing�
 
 节点部署冷签只接受公民链·LinuxARM·vX.Y.Z正式标签：字段按UTF-8读取且最多64字节，三段版本为无前导零的非负UInt64，完整保留中文及中点，不转换或接受旧英文别名。原产品、节点类别、目标IP、任务、摘要、期限、nonce、签名域及防重放校验保持；非法UTF-8、错误长度、截断和尾随字节仍拒绝。
 
-旧install进程专属测试全部删除；仍有用途的describeAction保留显式导入，回归继续拒绝产品安装入口并核验发布独立性。
+
+节点冷签回归同时覆盖格式2真实解码、独立签名域金标、实际签名验签与防重放，以及页面绿色批准和旧格式红色拒签。公开样例与共享协议fixtures/sign_request.json及控制台测试逐字节一致。控制台本机compile入口先调用本产品testProduct完整回归，失败不进入设备安装；所有验证仍使用本产品原依赖锁与工具声明。
+
+本产品scripts/config.mjs的describeAction仅返回repository、workflow、ref、inputs，或既有本地进程命令声明；不导入构建实现、不派发GitHub请求、不处理令牌、版本或历史。控制台使用统一数据接口直接派发并只读观察准确Run；产品GitHub业务归所属既有YAML。本次自动化Run名称使用运行编号，正式构建及产物保持版本名称。已有工具和依赖复用，缺少时才按原声明准备。

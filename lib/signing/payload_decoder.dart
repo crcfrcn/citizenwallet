@@ -3924,11 +3924,11 @@ class PayloadDecoder {
     );
   }
 
-  /// 独立 QR 协议的节点部署批准；消费全部字节并固定产品、类别、目标与任务。
+  /// 节点部署格式2与共享协议逐字节一致；只审阅包的平台、版本、哈希及本次身份授权。
   static DecodedPayload? _decodeNodeDeployAuthorization(Uint8List bytes) {
     const product = 'citizenchain';
     final productBytes = utf8.encode(product);
-    if (bytes.length < 1 + productBytes.length + 1 || bytes[0] != 1) return null;
+    if (bytes.length < 1 + productBytes.length + 1 || bytes[0] != 2) return null;
     for (var index = 0; index < productBytes.length; index++) {
       if (bytes[index + 1] != productBytes[index]) return null;
     }
@@ -3951,24 +3951,16 @@ class PayloadDecoder {
 
     final nodeId = readText(64);
     final ip = readText(45);
-    final version = readText(64);
-    if (nodeId == null || ip == null || version == null ||
+    final platform = readText(32);
+    final version = readText(255);
+    if (nodeId == null || ip == null || platform == null || version == null ||
         !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(nodeId) ||
+        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$').hasMatch(platform) ||
+        version.runes.any((value) => value < 32 || (value >= 127 && value <= 159)) ||
         InternetAddress.tryParse(ip)?.address != ip ||
-        offset + 20 + 32 + 9 + 8 + 32 != bytes.length) {
+        offset + 32 + 9 + 8 + 32 != bytes.length) {
       return null;
     }
-    // 与控制台节点部署的正式标签一致；readText按UTF-8限制64字节，各版本段保持UInt64范围。
-    final versionMatch = RegExp(
-      r'^公民链·LinuxARM·v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$',
-    ).firstMatch(version);
-    final versionLimit = BigInt.one << 64;
-    if (versionMatch == null || versionMatch.end != version.length ||
-        [1, 2, 3].any((index) => BigInt.parse(versionMatch.group(index)!) >= versionLimit)) {
-      return null;
-    }
-    final sourceBytes = bytes.sublist(offset, offset + 20);
-    final source = _bytesToLowerHex(sourceBytes); offset += 20;
     final artifactBytes = bytes.sublist(offset, offset + 32);
     final artifact = _bytesToLowerHex(artifactBytes); offset += 32;
     final taskBytes = bytes.sublist(offset, offset + 9);
@@ -3976,16 +3968,14 @@ class PayloadDecoder {
     final expiresAt = _readU64Le(bytes, offset); offset += 8;
     final nonceBytes = bytes.sublist(offset, offset + 32);
     final nonce = _bytesToLowerHex(nonceBytes);
-    if (sourceBytes.every((value) => value == 0) ||
-        artifactBytes.every((value) => value == 0) ||
-        nonceBytes.every((value) => value == 0) ||
+    if (nonceBytes.every((value) => value == 0) ||
         !RegExp(r'^[1-9][0-9]{8}$').hasMatch(taskId) || expiresAt <= 0) {
       return null;
     }
     final kindName = kind == 1 ? '权威节点' : '权益节点';
     final fields = <String,String>{
       'product_id': product, 'deployment_kind': kindName, 'node_id': nodeId,
-      'server_ip': ip, 'version_tag': version, 'source_sha': source,
+      'server_ip': ip, 'platform': platform, 'version': version,
       'artifact_sha256': artifact, 'task_id': taskId,
       'expires_at': expiresAt.toString(), 'nonce': nonce,
     };

@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 // 本产品配置需求的公开入口；只登记名称、类型和规则，不保存配置值。
 export const manifest=Object.freeze({
   "schema": 1,
@@ -46,4 +47,14 @@ export const repository="crcfrcn/citizenwallet";
 export const tools=Object.freeze({"node": "25.2.1", "rust": "1.97.1", "flutter": "3.47.2", "buildTools": "36.0.0", "ndk": "28.2.13676358", "gradle": "9.1.0", "agp": "9.0.1", "kotlin": "2.2.20", "cocoapods": "1.17.0"});
 export const platforms=Object.freeze({"ios": "iOS", "android": "Android"});
 export const initialVersion="1.0.0";
-export {describeAction} from './build.mjs';
+
+// 本产品Workflow坐标声明。
+export const workflows=Object.freeze({"ios":"ios.yml","android":"android.yml"});
+
+// 只返回声明数据；派发与观察归通用调用方，版本及交付归本仓YAML。
+export function describeAction({flow,platform,inputs={}}){
+ const workflow=workflows[platform];
+ if(flow==='release'&&workflow)return {repository:"crcfrcn/citizenwallet",workflow,ref:'main',inputs};
+ if(flow==='test'&&workflow)return {command:process.execPath,args:[fileURLToPath(new URL('build.mjs',import.meta.url)),flow,platform],cwd:fileURLToPath(new URL('../',import.meta.url)),env:{...process.env,...inputs.environment}};
+ throw Error('本产品未声明该流程：'+flow+'·'+platform);
+}
