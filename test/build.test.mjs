@@ -156,18 +156,18 @@ test('iOS验收成功后上传同一IPA，上传失败与缺少凭据均失败�
  const workflow=readFileSync(join(root,'.github/workflows/ios.yml'),'utf8'),start=workflow.indexOf('      - name: 上传正式IPA到App Store Connect'),end=workflow.indexOf('\n      - ',start+1),block=workflow.slice(start,end),marker='        run: |\n';
  assert.ok(start>workflow.indexOf('      - name: 创建正式Tag和Release并逐件回读'));assert.ok(end>start);assert.doesNotMatch(block,/continue-on-error|if: always/u);
  const script=block.slice(block.indexOf(marker)+marker.length).split('\n').map(line=>line.startsWith('          ')?line.slice(10):line).join('\n');
- for(const failure of ['', 'upload','APP_STORE_KEY_ID','APP_STORE_ISSUER_ID','APP_STORE_PRIVATE_KEY']){
+ for(const failure of ['', 'upload','APPSTORE_KEYID','APPSTORE_ISSUERID','APPSTORE_PRIVATEKEY']){
   const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const work=mkdtempSync(join(parent,'appstore-'));t.after(()=>rmSync(work,{recursive:true,force:true}));
   const signing=join(work,'signing');mkdirSync(signing);mkdirSync(join(work,'artifact'));
   const ipa=join(work,'artifact',artifactBaseName('ios','1.2.3')+'.ipa');writeFileSync(ipa,'synthetic IPA');
   const source=join(work,'upload.mjs'),argsFile=join(work,'args.json');
-  writeFileSync(source,`import {readFileSync,writeFileSync} from 'node:fs';import assert from 'node:assert/strict';import {join} from 'node:path';assert.equal(readFileSync(join(process.env.API_PRIVATE_KEYS_DIR,'AuthKey_'+process.env.APP_STORE_KEY_ID+'.p8'),'utf8'),'synthetic-not-a-private-key\\n');writeFileSync(process.env.MOCK_ARGUMENTS,JSON.stringify(process.argv.slice(2)));process.exit(Number(process.env.MOCK_EXIT));`);
+  writeFileSync(source,`import {readFileSync,writeFileSync} from 'node:fs';import assert from 'node:assert/strict';import {join} from 'node:path';assert.equal(readFileSync(join(process.env.API_PRIVATE_KEYS_DIR,'AuthKey_'+process.env.APPSTORE_KEYID+'.p8'),'utf8'),'synthetic-not-a-private-key\\n');writeFileSync(process.env.MOCK_ARGUMENTS,JSON.stringify(process.argv.slice(2)));process.exit(Number(process.env.MOCK_EXIT));`);
   const executable=join(work,'xcrun');writeFileSync(executable,'#!/bin/sh\nexec "$NODE_BINARY" "$MOCK_SOURCE" "$@"\n');chmodSync(executable,0o700);
-  const env={PRODUCT_WORK:work,PRODUCT_VERSION:'1.2.3',APP_STORE_KEY_ID:'SYNTHETIC',APP_STORE_ISSUER_ID:'synthetic-issuer',APP_STORE_PRIVATE_KEY:'synthetic-not-a-private-key',NODE_BINARY:process.execPath,MOCK_SOURCE:source,MOCK_ARGUMENTS:argsFile,MOCK_EXIT:failure==='upload'?'7':'0',PATH:work+':'+dirname(process.execPath)+':'+process.env.PATH};
-  if(failure.startsWith('APP_STORE_'))env[failure]='';
+  const env={PRODUCT_WORK:work,PRODUCT_VERSION:'1.2.3',APPSTORE_KEYID:'SYNTHETIC',APPSTORE_ISSUERID:'synthetic-issuer',APPSTORE_PRIVATEKEY:'synthetic-not-a-private-key',NODE_BINARY:process.execPath,MOCK_SOURCE:source,MOCK_ARGUMENTS:argsFile,MOCK_EXIT:failure==='upload'?'7':'0',PATH:work+':'+dirname(process.execPath)+':'+process.env.PATH};
+  if(failure.startsWith('APPSTORE_'))env[failure]='';
   if(failure)await assert.rejects(run('/bin/bash',['-c',script],{env,capture:true}));else await run('/bin/bash',['-c',script],{env,capture:true});
   assert.equal(existsSync(join(signing,'appstore')),false);
-  if(failure.startsWith('APP_STORE_'))assert.equal(existsSync(argsFile),false);
+  if(failure.startsWith('APPSTORE_'))assert.equal(existsSync(argsFile),false);
   else assert.deepEqual(JSON.parse(readFileSync(argsFile)),['altool','--upload-package',ipa,'--api-key','SYNTHETIC','--api-issuer','synthetic-issuer','--wait','--output-format','json']);
   assert.equal(readFileSync(ipa,'utf8'),'synthetic IPA');
  }
@@ -176,10 +176,10 @@ test('iOS验收成功后上传同一IPA，上传失败与缺少凭据均失败�
 test('钱包两平台不再声明独立发布动作或发布文件',()=>{
  for(const platform of ['ios','android'])assert.throws(()=>describeAction({flow:'publish',platform}),/未声明/u);
  assert.equal(existsSync(join(root,'scripts/publish.mjs')),false);
- // 商店凭据复用控制台现有受保护自定义配置，不重复声明或沿用失效账号。
- const config=readFileSync(join(root,'scripts/config.mjs'),'utf8');assert.doesNotMatch(config,/PLAY_KEY|GOOGLE_PLAY_SERVICE_ACCOUNT/u);
+ // 商店凭据由本产品统一六字段声明，按同名共用控制台唯一值。
+ const config=readFileSync(join(root,'scripts/config.mjs'),'utf8');assert.match(config,/PLAY_SERVICEACCOUNT/u);assert.doesNotMatch(config,/\bPLAY_KEY\b/u);
  const workflow=readFileSync(join(root,'.github/workflows/android.yml'),'utf8');
- assert.match(workflow,/credentials_json: \$\{\{ secrets\.GOOGLE_PLAY_SERVICE_ACCOUNT \}\}/u);assert.doesNotMatch(workflow,/secrets\.PLAY_KEY\b/u);
+ assert.match(workflow,/credentials_json: \$\{\{ secrets\.PLAY_SERVICEACCOUNT \}\}/u);assert.doesNotMatch(workflow,/secrets\.PLAY_KEY\b/u);
  assert.ok(workflow.indexOf('      - name: Google官方认证')>workflow.indexOf('      - name: 创建正式Tag和Release并逐件回读'));
  assert.match(workflow,/google-github-actions\/auth@[a-f0-9]{40}/u);assert.match(workflow,/create_credentials_file: false/u);
  assert.match(workflow,/access_token_scopes: https:\/\/www.googleapis.com\/auth\/androidpublisher/u);

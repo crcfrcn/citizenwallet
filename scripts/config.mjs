@@ -11,31 +11,58 @@ export const manifest=Object.freeze({
       {
         "environment": "release",
         "name": "APP_KEY",
-        "title": "APP_KEY",
-        "description": "Android 正式应用签名密钥的本机加密备份",
-        "revealable": true,
+        "description": "安卓应用正式签名材料",
         "accessLevel": "protected",
         "kind": "android-signing",
-        "sharedId": "mobile-signing:APP_KEY"
+        "format": "不适用"
       },
       {
         "environment": "release",
         "name": "IOS_KEY",
-        "title": "IOS_KEY",
-        "description": "iOS 正式签名证书的本机加密备份",
-        "revealable": true,
+        "description": "苹果移动应用正式签名证书",
         "accessLevel": "protected",
         "kind": "ios-signing",
-        "sharedId": "mobile-signing:IOS_KEY"
+        "format": "不适用"
       },
       {
         "environment": "release",
-        "name": "WALLET_PROFILE",
-        "title": "WALLET_PROFILE",
-        "description": "公民钱包 iOS 正式描述文件的本机加密备份",
-        "revealable": true,
+        "name": "CITIZENWALLET_PROFILE",
+        "description": "公民钱包描述文件",
         "accessLevel": "protected",
-        "kind": "ios-signing"
+        "kind": "ios-signing",
+        "format": "ios_profile:ios.citizenwallet"
+      },
+      {
+        "environment": "appstore",
+        "name": "APPSTORE_PRIVATEKEY",
+        "description": "苹果商店接口私钥",
+        "accessLevel": "protected",
+        "kind": "不适用",
+        "format": "不适用"
+      },
+      {
+        "environment": "appstore",
+        "name": "APPSTORE_KEYID",
+        "description": "苹果商店接口密钥编号",
+        "accessLevel": "protected",
+        "kind": "不适用",
+        "format": "不适用"
+      },
+      {
+        "environment": "appstore",
+        "name": "APPSTORE_ISSUERID",
+        "description": "苹果商店接口签发者编号",
+        "accessLevel": "protected",
+        "kind": "不适用",
+        "format": "不适用"
+      },
+      {
+        "environment": "appstore",
+        "name": "PLAY_SERVICEACCOUNT",
+        "description": "谷歌商店服务账号凭据",
+        "accessLevel": "protected",
+        "kind": "不适用",
+        "format": "不适用"
       }
     ]
   }

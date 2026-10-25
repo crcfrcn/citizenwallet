@@ -214,7 +214,7 @@ scripts/config.mjs仅声明产品、工具、平台、配置需求与公开入�
 
 固定Workflow为产品·平台；Run、Job、Artifact、正式Tag、Release及附件显示标签为产品·平台·vX.Y.Z，必要文件扩展名保留。Workflow创建准确源码Tag，正式附件先逐个下载比较再确认正式Release；清理按本产品平台最新成功和非成功终态各留一条，活动任务保留，删除后回查。淘汰旧成功前必须确认新正式Release/Tag与Artifact；不按界面隐藏代替实际删除。
 
-产品测试、塔塔鹿鹿和自动化均通过控制台发起；本机塔塔安装器与GitHub塔塔自动化共用本仓唯一编译实现，分别沿用下述已确认的签名方式。钱包不设独立发布文件、命令或控制台发布按钮。iOS在同一Run的测试、编译、正式附件验收及逐字节回读成功后，沿公民App现有方式调用xcrun altool --upload-package --wait，将同一份IPA上传App Store Connect；上传失败即失败，自动化不提交审核或公开上架。上传复用控制台中已获准的公民App App Store Connect配置，通过现有保密流程交付钱包仓库的APP_STORE_KEY_ID、APP_STORE_ISSUER_ID、APP_STORE_PRIVATE_KEY，不新增密钥或将值写入源码。私钥仅写本轮signing/appstore现场，上传成败均立即删除，不进入正式附件；原always签名清理和GitHub历史清理保持。IOS_KEY、WALLET_PROFILE及导出方式不变，不为上传修改描述文件或重签。Android通过控制台既有保密复用流程共享公民App现有受保护自定义配置GOOGLE_PLAY_SERVICE_ACCOUNT，保留公民App所有权并追加钱包，向钱包仓库交付同名GitHub Secret，不重复声明配置、不新增服务账号或密钥；现有服务账号仅追加钱包应用的只读查看及测试轨道权限（含草稿上传），不授予正式发布权限。由Google官方认证Action取得仅androidpublisher作用域的短期令牌，不生成凭据文件；现有scripts/build.mjs的upload android入口调用Google Play官方API，核对本轮proof、AAB字节与版本后创建edit、上传AAB、核对摘要、提交保存，再从新edit回读版本和摘要并删除回读edit，不修改轨道、不公开投放。有审核中的变更、权限、网络或回读失败均明确失败，不自动重发。任何失败先查原因、报告推荐方案，待用户确认后修复并继续。
+产品测试、塔塔鹿鹿和自动化均通过控制台发起；本机塔塔安装器与GitHub塔塔自动化共用本仓唯一编译实现，分别沿用下述已确认的签名方式。钱包不设独立发布文件、命令或控制台发布按钮。iOS在同一Run的测试、编译、正式附件验收及逐字节回读成功后，沿公民App现有方式调用xcrun altool --upload-package --wait，将同一份IPA上传App Store Connect；上传失败即失败，自动化不提交审核或公开上架。上传复用控制台中已获准的公民App App Store Connect配置，通过现有保密流程交付钱包仓库的APPSTORE_KEYID、APPSTORE_ISSUERID、APPSTORE_PRIVATEKEY，不新增密钥或将值写入源码。私钥仅写本轮signing/appstore现场，上传成败均立即删除，不进入正式附件；原always签名清理和GitHub历史清理保持。IOS_KEY、CITIZENWALLET_PROFILE及导出方式不变，不为上传修改描述文件或重签。Android与公民App各自声明PLAY_SERVICEACCOUNT，按同名共用控制台唯一值；配置复用及追加归属入口已删除，GitHub名称迁移另按准确授权交付，不新增服务账号或密钥；现有服务账号仅追加钱包应用的只读查看及测试轨道权限（含草稿上传），不授予正式发布权限。由Google官方认证Action取得仅androidpublisher作用域的短期令牌，不生成凭据文件；现有scripts/build.mjs的upload android入口调用Google Play官方API，核对本轮proof、AAB字节与版本后创建edit、上传AAB、核对摘要、提交保存，再从新edit回读版本和摘要并删除回读edit，不修改轨道、不公开投放。有审核中的变更、权限、网络或回读失败均明确失败，不自动重发。任何失败先查原因、报告推荐方案，待用户确认后修复并继续。
 
 钱包平台为ios、android；宿主Rust签名库只作为真实Flutter测试输入。编译使用Flutter 3.47.2、Rust 1.97.1、Gradle 9.1.0、AGP 9.0.1、KGP 2.2.20、NDK 28.2.13676358、CocoaPods 1.17.0。Android使用官方Flutter插件加载器和当前原锁插件支持的KGP/DSL设置，不修订Flutter、Gradle或插件缓存；工程和硬件金库单测按官方布局装配到本轮source-view。图标使用macOS sips与既有原件、尺寸声明，不包含自编图片编解码器。
 
@@ -255,7 +255,7 @@ GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwal
 
 本机蓝色入口统一称塔塔安装器，唯一实现位于塔塔控制台app/source/Installer.swift。钱包scripts/build.mjs的compile PLATFORM调用同一buildProduct完成本机编译并交付本轮App/APK及原声明Android工具入口，调用方消费结束后清场；不再下载GitHub正式包或实现设备安装。GitHub流程仍称塔塔自动化，正式签名、上传和记录保留规则保持。
 
-Android本机安装器沿用现有APP_KEY，与公民App共享原mobile-signing身份，并记录已签APK的公开证书指纹；不生成新密钥。iOS本机继续使用先前安装成功的已有Apple Development身份和系统设备描述文件，按安装器原规则选择；不创建、下载或重建描述文件，不强制使用正式分发证书。GitHub塔塔自动化继续使用原IOS_KEY及WALLET_PROFILE完成正式签名，App Store Connect上传保持原流程。
+Android本机安装器沿用现有APP_KEY，与公民App按同名APP_KEY共用唯一值，并记录已签APK的公开证书指纹；不生成新密钥。iOS本机继续使用先前安装成功的已有Apple Development身份和系统设备描述文件，按安装器原规则选择；不创建、下载或重建描述文件，不强制使用正式分发证书。GitHub塔塔自动化继续使用原IOS_KEY及CITIZENWALLET_PROFILE完成正式签名，App Store Connect上传保持原流程。
 
 节点部署冷签只接受公民链·LinuxARM·vX.Y.Z正式标签：字段按UTF-8读取且最多64字节，三段版本为无前导零的非负UInt64，完整保留中文及中点，不转换或接受旧英文别名。原产品、节点类别、目标IP、任务、摘要、期限、nonce、签名域及防重放校验保持；非法UTF-8、错误长度、截断和尾随字节仍拒绝。
 
@@ -263,3 +263,6 @@ Android本机安装器沿用现有APP_KEY，与公民App共享原mobile-signing�
 节点冷签回归同时覆盖格式2真实解码、独立签名域金标、实际签名验签与防重放，以及页面绿色批准和旧格式红色拒签。公开样例与共享协议fixtures/sign_request.json及控制台测试逐字节一致。控制台本机compile入口先调用本产品testProduct完整回归，失败不进入设备安装；所有验证仍使用本产品原依赖锁与工具声明。
 
 本产品scripts/config.mjs的describeAction仅返回repository、workflow、ref、inputs，或既有本地进程命令声明；不导入构建实现、不派发GitHub请求、不处理令牌、版本或历史。控制台使用统一数据接口直接派发并只读观察准确Run；产品GitHub业务归所属既有YAML。本次自动化Run名称使用运行编号，正式构建及产物保持版本名称。已有工具和依赖复用，缺少时才按原声明准备。
+
+本产品配置项统一为environment、name、description、accessLevel、kind、format六个必填字段；不适用规则明确填写“不适用”。name严格使用两组大写字母和一个下划线，同名共用控制台唯一值，当前页仅汇总实际声明的使用产品。操作列固定写入/更换、查看、删除；保密查看保留生物识别。现有配置消费者随声明同步改名，官方工具/API字段保持官方名称，不新增旧名兼容或配置副本。
+描述文件使用CITIZENWALLET_PROFILE，format绑定真实iOS Bundle身份；不能将其它产品描述文件冒认成本产品已配置。

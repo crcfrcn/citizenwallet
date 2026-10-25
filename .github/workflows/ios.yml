@@ -90,7 +90,7 @@ jobs:
       - name: 准备本轮正式Apple签名
         env:
           IOS_KEY: ${{ secrets.IOS_KEY }}
-          WALLET_PROFILE: ${{ secrets.WALLET_PROFILE }}
+          CITIZENWALLET_PROFILE: ${{ secrets.CITIZENWALLET_PROFILE }}
         run: |
           set -euo pipefail
           umask 077
@@ -105,7 +105,7 @@ jobs:
            if not sep or not value or key in fields:raise ValueError('IOS_KEY字段无效')
            fields[key]=value
           if set(fields)!={'pkcs12','password','certificate_sha1'} or not re.fullmatch('[0-9A-F]{40}',fields['certificate_sha1']):raise ValueError('正式证书字段无效')
-          (p/'distribution.p12').write_bytes(base64.b64decode(fields['pkcs12'],validate=True));(p/'password').write_text(fields['password']);(p/'certificate').write_text(fields['certificate_sha1']);(p/'profile.mobileprovision').write_bytes(base64.b64decode(os.environ['WALLET_PROFILE'],validate=True))
+          (p/'distribution.p12').write_bytes(base64.b64decode(fields['pkcs12'],validate=True));(p/'password').write_text(fields['password']);(p/'certificate').write_text(fields['certificate_sha1']);(p/'profile.mobileprovision').write_bytes(base64.b64decode(os.environ['CITIZENWALLET_PROFILE'],validate=True))
           PY
           security list-keychains -d user > "$PRODUCT_WORK/signing/keychains"
           password="$(openssl rand -hex 32)"
@@ -214,22 +214,22 @@ jobs:
       - name: 上传正式IPA到App Store Connect
         timeout-minutes: 30
         env:
-          APP_STORE_KEY_ID: ${{ secrets.APP_STORE_KEY_ID }}
-          APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_ISSUER_ID }}
-          APP_STORE_PRIVATE_KEY: ${{ secrets.APP_STORE_PRIVATE_KEY }}
+          APPSTORE_KEYID: ${{ secrets.APPSTORE_KEYID }}
+          APPSTORE_ISSUERID: ${{ secrets.APPSTORE_ISSUERID }}
+          APPSTORE_PRIVATEKEY: ${{ secrets.APPSTORE_PRIVATEKEY }}
         run: |
           set -euo pipefail
           umask 077
-          : "${APP_STORE_KEY_ID:?缺少APP_STORE_KEY_ID}"
-          : "${APP_STORE_ISSUER_ID:?缺少APP_STORE_ISSUER_ID}"
-          : "${APP_STORE_PRIVATE_KEY:?缺少APP_STORE_PRIVATE_KEY}"
+          : "${APPSTORE_KEYID:?缺少APPSTORE_KEYID}"
+          : "${APPSTORE_ISSUERID:?缺少APPSTORE_ISSUERID}"
+          : "${APPSTORE_PRIVATEKEY:?缺少APPSTORE_PRIVATEKEY}"
           export API_PRIVATE_KEYS_DIR="$PRODUCT_WORK/signing/appstore"
           mkdir "$API_PRIVATE_KEYS_DIR"
           trap 'rm -rf "$API_PRIVATE_KEYS_DIR"' EXIT
-          printf '%s\n' "$APP_STORE_PRIVATE_KEY" > "$API_PRIVATE_KEYS_DIR/AuthKey_$APP_STORE_KEY_ID.p8"
+          printf '%s\n' "$APPSTORE_PRIVATEKEY" > "$API_PRIVATE_KEYS_DIR/AuthKey_$APPSTORE_KEYID.p8"
           ipa="$(node --input-type=module -e 'import {artifactBaseName} from "./scripts/build.mjs"; process.stdout.write(artifactBaseName("ios",process.env.PRODUCT_VERSION)+".ipa");')"
           xcrun altool --upload-package "$PRODUCT_WORK/artifact/$ipa" \
-            --api-key "$APP_STORE_KEY_ID" --api-issuer "$APP_STORE_ISSUER_ID" \
+            --api-key "$APPSTORE_KEYID" --api-issuer "$APPSTORE_ISSUERID" \
             --wait --output-format json
       - name: 保存官方缓存
         if: always()
