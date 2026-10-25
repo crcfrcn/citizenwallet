@@ -9,7 +9,6 @@ export const manifest=Object.freeze({
     "title": "公民钱包配置",
     "items": [
       {
-        "environment": "release",
         "name": "APP_KEY",
         "description": "安卓应用正式签名材料",
         "accessLevel": "protected",
@@ -17,7 +16,6 @@ export const manifest=Object.freeze({
         "format": "不适用"
       },
       {
-        "environment": "release",
         "name": "IOS_KEY",
         "description": "苹果移动应用正式签名证书",
         "accessLevel": "protected",
@@ -25,7 +23,6 @@ export const manifest=Object.freeze({
         "format": "不适用"
       },
       {
-        "environment": "release",
         "name": "CITIZENWALLET_PROFILE",
         "description": "公民钱包描述文件",
         "accessLevel": "protected",
@@ -33,7 +30,6 @@ export const manifest=Object.freeze({
         "format": "ios_profile:ios.citizenwallet"
       },
       {
-        "environment": "appstore",
         "name": "APPSTORE_PRIVATEKEY",
         "description": "苹果商店接口私钥",
         "accessLevel": "protected",
@@ -41,7 +37,6 @@ export const manifest=Object.freeze({
         "format": "不适用"
       },
       {
-        "environment": "appstore",
         "name": "APPSTORE_KEYID",
         "description": "苹果商店接口密钥编号",
         "accessLevel": "protected",
@@ -49,7 +44,6 @@ export const manifest=Object.freeze({
         "format": "不适用"
       },
       {
-        "environment": "appstore",
         "name": "APPSTORE_ISSUERID",
         "description": "苹果商店接口签发者编号",
         "accessLevel": "protected",
@@ -57,7 +51,6 @@ export const manifest=Object.freeze({
         "format": "不适用"
       },
       {
-        "environment": "appstore",
         "name": "PLAY_SERVICEACCOUNT",
         "description": "谷歌商店服务账号凭据",
         "accessLevel": "protected",

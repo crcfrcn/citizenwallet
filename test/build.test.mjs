@@ -176,7 +176,7 @@ test('iOS验收成功后上传同一IPA，上传失败与缺少凭据均失败�
 test('钱包两平台不再声明独立发布动作或发布文件',()=>{
  for(const platform of ['ios','android'])assert.throws(()=>describeAction({flow:'publish',platform}),/未声明/u);
  assert.equal(existsSync(join(root,'scripts/publish.mjs')),false);
- // 商店凭据由本产品统一六字段声明，按同名共用控制台唯一值。
+ // 商店凭据由本产品统一五字段声明，按同名共用控制台唯一值。
  const config=readFileSync(join(root,'scripts/config.mjs'),'utf8');assert.match(config,/PLAY_SERVICEACCOUNT/u);assert.doesNotMatch(config,/\bPLAY_KEY\b/u);
  const workflow=readFileSync(join(root,'.github/workflows/android.yml'),'utf8');
  assert.match(workflow,/credentials_json: \$\{\{ secrets\.PLAY_SERVICEACCOUNT \}\}/u);assert.doesNotMatch(workflow,/secrets\.PLAY_KEY\b/u);
