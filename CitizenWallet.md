@@ -101,8 +101,12 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
 - `signerPublicKey` 只表示真实签名公钥。当前 sr25519 的 `AccountId32` 直接取该公钥
   32 字节，因此登录和离线签名可做字节等值核验；不得据此把字段重新混称为
   `pubkeyHex` 或裸 `address`。
-- `WalletProfileEntity` 最终字段保存 `accountId + ss58Address + ss58Prefix` 及钱包
-  展示元数据，不重复保存同一 32 字节值的公钥别名。
+- 本机数据库保持 wallet、account、request 三集合；Dart 实体按官方 UpperCamelCase，
+  属性按 lowerCamelCase，物理名称由 Isar 官方 @Name 指定。主键为 row_id。
+  wallet 只存 wallet_index、wallet_name、master_id、sort_order；account 只存
+  master_id、account_index、account_id、account_name；request 只存 request_id、expires_at。
+  master_id 是硬件信封绑定的根身份，不能用当前账户0行替代；SS58 由 account_id 与
+  原链前缀即时编码。无消费的来源/创建时间与通用KV槽不持久化；请求期限继续为UTC秒。
 - 正式创世切换前，CitizenWallet 已只按最终 Isar schema 完成旧业务库重建；运行态不执行
   旧格式 migration，不读取旧 `address` / `pubkeyHex` 字段。正式创世后不得再把开发期
   “删除重建”口径用于现行钱包数据或安全材料。
@@ -112,9 +116,8 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
   `isar_community_flutter_libs`、`isar_community_generator` 3.3.2。旧 Isar 3.1
   预编译 `libisar.so` 只有 4 KB ELF 对齐，禁止恢复；community 引擎的
   arm64-v8a/x86_64 `libisar.so` 必须保持 `0x4000` 或更高。
-- Isar 引擎升级不得改变 `WalletEntity`、`AccountEntity`、`AppKvEntity` 的
-  Collection ID、字段或索引。3.1 业务库已用非敏感测试数据验证可由 community 3.3.2
-  原地打开、按索引读取并继续写入；生成 schema 只允许更新引擎版本字符串。
+- 引擎升级与业务schema变更分开验收。本轮规范schema不提供旧名兼容、普通读取迁移
+  或自动清库；真实现存数据库处置须另行确认准确对象，不能套用开发期重建结论。
 - community 引擎使用 `<name>.isar-lck`；启动前幂等删除 Isar 3.1 遗留的空
   `<name>.isar.lock`。该清理只处理旧锁文件，不删除 `<name>.isar` 业务库或任何
   secure storage 数据。

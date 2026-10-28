@@ -56,16 +56,13 @@ void main() {
         '0x2afba9278e30ccf6a6ceb3a8b6e336b70068f045c666f2e7f4f9cc5f47db8972',
     accountIndex: 1,
     accountId: signerPk,
-    ss58Address: 'w5FhUDLW4BxsE1QXK4sNjPZ8rqSnK2QeVpUfXzqczpWdxChxV',
     accountName: '账户1',
-    createdAtMillis: 0,
   );
 
   testWidgets('runtime 升级哈希签:绿 banner 且无“拒绝签名”矛盾行', (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     // 32 字节升级摘要。
-    final hashHex =
-        '0x'
+    final hashHex = '0x'
         '${List<int>.generate(32, (i) => i).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
     final request = QrEnvelope<SignRequestBody>(
       kind: QrKind.signRequest,
@@ -133,33 +130,58 @@ void main() {
   });
 
   testWidgets('节点部署格式2展示平台和实际版本并允许签名，旧格式红色拒绝', (tester) async {
-    final expires=DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
-    final payload=<int>[2,...'citizenchain'.codeUnits,1,7,...'node-01'.codeUnits,
-      10,...'192.0.2.10'.codeUnits,5,...'arm64'.codeUnits,5,...'1.0.0'.codeUnits,
-      ...List<int>.filled(32,0x22),...'123456789'.codeUnits,
-      ...List<int>.generate(8,(index)=>(expires>>(index*8))&0xff),...List<int>.filled(32,0x33)];
-    for (final format in [2,1]) {
-      payload[0]=format;
-      final request=QrEnvelope<SignRequestBody>(kind:QrKind.signRequest,
-        id:'offline-node-format-$format',expiresAt:expires,
-        body:SignRequestBody.fromHex(action:QrActions.nodeDeploy,signerPublicKeyHex:signerPk,
-          payloadHex:'0x${payload.map((b)=>b.toRadixString(16).padLeft(2,'0')).join()}'));
-      await tester.pumpWidget(MaterialApp(home:OfflineSignPage(
-        account:account,walletName:'钱包1',raw:QrSigner().encodeRequest(request))));
-      await ScreenshotGuard.waitForIdleForTest();await tester.pump();
-      if (format==2) {
-        expect(find.textContaining('可以签名'),findsWidgets);
-        expect(find.text('arm64'),findsWidgets);expect(find.text('1.0.0'),findsWidgets);
-        expect(find.text('安装包版本'),findsWidgets);expect(find.text('源码提交'),findsNothing);
+    final expires = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
+    final payload = <int>[
+      2,
+      ...'citizenchain'.codeUnits,
+      1,
+      7,
+      ...'node-01'.codeUnits,
+      10,
+      ...'192.0.2.10'.codeUnits,
+      5,
+      ...'arm64'.codeUnits,
+      5,
+      ...'1.0.0'.codeUnits,
+      ...List<int>.filled(32, 0x22),
+      ...'123456789'.codeUnits,
+      ...List<int>.generate(8, (index) => (expires >> (index * 8)) & 0xff),
+      ...List<int>.filled(32, 0x33)
+    ];
+    for (final format in [2, 1]) {
+      payload[0] = format;
+      final request = QrEnvelope<SignRequestBody>(
+          kind: QrKind.signRequest,
+          id: 'offline-node-format-$format',
+          expiresAt: expires,
+          body: SignRequestBody.fromHex(
+              action: QrActions.nodeDeploy,
+              signerPublicKeyHex: signerPk,
+              payloadHex:
+                  '0x${payload.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}'));
+      await tester.pumpWidget(MaterialApp(
+          home: OfflineSignPage(
+              account: account,
+              walletName: '钱包1',
+              raw: QrSigner().encodeRequest(request))));
+      await ScreenshotGuard.waitForIdleForTest();
+      await tester.pump();
+      if (format == 2) {
+        expect(find.textContaining('可以签名'), findsWidgets);
+        expect(find.text('arm64'), findsWidgets);
+        expect(find.text('1.0.0'), findsWidgets);
+        expect(find.text('安装包版本'), findsWidgets);
+        expect(find.text('源码提交'), findsNothing);
       } else {
-        expect(find.text('签名载荷无法解码，已拒绝签名'),findsWidgets);
+        expect(find.text('签名载荷无法解码，已拒绝签名'), findsWidgets);
       }
       // 完整节点明细比屏幕长，ListView按需构建底部按钮，先真实滚动再检查可用状态。
-      final buttonFinder=find.widgetWithText(FilledButton,'确认签名');
-      await tester.scrollUntilVisible(buttonFinder,250);
-      final button=tester.widget<FilledButton>(buttonFinder);
-      expect(button.onPressed,format==2 ? isNotNull:isNull);
-      expect(tester.takeException(),isNull);await releasePage(tester);
+      final buttonFinder = find.widgetWithText(FilledButton, '确认签名');
+      await tester.scrollUntilVisible(buttonFinder, 250);
+      final button = tester.widget<FilledButton>(buttonFinder);
+      expect(button.onPressed, format == 2 ? isNotNull : isNull);
+      expect(tester.takeException(), isNull);
+      await releasePage(tester);
     }
   });
 
@@ -181,9 +203,8 @@ void main() {
       ...List<int>.filled(8, 0), // expected_binding_revision=0
       ...u64Expiry,
     ];
-    final payloadB64 = base64Url
-        .encode(authorizationTemplate)
-        .replaceAll('=', '');
+    final payloadB64 =
+        base64Url.encode(authorizationTemplate).replaceAll('=', '');
     final request = QrEnvelope<SignRequestBody>(
       kind: QrKind.signRequest,
       id: 'offline-req-occupy-0001',
@@ -210,8 +231,7 @@ void main() {
     expect(
       find.text('签名账户'),
       findsOneWidget,
-      reason:
-          '保护失败=${find.textContaining('屏幕保护不可用').evaluate().isNotEmpty}，'
+      reason: '保护失败=${find.textContaining('屏幕保护不可用').evaluate().isNotEmpty}，'
           '解析错误=${find.byIcon(Icons.error_outline).evaluate().isNotEmpty}',
     );
 

@@ -116,8 +116,6 @@ void main() {
     walletName: '钱包1',
     masterId:
         '0x2afba9278e30ccf6a6ceb3a8b6e336b70068f045c666f2e7f4f9cc5f47db8972',
-    createdAtMillis: 0,
-    source: 'created',
   );
 
   testWidgets('身份卡助记词区默认隐藏 + 查看确认取消', (tester) async {
@@ -176,8 +174,7 @@ void main() {
     expect(
       find.text(kDevPhrase),
       findsOneWidget,
-      reason:
-          '保护错误=${find.textContaining('验证失败：').evaluate().isNotEmpty}，'
+      reason: '保护错误=${find.textContaining('验证失败：').evaluate().isNotEmpty}，'
           '解密调用=$decryptCalls',
     );
     await releasePage(tester);
@@ -252,8 +249,7 @@ void main() {
     expect(
       find.text(kDevPhrase),
       findsOneWidget,
-      reason:
-          '保护错误=${find.textContaining('验证失败：').evaluate().isNotEmpty}，'
+      reason: '保护错误=${find.textContaining('验证失败：').evaluate().isNotEmpty}，'
           '解密调用=$decryptCalls',
     );
     await releasePage(tester);
@@ -313,8 +309,7 @@ void main() {
     expect(
       find.text('已备份，完成'),
       findsOneWidget,
-      reason:
-          '仍在选择=${find.text('选择助记词数量').evaluate().isNotEmpty}，'
+      reason: '仍在选择=${find.text('选择助记词数量').evaluate().isNotEmpty}，'
           '创建中=${find.byType(CircularProgressIndicator).evaluate().isNotEmpty}，'
           '保护失败=${find.textContaining('屏幕保护不可用').evaluate().isNotEmpty}',
     );

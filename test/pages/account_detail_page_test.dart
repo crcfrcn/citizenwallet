@@ -17,9 +17,7 @@ void main() {
     accountIndex: 1,
     accountId:
         '0xb606fc73f57f03cdb4c932d475ab426043e429cecc2ffff0d2672b0df8398c48',
-    ss58Address: 'w5FhUDLW4BxsE1QXK4sNjPZ8rqSnK2QeVpUfXzqczpWdxChxV',
     accountName: '账户1',
-    createdAtMillis: 0,
   );
 
   testWidgets('账户详情展示公开信息,私钥默认隐藏', (tester) async {
@@ -114,8 +112,7 @@ void main() {
   });
 
   test('公民钱包拒绝解析收款码', () {
-    const receiveQr =
-        '{"p":"QR_V1","k":4,"i":"pay_test","e":1300,"b":{'
+    const receiveQr = '{"p":"QR_V1","k":4,"i":"pay_test","e":1300,"b":{'
         '"n":"0x1111111111111111111111111111111111111111111111111111111111111111",'
         '"v":"1","t":"GMB","m":"","l":"BANK-1"}}';
     expect(

@@ -77,56 +77,59 @@ List<int> _mlsDeviceBindPayload({
   required String cidNumber,
   required String accountId,
   required int issuedAtMillis,
-}) => <int>[
-  ..._scaleString(cidNumber),
-  ..._u64Le(4),
-  ..._scaleString(accountId),
-  ..._scaleString('0x${'ab' * 32}'),
-  ..._u64Le(issuedAtMillis),
-];
+}) =>
+    <int>[
+      ..._scaleString(cidNumber),
+      ..._u64Le(4),
+      ..._scaleString(accountId),
+      ..._scaleString('0x${'ab' * 32}'),
+      ..._u64Le(issuedAtMillis),
+    ];
 
 List<int> _squareAccountActionPayload({
   required String accountId,
   required int expiresAt,
   String action = 'cancel_membership',
-}) => <int>[
-  ..._scaleString(action),
-  ..._scaleString(accountId),
-  ..._scaleString('sqa_test'),
-  ..._u64Le(expiresAt * 1000),
-];
+}) =>
+    <int>[
+      ..._scaleString(action),
+      ..._scaleString(accountId),
+      ..._scaleString('sqa_test'),
+      ..._u64Le(expiresAt * 1000),
+    ];
 
 List<int> _occupyAuthorizationTemplate(String cid, int expiresAt) => [
-  ..._hexToBytes(ChainConstants.genesisHash),
-  cid.length << 2,
-  ...cid.codeUnits,
-  ...List<int>.filled(32, 0),
-  ..._u64Le(0),
-  ..._u64Le(expiresAt),
-];
+      ..._hexToBytes(ChainConstants.genesisHash),
+      cid.length << 2,
+      ...cid.codeUnits,
+      ...List<int>.filled(32, 0),
+      ..._u64Le(0),
+      ..._u64Le(expiresAt),
+    ];
 
 List<int> _rebindAuthorizationTemplate(String cid, int expiresAt) => [
-  ..._hexToBytes(ChainConstants.genesisHash),
-  cid.length << 2,
-  ...cid.codeUnits,
-  ...List<int>.filled(32, 0x55),
-  ...List<int>.filled(32, 0),
-  ..._u64Le(7),
-  ..._u64Le(expiresAt),
-];
+      ..._hexToBytes(ChainConstants.genesisHash),
+      cid.length << 2,
+      ...cid.codeUnits,
+      ...List<int>.filled(32, 0x55),
+      ...List<int>.filled(32, 0),
+      ..._u64Le(7),
+      ..._u64Le(expiresAt),
+    ];
 
 List<int> _switchDefaultAccountPayload({
   required String currentDefaultAccountId,
   required int expiresAt,
-}) => [
-  ..._hexToBytes(ChainConstants.genesisHash),
-  ..._hexToBytes(currentDefaultAccountId),
-  2 << 2,
-  ...List<int>.filled(32, 0x55),
-  ..._hexToBytes(currentDefaultAccountId),
-  ..._u64Le(expiresAt),
-  ...List<int>.filled(16, 0x66),
-];
+}) =>
+    [
+      ..._hexToBytes(ChainConstants.genesisHash),
+      ..._hexToBytes(currentDefaultAccountId),
+      2 << 2,
+      ...List<int>.filled(32, 0x55),
+      ..._hexToBytes(currentDefaultAccountId),
+      ..._u64Le(expiresAt),
+      ...List<int>.filled(16, 0x66),
+    ];
 
 /// 中文注释：公民服务端独立动作在产物摘要后追加最终配置摘要；
 /// 其它产品仍使用原 SCALE 发布布局和相同发布签名域。
@@ -134,28 +137,37 @@ List<int> _publishAuthorizationPayload({
   required String product,
   required String platform,
   required int expiresAt,
-}) => <int>[
-  ..._scaleString(product),
-  ..._scaleString(platform),
-  ..._scaleString('1.2.3'),
-  ...List<int>.generate(20, (index) => index + 1),
-  ...List<int>.generate(32, (index) => index + 21),
-  if (product == 'citizenserve') ...List<int>.filled(32, 0x44),
-  ..._scaleString('deployment-stable-1'),
-  ..._u64Le(expiresAt),
-  ...List<int>.filled(32, 0x66),
-];
+}) =>
+    <int>[
+      ..._scaleString(product),
+      ..._scaleString(platform),
+      ..._scaleString('1.2.3'),
+      ...List<int>.generate(20, (index) => index + 1),
+      ...List<int>.generate(32, (index) => index + 21),
+      if (product == 'citizenserve') ...List<int>.filled(32, 0x44),
+      ..._scaleString('deployment-stable-1'),
+      ..._u64Le(expiresAt),
+      ...List<int>.filled(32, 0x66),
+    ];
 
 // 与共享协议及控制台使用同一公开样例；仅替换本轮期限，不要求Tag或源码提交。
 List<int> _nodeDeployPayload(int expiresAt) => <int>[
-  2, ...'citizenchain'.codeUnits, 1,
-  7, ...'node-01'.codeUnits,
-  10, ...'192.0.2.10'.codeUnits,
-  5, ...'arm64'.codeUnits, 5, ...'1.0.0'.codeUnits,
-  ...List<int>.filled(32, 0x22),
-  ...'123456789'.codeUnits, ..._u64Le(expiresAt),
-  ...List<int>.filled(32, 0x33),
-];
+      2,
+      ...'citizenchain'.codeUnits,
+      1,
+      7,
+      ...'node-01'.codeUnits,
+      10,
+      ...'192.0.2.10'.codeUnits,
+      5,
+      ...'arm64'.codeUnits,
+      5,
+      ...'1.0.0'.codeUnits,
+      ...List<int>.filled(32, 0x22),
+      ...'123456789'.codeUnits,
+      ..._u64Le(expiresAt),
+      ...List<int>.filled(32, 0x33),
+    ];
 
 void main() {
   group('OfflineSignService', () {
@@ -340,28 +352,42 @@ void main() {
     });
 
     test('节点部署冷签展示准确目标、期限一致且一次请求只能签一次', () async {
-      final expiresAt=DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
-      final payload=_nodeDeployPayload(expiresAt);
-      final request=_buildTestRequest(requestId:'offline-node-deploy-authorization',
-        signerPublicKey:signingAccount.accountId,payloadHex:'0x${_toHex(payload)}',
-        action:QrActions.nodeDeploy,expiresAt:expiresAt);
-      final verified=service.verifyPayload(request);
-      expect(verified.status,SignDecisionStatus.normal);
-      expect(verified.actionLabel,'节点部署批准');
-      expect(verified.decoded?.fields['node_id'],'node-01');
-      expect(verified.decoded?.fields['server_ip'],'192.0.2.10');
-      expect(verified.decoded?.fields['platform'],'arm64');
-      expect(verified.decoded?.fields['version'],'1.0.0');
-      expect(verified.decoded?.fields.containsKey('source_sha'),isFalse);
-      final response=await service.signParsedRequest(accountId:signingAccount.accountId,request:request);
-      expect(_verifySr25519(signerPublicKeyHex:response.body.signerPublicKeyHex,
-        message:QrSigner.signingBytesFor(request.body),signatureHex:response.body.signatureHex),isTrue);
-      await expectLater(service.signParsedRequest(accountId:signingAccount.accountId,request:request),
-        throwsA(isA<OfflineSignException>().having((error)=>error.code,'code',OfflineSignErrorCode.replayed)));
-      final mismatch=_buildTestRequest(requestId:'offline-node-deploy-expiry',
-        signerPublicKey:signingAccount.accountId,payloadHex:'0x${_toHex(payload)}',
-        action:QrActions.nodeDeploy,expiresAt:expiresAt+1);
-      expect(service.verifyPayload(mismatch).status,SignDecisionStatus.reject);
+      final expiresAt = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
+      final payload = _nodeDeployPayload(expiresAt);
+      final request = _buildTestRequest(
+          requestId: 'offline-node-deploy-authorization',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: '0x${_toHex(payload)}',
+          action: QrActions.nodeDeploy,
+          expiresAt: expiresAt);
+      final verified = service.verifyPayload(request);
+      expect(verified.status, SignDecisionStatus.normal);
+      expect(verified.actionLabel, '节点部署批准');
+      expect(verified.decoded?.fields['node_id'], 'node-01');
+      expect(verified.decoded?.fields['server_ip'], '192.0.2.10');
+      expect(verified.decoded?.fields['platform'], 'arm64');
+      expect(verified.decoded?.fields['version'], '1.0.0');
+      expect(verified.decoded?.fields.containsKey('source_sha'), isFalse);
+      final response = await service.signParsedRequest(
+          accountId: signingAccount.accountId, request: request);
+      expect(
+          _verifySr25519(
+              signerPublicKeyHex: response.body.signerPublicKeyHex,
+              message: QrSigner.signingBytesFor(request.body),
+              signatureHex: response.body.signatureHex),
+          isTrue);
+      await expectLater(
+          service.signParsedRequest(
+              accountId: signingAccount.accountId, request: request),
+          throwsA(isA<OfflineSignException>().having(
+              (error) => error.code, 'code', OfflineSignErrorCode.replayed)));
+      final mismatch = _buildTestRequest(
+          requestId: 'offline-node-deploy-expiry',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: '0x${_toHex(payload)}',
+          action: QrActions.nodeDeploy,
+          expiresAt: expiresAt + 1);
+      expect(service.verifyPayload(mismatch).status, SignDecisionStatus.reject);
     });
 
     test('MLS设备登记复用 0x1C，且只接受载荷账户和签发时间一致的请求', () async {
@@ -552,7 +578,8 @@ void main() {
         ChainConstants.genesisHash,
       );
       expect(verification.decoded!.reviewFields['spec_version'], '1');
-      expect(verification.decoded!.reviewFields['transaction_version'], ChainConstants.transactionVersion.toString());
+      expect(verification.decoded!.reviewFields['transaction_version'],
+          ChainConstants.transactionVersion.toString());
     });
 
     test('链交易严格拒绝错创世、错交易版本和裸 call data，但不锁 spec_version', () {
@@ -575,7 +602,8 @@ void main() {
         SignDecisionStatus.reject,
       );
       expect(
-        verify(_withSigningTailHex(callData, transactionVersion: ChainConstants.transactionVersion + 1)),
+        verify(_withSigningTailHex(callData,
+            transactionVersion: ChainConstants.transactionVersion + 1)),
         SignDecisionStatus.reject,
       );
       expect(verify(callData), SignDecisionStatus.reject);
@@ -599,7 +627,16 @@ void main() {
       final roleBytes = role.codeUnits;
       final price = List<int>.filled(16, 0)..[0] = 100;
       final payloadHex = _withSigningTailHex(
-        '0x${_toHex([34, 5, cidBytes.length << 2, ...cidBytes, roleBytes.length << 2, ...roleBytes, 2, ...price])}',
+        '0x${_toHex([
+              34,
+              5,
+              cidBytes.length << 2,
+              ...cidBytes,
+              roleBytes.length << 2,
+              ...roleBytes,
+              2,
+              ...price
+            ])}',
       );
       final request = _buildTestRequest(
         requestId: 'offline-platform-price',
@@ -636,7 +673,8 @@ void main() {
       expect(verification.decoded?.fields['expected_price_fen'], contains('分'));
     });
 
-    test('verifyPayload rejects platform price payload with mismatched action', () {
+    test('verifyPayload rejects platform price payload with mismatched action',
+        () {
       const cid = 'GZ018-SFGYR-201206100-2026';
       final cidBytes = cid.codeUnits;
       const role = 'GENESIS_PRODUCT_MANAGER';
@@ -646,7 +684,16 @@ void main() {
         requestId: 'offline-platform-price-mismatch',
         signerPublicKey: signingAccount.accountId,
         payloadHex: _withSigningTailHex(
-          '0x${_toHex([34, 5, cidBytes.length << 2, ...cidBytes, roleBytes.length << 2, ...roleBytes, 0, ...price])}',
+          '0x${_toHex([
+                34,
+                5,
+                cidBytes.length << 2,
+                ...cidBytes,
+                roleBytes.length << 2,
+                ...roleBytes,
+                0,
+                ...price
+              ])}',
         ),
         action: QrActions.transferWithRemark,
       );
@@ -660,7 +707,8 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-hash-only-reject',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        payloadHex:
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         action: QrActions.privateInstitutionGovernance,
       );
 
@@ -753,7 +801,11 @@ void main() {
               ? '0x${'aa' * 32}'
               : signingAccount.accountId,
           payloadHex: _withSigningTailHex(
-            '0x${_toHex([10, 5, ..._scaleString('CN202-CTZN6-123456789-1234')])}',
+            '0x${_toHex([
+                  10,
+                  5,
+                  ..._scaleString('CN202-CTZN6-123456789-1234')
+                ])}',
           ),
           action: 0x0a05,
           expiresAt: invalid == 'expired'
@@ -899,7 +951,8 @@ void main() {
     test('signParsedRequest should reject wrong signer public key', () async {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-0002',
-        signerPublicKey: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        signerPublicKey:
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         payloadHex: '0x0102',
         action: QrActions.login,
       );
@@ -929,7 +982,8 @@ void main() {
 
       expect(
         () => service.signParsedRequest(
-          accountId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0',
+          accountId:
+              '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0',
           request: request,
         ),
         throwsA(
@@ -1010,9 +1064,7 @@ class _FakeWalletManager extends WalletManager {
       masterId: accountId,
       accountIndex: 0,
       accountId: accountId,
-      ss58Address: pair.address,
       accountName: '账户0',
-      createdAtMillis: 0,
     );
     return _account!;
   }

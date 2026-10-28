@@ -180,41 +180,28 @@ void main() {
     await WalletIsar.instance.resetForTest();
   });
 
-  test('Isar 最终 schema 指纹固定，依赖升级不得静默改库', () {
-    expect(WalletEntitySchema.id, 495311719639707741);
+  test('三集合只保存独立事实，表列使用规范名称', () {
+    expect(WalletEntitySchema.name, 'wallet');
+    expect(WalletEntitySchema.idName, 'row_id');
     expect(WalletEntitySchema.properties.keys, {
-      'createdAtMillis',
-      'masterId',
-      'sortOrder',
-      'source',
-      'walletIndex',
-      'walletName',
+      'master_id',
+      'sort_order',
+      'wallet_index',
+      'wallet_name',
     });
-    expect(WalletEntitySchema.indexes.keys, {'walletIndex', 'masterId'});
-
-    expect(AccountEntitySchema.id, -996322080142432925);
+    expect(AccountEntitySchema.name, 'account');
+    expect(AccountEntitySchema.idName, 'row_id');
     expect(AccountEntitySchema.properties.keys, {
-      'accountId',
-      'accountIndex',
-      'accountName',
-      'createdAtMillis',
-      'masterId',
-      'ss58Address',
+      'account_id',
+      'account_index',
+      'account_name',
+      'master_id',
     });
-    expect(AccountEntitySchema.indexes.keys, {
-      'masterId_accountIndex',
-      'accountId',
-      'ss58Address',
-    });
-
-    expect(AppKvEntitySchema.id, -4757328183228885293);
-    expect(AppKvEntitySchema.properties.keys, {
-      'boolValue',
-      'intValue',
-      'key',
-      'stringValue',
-    });
-    expect(AppKvEntitySchema.indexes.keys, {'key'});
+    expect(SignedRequestSchema.name, 'request');
+    expect(SignedRequestSchema.idName, 'row_id');
+    expect(SignedRequestSchema.properties.keys, {'request_id', 'expires_at'});
+    expect(AccountEntitySchema.indexes.length, 2);
+    expect(SignedRequestSchema.indexes.length, 1);
   });
 
   test('community 引擎启动前幂等清理 Isar 3.1 旧锁文件', () async {
@@ -318,19 +305,19 @@ void main() {
     expect(await manager.getWallets(), isEmpty);
   });
 
-  test('防重放占用拒绝远未来期限，并批量清理过期记录且保留其他键', () async {
+  test('防重放占用拒绝远未来期限，原子清理到期请求并保留有效请求', () async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final db = await WalletIsar.instance.db();
     await db.writeTxn(() async {
-      await db.appKvEntitys.put(
-        AppKvEntity()
-          ..key = 'qr.signed_request.expired'
-          ..intValue = now - 1,
+      await db.signedRequests.put(
+        SignedRequest()
+          ..requestId = 'expired'
+          ..expiresAt = now - 1,
       );
-      await db.appKvEntitys.put(
-        AppKvEntity()
-          ..key = 'other.record'
-          ..intValue = now - 1,
+      await db.signedRequests.put(
+        SignedRequest()
+          ..requestId = 'active'
+          ..expiresAt = now + 60,
       );
     });
     expect(
@@ -347,8 +334,8 @@ void main() {
       ),
       isTrue,
     );
-    expect(await db.appKvEntitys.getByKey('qr.signed_request.expired'), isNull);
-    expect(await db.appKvEntitys.getByKey('other.record'), isNotNull);
+    expect(await db.signedRequests.getByRequestId('expired'), isNull);
+    expect(await db.signedRequests.getByRequestId('active'), isNotNull);
   });
 
   test('导入入口仅接受12、18、24词，其他词数不建立钱包', () async {

@@ -12,65 +12,71 @@ import '../protocol/envelope.dart';
 part 'wallet_isar.g.dart';
 
 /// 钱包（master）：一套助记词 = 一个种子 = 一个 master。其下派生多个账户。
+@Name('wallet')
 @collection
 class WalletEntity {
+  @Name('row_id')
   Id id = Isar.autoIncrement;
 
   @Index(unique: true)
+  @Name('wallet_index')
   late int walletIndex;
 
+  @Name('wallet_name')
   late String walletName;
 
   /// 主指纹 = 账户0（`//0`）的 accountId，唯一标识一套助记词。
   /// 冷钱包按 master(此指纹)加密存 master 种子 + 助记词（见 WalletSecureKeys）;
   /// 账户不单独持久化密钥,签名/私钥导出时从种子按 accountIndex 现场派生。
   @Index(unique: true)
+  @Name('master_id')
   late String masterId;
 
-  late int createdAtMillis;
-  late String source;
-
   /// 排列顺序（越小越靠前）。
+  @Name('sort_order')
   int sortOrder = 0;
 }
 
 /// 账户：钱包（master）下按派生序号展开的一对公私钥。
 /// 全部 `//index` 硬派生（含账户0 = `//0`，无 bare 根）；每账户密钥独立、单向。
+@Name('account')
 @collection
 class AccountEntity {
+  @Name('row_id')
   Id id = Isar.autoIncrement;
 
   /// 所属钱包（master）指纹。按此过滤取某钱包下全部账户。
   @Index(composite: [CompositeIndex('accountIndex')], unique: true)
+  @Name('master_id')
   late String masterId;
 
   /// 派生序号：N → `//N`（含账户0 = `//0`）。
+  @Name('account_index')
   late int accountIndex;
 
   /// Substrate 账户唯一标识，小写 `0x` 加 64 位十六进制（= 派生公钥原字节）。
   @Index(unique: true)
+  @Name('account_id')
   late String accountId;
 
-  /// SS58（前缀 2027），仅展示 / 二维码用，不作授权主键。
-  @Index(unique: true)
-  late String ss58Address;
-
   /// 账户显示名，默认「账户$accountIndex」。
+  @Name('account_name')
   late String accountName;
-
-  late int createdAtMillis;
 }
 
+@Name('request')
 @collection
-class AppKvEntity {
+class SignedRequest {
+  @Name('row_id')
   Id id = Isar.autoIncrement;
 
-  @Index(unique: true, replace: true)
-  late String key;
+  @Name('request_id')
+  @Index(unique: true)
+  late String requestId;
 
-  String? stringValue;
-  int? intValue;
-  bool? boolValue;
+  /// UTC 秒；只用于原签名请求的一次性占用和到期清理。
+  @Name('expires_at')
+  late int expiresAt;
 }
 
 class WalletIsar {
@@ -108,15 +114,15 @@ class WalletIsar {
 
   /// 只打开最终 schema。
   ///
-  /// Isar 引擎升级不得改变集合、字段或索引 id；现有 `citizenwallet` 业务库必须
-  /// 原地打开。助记词、seed 与私钥位于 secure storage，不属于本库。
+  /// 只接受本产品当前三集合；不在打开时迁移、重建或清除旧业务数据。
+  /// 助记词、seed 与私钥位于硬件保护存储，不属于本库。
   Future<Isar> _openFinalSchema() async {
     await ensureTestCoreInitialized();
     final dir = await _resolveDirectory();
     final schemas = [
       WalletEntitySchema,
       AccountEntitySchema,
-      AppKvEntitySchema,
+      SignedRequestSchema,
     ];
     final name = _isFlutterTest()
         ? 'citizenwallet_${Isolate.current.hashCode}'
@@ -253,8 +259,8 @@ class WalletIsar {
           jsonDecode(config.readAsStringSync()) as Map<String, dynamic>;
       final packages = data['packages'] as List<dynamic>;
       final library = packages.cast<Map<String, dynamic>>().singleWhere(
-        (entry) => entry['name'] == 'isar_community_flutter_libs',
-      );
+            (entry) => entry['name'] == 'isar_community_flutter_libs',
+          );
       final rootUri = config.uri.resolve(library['rootUri'] as String);
       if (rootUri.scheme != 'file') return null;
       // package_config 的 rootUri 可不带尾部斜杠；按目录拼接，避免把包名当文件名替换。
@@ -272,8 +278,6 @@ class WalletIsar {
 class SignedQrRequestStore {
   const SignedQrRequestStore._();
 
-  static const String _keyPrefix = 'qr.signed_request.';
-
   static Future<bool> claim({
     required String requestId,
     required int expiresAt,
@@ -284,28 +288,24 @@ class SignedQrRequestStore {
     final isar = await WalletIsar.instance.db();
     late bool claimed;
     await isar.writeTxn(() async {
-      // 一次数据库批删代替把全部记录搬到 Dart 再逐行删除；保留其他 AppKv 数据。
-      await isar.appKvEntitys
+      // 防重放集合只保存请求；在同一写事务清到期记录并占用准确请求。
+      await isar.signedRequests
           .filter()
-          .keyStartsWith(_keyPrefix)
-          .group(
-            (q) => q.intValueIsNull().or().intValueLessThan(now, include: true),
-          )
+          .expiresAtLessThan(now, include: true)
           .deleteAll();
 
-      final key = '$_keyPrefix$requestId';
-      final existing = await isar.appKvEntitys
+      final existing = await isar.signedRequests
           .filter()
-          .keyEqualTo(key)
+          .requestIdEqualTo(requestId)
           .findFirst();
       if (existing != null) {
         claimed = false;
         return;
       }
-      await isar.appKvEntitys.put(
-        AppKvEntity()
-          ..key = key
-          ..intValue = expiresAt,
+      await isar.signedRequests.put(
+        SignedRequest()
+          ..requestId = requestId
+          ..expiresAt = expiresAt,
       );
       claimed = true;
     });
@@ -316,9 +316,9 @@ class SignedQrRequestStore {
   static Future<void> release(String requestId) async {
     final isar = await WalletIsar.instance.db();
     await isar.writeTxn(() async {
-      await isar.appKvEntitys
+      await isar.signedRequests
           .filter()
-          .keyEqualTo('$_keyPrefix$requestId')
+          .requestIdEqualTo(requestId)
           .deleteFirst();
     });
   }

@@ -19,8 +19,6 @@ class Wallet {
     required this.walletIndex,
     required this.walletName,
     required this.masterId,
-    required this.createdAtMillis,
-    required this.source,
     this.sortOrder = 0,
   });
 
@@ -29,8 +27,6 @@ class Wallet {
 
   /// 主指纹 = 账户0（`//0`）的 accountId，唯一标识一套助记词。
   final String masterId;
-  final int createdAtMillis;
-  final String source;
 
   final int sortOrder;
 }
@@ -42,9 +38,7 @@ class Account {
     required this.masterId,
     required this.accountIndex,
     required this.accountId,
-    required this.ss58Address,
     required this.accountName,
-    required this.createdAtMillis,
   });
 
   final String masterId;
@@ -52,9 +46,13 @@ class Account {
 
   /// 小写 `0x` + 64 位十六进制（= 派生公钥原字节）。
   final String accountId;
-  final String ss58Address;
   final String accountName;
-  final int createdAtMillis;
+
+  /// SS58 只在展示和二维码边界由唯一账户公钥按本链前缀编码。
+  String get ss58Address => Keyring().encodeAddress(
+        WalletManager._hexToBytes(accountId),
+        ChainConstants.ss58Prefix,
+      );
 
   /// 展示用派生路径：`//index`（含账户0 = `//0`）。
   String get derivationPath => '//$accountIndex';
@@ -144,7 +142,6 @@ String walletErrorMessage(Object error) {
 /// 派生金标（冷热共享单源）：`test/wallet/derivation_golden_test.dart`，钉死
 /// `fromSeed(childMiniSecret) == <助记词>//index` 逐字节相等。
 class WalletManager {
-  static const int _ss58Prefix = ChainConstants.ss58Prefix;
   static final RegExp _accountIdPattern = RegExp(r'^0x[0-9a-f]{64}$');
   static final WalletSecureKeys _secretStore = WalletSecureKeys();
 
@@ -193,10 +190,10 @@ class WalletManager {
       length: wordCount == 24
           ? bip39m.MnemonicLength.words24
           : wordCount == 18
-          ? bip39m.MnemonicLength.words18
-          : bip39m.MnemonicLength.words12,
+              ? bip39m.MnemonicLength.words18
+              : bip39m.MnemonicLength.words12,
     ).sentence;
-    return _establishWallet(mnemonic, 'created', password: password);
+    return _establishWallet(mnemonic, password: password);
   }
 
   /// 导入钱包：校验助记词 → 派生账户0（`//0`）→ 存 master 种子 + 助记词。
@@ -206,21 +203,19 @@ class WalletManager {
   }) async {
     final trimmed = mnemonic.trim();
     // 导入仅接受产品提供的三种词数；不能只依赖页面输入限制或 BIP-39 库的可用长度。
-    final wordCount = trimmed.isEmpty
-        ? 0
-        : trimmed.split(RegExp(r'\s+')).length;
+    final wordCount =
+        trimmed.isEmpty ? 0 : trimmed.split(RegExp(r'\s+')).length;
     if (wordCount != 12 && wordCount != 18 && wordCount != 24) {
       throw Exception('助记词必须为 12、18 或 24 个单词');
     }
     if (!_isValidMnemonic(trimmed)) {
       throw Exception('助记词无效，请检查拼写和空格');
     }
-    return _establishWallet(trimmed, 'imported', password: password);
+    return _establishWallet(trimmed, password: password);
   }
 
   Future<WalletCreationResult> _establishWallet(
-    String mnemonic,
-    String source, {
+    String mnemonic, {
     String password = '',
   }) async {
     // 创建前先确认设备具备强生物识别和硬件金库；硬件私钥永不落入 Dart 层。
@@ -232,11 +227,10 @@ class WalletManager {
     try {
       // 账户0 = //0（无 bare 根）。其 accountId 即 master 指纹。
       final acct0 = _deriveAccount(seed, 0);
-      final masterId = acct0.accountId;
+      final masterId = acct0;
 
       final result = await _appendWalletAtomic(
         masterId: masterId,
-        source: source,
         primary: acct0,
       );
       try {
@@ -277,10 +271,8 @@ class WalletManager {
       throw const WalletAuthException('账户序号需在 1–$maxAccountIndex');
     }
     final isar = await WalletIsar.instance.db();
-    final wallet = await isar.walletEntitys
-        .filter()
-        .masterIdEqualTo(masterId)
-        .findFirst();
+    final wallet =
+        await isar.walletEntitys.filter().masterIdEqualTo(masterId).findFirst();
     if (wallet == null) {
       throw const WalletAuthException('未找到钱包');
     }
@@ -317,10 +309,8 @@ class WalletManager {
         entity = AccountEntity()
           ..masterId = masterId
           ..accountIndex = targetIndex
-          ..accountId = derived.accountId
-          ..ss58Address = derived.ss58Address
-          ..accountName = '账户$targetIndex'
-          ..createdAtMillis = DateTime.now().millisecondsSinceEpoch;
+          ..accountId = derived
+          ..accountName = '账户$targetIndex';
         await isar.accountEntitys.put(entity);
       });
       return _toAccount(entity);
@@ -418,10 +408,8 @@ class WalletManager {
         throw Exception('未找到账户');
       }
       masterId = acct.masterId;
-      final accountCount = await isar.accountEntitys
-          .filter()
-          .masterIdEqualTo(masterId)
-          .count();
+      final accountCount =
+          await isar.accountEntitys.filter().masterIdEqualTo(masterId).count();
       if (acct.accountIndex == 0 && accountCount > 1) {
         throw Exception('账户0是钱包锚点,请删除整个钱包');
       }
@@ -450,10 +438,8 @@ class WalletManager {
       throw Exception('钱包名称最多$maxWalletNameLength个字');
     }
     final isar = await WalletIsar.instance.db();
-    final row = await isar.walletEntitys
-        .filter()
-        .masterIdEqualTo(masterId)
-        .findFirst();
+    final row =
+        await isar.walletEntitys.filter().masterIdEqualTo(masterId).findFirst();
     if (row == null) {
       throw Exception('未找到钱包');
     }
@@ -608,8 +594,7 @@ class WalletManager {
     }
     final parts = message.split('|');
     final expiresAt = parts.length == 6 ? int.tryParse(parts[4]) : null;
-    final valid =
-        parts.length == 6 &&
+    final valid = parts.length == 6 &&
         parts[0] == QrProtocols.qrV1 &&
         parts[1] == QrKind.signResponse.code.toString() &&
         QrSigner.isValidRequestId(parts[2]) &&
@@ -675,8 +660,8 @@ class WalletManager {
 
   // ── 派生 ──
   /// 从 master mini-secret 派生账户 [index]（全部 `//index` 硬派生，无 bare 根）,
-  /// 返回该账户公钥 accountId + ss58。
-  _DerivedAccount _deriveAccount(List<int> seed, int index) {
+  /// 返回该账户公钥 accountId；SS58由展示边界即时编码。
+  String _deriveAccount(List<int> seed, int index) {
     if (index < 0) {
       throw ArgumentError.value(index, 'index', '不能为负');
     }
@@ -686,14 +671,7 @@ class WalletManager {
       final accountId = _accountIdFromBytes(
         NativeSr25519.publicKeyOf(childBytes),
       );
-      return _DerivedAccount(
-        accountId: accountId,
-        // SS58 编解码(base58 + 校验和)仍走 polkadart_keyring，非密码学。
-        ss58Address: Keyring().encodeAddress(
-          _hexToBytes(accountId),
-          _ss58Prefix,
-        ),
-      );
+      return accountId;
     } finally {
       childBytes.fillRange(0, childBytes.length, 0);
       _zeroList(childMiniSecretKey);
@@ -738,7 +716,7 @@ class WalletManager {
       if (miniSecretKey.length != 32) {
         throw const WalletAuthException('钱包 MiniSecretKey 长度异常，请重新导入钱包');
       }
-      if (_deriveAccount(miniSecretKey, 0).accountId != masterId) {
+      if (_deriveAccount(miniSecretKey, 0) != masterId) {
         throw const WalletAuthException('钱包 MiniSecretKey 归属异常，请重新导入钱包');
       }
       return miniSecretKey;
@@ -851,11 +829,9 @@ class WalletManager {
   /// 原子建钱包：同一事务分配 walletIndex、写 WalletEntity + 账户0（`//0`）。
   Future<(Wallet, Account)> _appendWalletAtomic({
     required String masterId,
-    required String source,
-    required _DerivedAccount primary,
+    required String primary,
   }) async {
     final isar = await WalletIsar.instance.db();
-    final now = DateTime.now().millisecondsSinceEpoch;
     late int walletIndex;
     late int sortOrder;
     await isar.writeTxn(() async {
@@ -866,10 +842,8 @@ class WalletManager {
       if (duplicate != null) {
         throw Exception('该钱包已存在（${duplicate.walletName}），无需重复导入');
       }
-      final wallets = await isar.walletEntitys
-          .where()
-          .sortByWalletIndex()
-          .findAll();
+      final wallets =
+          await isar.walletEntitys.where().sortByWalletIndex().findAll();
       final used = wallets.map((e) => e.walletIndex).toSet();
       walletIndex = 1;
       while (used.contains(walletIndex)) {
@@ -884,18 +858,14 @@ class WalletManager {
         ..walletIndex = walletIndex
         ..walletName = '钱包$walletIndex'
         ..masterId = masterId
-        ..createdAtMillis = now
-        ..source = source
         ..sortOrder = sortOrder;
       await isar.walletEntitys.put(wallet);
 
       final account = AccountEntity()
         ..masterId = masterId
         ..accountIndex = 0
-        ..accountId = primary.accountId
-        ..ss58Address = primary.ss58Address
-        ..accountName = '账户0'
-        ..createdAtMillis = now;
+        ..accountId = primary
+        ..accountName = '账户0';
       await isar.accountEntitys.put(account);
     });
 
@@ -904,17 +874,13 @@ class WalletManager {
         walletIndex: walletIndex,
         walletName: '钱包$walletIndex',
         masterId: masterId,
-        createdAtMillis: now,
-        source: source,
         sortOrder: sortOrder,
       ),
       Account(
         masterId: masterId,
         accountIndex: 0,
-        accountId: primary.accountId,
-        ss58Address: primary.ss58Address,
+        accountId: primary,
         accountName: '账户0',
-        createdAtMillis: now,
       ),
     );
   }
@@ -960,7 +926,7 @@ class WalletManager {
     return text;
   }
 
-  List<int> _hexToBytes(String input) {
+  static List<int> _hexToBytes(String input) {
     final text = input.startsWith('0x') ? input.substring(2) : input;
     if (text.isEmpty || text.length.isOdd) return const <int>[];
     final out = <int>[];
@@ -971,26 +937,16 @@ class WalletManager {
   }
 
   Wallet _toWallet(WalletEntity row) => Wallet(
-    walletIndex: row.walletIndex,
-    walletName: row.walletName,
-    masterId: row.masterId,
-    createdAtMillis: row.createdAtMillis,
-    source: row.source,
-    sortOrder: row.sortOrder,
-  );
+        walletIndex: row.walletIndex,
+        walletName: row.walletName,
+        masterId: row.masterId,
+        sortOrder: row.sortOrder,
+      );
 
   Account _toAccount(AccountEntity row) => Account(
-    masterId: row.masterId,
-    accountIndex: row.accountIndex,
-    accountId: row.accountId,
-    ss58Address: row.ss58Address,
-    accountName: row.accountName,
-    createdAtMillis: row.createdAtMillis,
-  );
-}
-
-class _DerivedAccount {
-  const _DerivedAccount({required this.accountId, required this.ss58Address});
-  final String accountId;
-  final String ss58Address;
+        masterId: row.masterId,
+        accountIndex: row.accountIndex,
+        accountId: row.accountId,
+        accountName: row.accountName,
+      );
 }
