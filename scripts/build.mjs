@@ -142,7 +142,8 @@ async function prepare(work,platform,env){
  }
  const iconOutput=generatePlatformIcons(project,platform);
  if(platform==='android')for(const name of readdirSync(iconOutput))copy(join(iconOutput,name),join(project,'android/app/src/main/res',name));
- await run(flutterExecutable(env),['pub','get','--enforce-lockfile'],{cwd:project,env});
+ await run(flutterExecutable(env),['pub','get','--enforce-lockfile',
+  ...(process.env.GITHUB_ACTIONS==='true'?[]:['--offline'])],{cwd:project,env});
  if(!readFileSync(join(project,'pubspec.lock')).equals(readFileSync(join(root,'pubspec.lock'))))throw Error('Pub原锁改变');
  return project;
 }
@@ -198,7 +199,9 @@ export async function buildProduct(platform,{consume}={}){
  const work=supplied?directory(supplied):task('build',platform),env=environment(work);let safe=true,complete=false;
  try{
   await prepareTools(work,platform,env);const project=await prepare(work,platform,env);await native(platform,project,work,env);
-  const version=process.env.PRODUCT_VERSION||initialVersion,number=process.env.GITHUB_RUN_NUMBER||'1',formal=process.env.GITHUB_ACTIONS==='true';
+  const version=process.env.PRODUCT_VERSION||initialVersion,formal=process.env.GITHUB_ACTIONS==='true';
+  const number=formal?process.env.GITHUB_RUN_NUMBER:
+   (/^version:\s*[^+\s]+(?:\+(\d+))?/mu.exec(readFileSync(join(root,'pubspec.yaml'),'utf8'))?.[1]||'1');
   const args=['--release','--build-name',version,'--build-number',number,'--no-pub'];const output=directory(join(work,'artifact')),title=artifactBaseName(platform,version);
   if(platform==='android'){
    if(formal&&!process.env.ANDROID_KEY_PROPERTIES)throw Error('正式Android签名输入缺失');
@@ -266,6 +269,8 @@ export async function uploadAndroid({token=process.env.PLAY_ACCESS_TOKEN,fetchIm
 // 签名、设备安装和版本回读归控制台原生安装器；本块不派发GitHub或执行商店上传。
 export async function compile(platform){
  if(process.env.GITHUB_ACTIONS==='true')throw Error('本机编译入口不接受GitHub环境');
+ // 本机只消费已准备的源码和依赖，任务与签名安装仍归控制台。
+ Object.assign(process.env,{CARGO_NET_OFFLINE:'true',GIT_ALLOW_PROTOCOL:'file',npm_config_offline:'true'});
  // 原生调用方使用最小PATH；补齐已有Rustup启动器，版本及目标继续由本产品原声明约束。
  process.env.PATH=[join(homedir(),'.cargo/bin'),process.env.PATH||'/usr/bin:/bin'].join(':');
  if(platform==='android'){
