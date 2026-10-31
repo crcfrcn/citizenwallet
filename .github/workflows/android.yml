@@ -40,17 +40,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/android.yml/runs?branch=main&event=workflow_dispatch&status=success&per_page=1" > "$RUNNER_TEMP/previous.json"
           node --input-type=module >> "$GITHUB_OUTPUT" <<'NODE'
           import {readFileSync} from 'node:fs';
           import {execFileSync} from 'node:child_process';
+          import {selectRelease} from './scripts/build.mjs';
+          const selected=await selectRelease('android',route=>JSON.parse(execFileSync('gh',['api','repos/'+process.env.GITHUB_REPOSITORY+route],{encoding:'utf8'})));
           let version=/^version:\s*([^+\s]+)/mu.exec(readFileSync('pubspec.yaml','utf8'))[1];
-          const previous=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/previous.json','utf8')).workflow_runs[0];
-          if(previous){
-            const data=JSON.parse(execFileSync('gh',['api','repos/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+previous.id+'/artifacts?per_page=100'],{encoding:'utf8'}));
-            const prefix="公民钱包·Android·v";
-            const artifact=data.artifacts.find(value=>value.name.startsWith(prefix)&&/^\d+\.\d+\.\d+$/u.test(value.name.slice(prefix.length)));
-            const parts=artifact.name.slice(prefix.length).split('.');parts[2]=String(BigInt(parts[2])+1n);version=parts.join('.');
+          if(selected){
+            const parts=selected.version.split('.');parts[2]=String(BigInt(parts[2])+1n);version=parts.join('.');
           }
           console.log('version='+version);
           NODE

@@ -4,9 +4,9 @@ import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSyn
 import {join,dirname,basename} from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {root,displayName,run,artifactBaseName,packageProduct,uploadAndroid} from '../scripts/build.mjs';
+import {root,displayName,run,artifactBaseName,packageProduct,uploadAndroid,selectRelease} from '../scripts/build.mjs';
 import {describeAction} from '../scripts/config.mjs';
-import {initialVersion,platforms,repository} from '../scripts/config.mjs';
+import {platforms,repository} from '../scripts/config.mjs';
 const platform=Object.keys(platforms)[0];
 test('配置仅声明和引用，导入不派发、不生成现场',async()=>{
  const config=await import('../scripts/config.mjs');assert.equal(config.describeConfiguration().schema,1);
@@ -238,4 +238,38 @@ test('Apple签名清单包含嵌套代码和产品明确的主程序权限',asyn
   assert.equal(appleSigning(app).at(-1).entitlements,null);
   assert.throws(()=>appleSigning(path.join(work,'missing')));
  }finally{fs.rmSync(work,{recursive:true,force:true});}
+});
+
+// 版本只取同平台成功正式Release，失败候选不推动下一版。
+test('正式版本按平台选择，失败、草稿和预发行不递增',async t=>{
+ const release=(platform,version,id,extra={})=>({id,tag_name:displayName(platform,version),draft:false,prerelease:false,published_at:'2026-10-'+id,body:'<!-- automation:'+JSON.stringify({schema:1,product_id:'citizenwallet',platform,version,run_id:id,run_attempt:1,source_sha:'a'.repeat(40)})+' -->',...extra});
+ const records=[release('ios','1.0.9',9),release('android','1.0.8',8),release('ios','1.0.7',7),release('ios','1.0.6',6,{draft:true}),release('ios','1.0.5',5,{prerelease:true})];
+ const read=async route=>route.startsWith('/releases?')?records:{status:'completed',conclusion:route.endsWith('/9')?'failure':'success',path:route.endsWith('/8')?'.github/workflows/android.yml':'.github/workflows/ios.yml',head_branch:'main',event:'workflow_dispatch',head_sha:'a'.repeat(40),run_attempt:1,run_number:42};
+ assert.deepEqual(await selectRelease('ios',read),{version:'1.0.7',buildNumber:'42'});
+ assert.deepEqual(await selectRelease('android',read),{version:'1.0.8',buildNumber:'42'});
+ const work=mkdtempSync(join(root,'target/test/version-'));t.after(()=>rmSync(work,{recursive:true,force:true}));
+ const runs=Object.fromEntries(await Promise.all([5,6,7,8,9].map(async id=>[id,await read('/actions/runs/'+id)])));
+ const fixture=join(work,'releases.json');writeFileSync(fixture,JSON.stringify({releases:records,runs}));
+ writeFileSync(join(work,'gh'),'#!'+process.execPath+'\n'+"const data=JSON.parse(require('node:fs').readFileSync(process.env.VERSION_FIXTURE));const route=process.argv[3];console.log(JSON.stringify(route.includes('/releases?')?data.releases:data.runs[route.split('/').at(-1)]));\n",{mode:0o700});
+ for(const [platform,expected]of [['ios','1.0.8'],['android','1.0.9']]){
+  const source=readFileSync(join(root,'.github/workflows',platform+'.yml'),'utf8');
+  const code=/<<'NODE'\n([\s\S]*?)\n          NODE/u.exec(source)[1];
+  const output=execFileSync(process.execPath,['--input-type=module'],{input:code,cwd:root,encoding:'utf8',env:{PATH:work+':'+dirname(process.execPath)+':/usr/bin:/bin',VERSION_FIXTURE:fixture,GITHUB_REPOSITORY:repository}});
+  assert.equal(output.trim(),'version='+expected);
+ }
+
+ assert.equal(await selectRelease('ios',async()=>[]),null);
+ await assert.rejects(selectRelease('ios',async()=>{throw Error('HTTP unavailable');}),/HTTP unavailable/);
+ await assert.rejects(selectRelease('ios',async route=>route.startsWith('/releases?')?[release('ios','1.0.7',7)]:{...(await read(route)),head_sha:'wrong'}),/成功Run不符/);
+});
+test('设置页只显示设备已安装版本，版本初值只有pubspec一处',()=>{
+ const page=readFileSync(join(root,'lib/pages/settings_page.dart'),'utf8');
+ assert.match(page,/PackageInfo\.fromPlatform\(\)/u);assert.match(page,/版本未知/u);
+ assert.doesNotMatch(page,/api\.github\.com|itunes\.apple\.com|checkUpdate|downloadUpdate/u);
+ assert.doesNotMatch(readFileSync(join(root,'scripts/config.mjs'),'utf8'),/initialVersion/u);
+ for(const platform of Object.keys(platforms)){
+  const workflow=readFileSync(join(root,'.github/workflows',platform+'.yml'),'utf8');
+  assert.match(workflow,/await selectRelease/u);assert.match(workflow,/BigInt\(parts\[2\]\)\+1n/u);
+  assert.doesNotMatch(workflow,/previous\.json|artifact\.name\.slice/u);
+ }
 });

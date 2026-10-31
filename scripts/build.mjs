@@ -6,8 +6,40 @@ import {join,dirname,resolve,relative,sep,basename} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
-import {tools,repository,platforms,initialVersion} from './config.mjs';
+import {tools,repository,platforms} from './config.mjs';
 export const root=fileURLToPath(new URL('../',import.meta.url));
+// 初始版号只来自产品pubspec；正式版本由本平台成功Release及来源Run确定。
+function initialBuild(){
+ const match=/^version:\s*([^+\s]+)(?:\+(\d+))?/mu.exec(readFileSync(join(root,'pubspec.yaml'),'utf8'));
+ return {version:match[1],buildNumber:match[2]||'1'};
+}
+async function readGitHub(route){
+ const response=await fetch('https://api.github.com/repos/'+repository+route,{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Accept:'application/vnd.github+json'}});
+ if(!response.ok)throw Error('读取公民钱包正式版本失败：'+response.status);
+ return response.json();
+}
+export async function selectRelease(platform,read=readGitHub){
+ displayName(platform,initialBuild().version);
+ const releases=[];
+ for(let page=1;;page++){
+  const rows=await read('/releases?per_page=100&page='+page);releases.push(...rows);
+  if(rows.length<100)break;
+ }
+ const prefix=productTitle+'·'+platforms[platform]+'·v';
+ for(const release of releases.filter(row=>row.draft===false&&row.prerelease===false&&row.tag_name?.startsWith(prefix))
+  .sort((a,b)=>String(b.published_at).localeCompare(String(a.published_at))||b.id-a.id)){
+  let proof;try{proof=JSON.parse(/<!-- automation:([^\n]*) -->/u.exec(release.body)?.[1]);}catch{continue;}
+  if(proof?.product_id!=='citizenwallet'||proof.platform!==platform)continue;
+  displayName(platform,proof.version);
+  if(proof.schema!==1||release.tag_name!==prefix+proof.version||!Number.isSafeInteger(proof.run_id)||proof.run_id<=0)throw Error('公民钱包正式版本记录无效');
+  const run=await read('/actions/runs/'+proof.run_id);
+  if(run.status!=='completed'||run.conclusion!=='success')continue;
+  if(run.path!=='.github/workflows/'+platform+'.yml'||run.head_branch!=='main'||run.event!=='workflow_dispatch'
+   ||run.head_sha!==proof.source_sha||run.run_attempt!==proof.run_attempt||!Number.isSafeInteger(run.run_number)||run.run_number<=0)throw Error('公民钱包正式版本与成功Run不符');
+  return {version:proof.version,buildNumber:String(run.run_number)};
+ }
+ return null;
+}
 const controller=new AbortController();
 // Apple嵌套代码及权限由本产品交付，不让安装器猜测产品结构。
 export function appleSigning(app, entitlements = null) {
@@ -34,7 +66,7 @@ function directory(path){
  for(let at=path;at!==resolve(root);at=dirname(at))if(existsSync(at)&&lstatSync(at).isSymbolicLink())throw Error('任务目录经过链接');
  mkdirSync(path,{recursive:true});if(realpathSync(path)!==path)throw Error('任务目录经过链接');return path;
 }
-function task(kind,platform){displayName(platform,initialVersion);return mkdtempSync(join(directory(join(root,'target',kind)),platform+'-'));}
+function task(kind,platform){displayName(platform,initialBuild().version);return mkdtempSync(join(directory(join(root,'target',kind)),platform+'-'));}
 function put(path,bytes){mkdirSync(dirname(path),{recursive:true});writeFileSync(path,bytes,{mode:0o600});}
 function copy(from,to){mkdirSync(dirname(to),{recursive:true});cpSync(from,to,{recursive:true,verbatimSymlinks:true});}
 function sourceView(work,names){
@@ -206,14 +238,14 @@ export async function testProduct(platform='android'){
  }catch(error){safe=!error.keepWork;throw error;}finally{if(safe)rmSync(work,{recursive:true,force:true});}
 }
 export async function buildProduct(platform,{consume}={}){
- nodeCheck();displayName(platform,process.env.PRODUCT_VERSION||initialVersion);
+ nodeCheck();const formal=process.env.GITHUB_ACTIONS==='true';
+ const selected=formal?{version:process.env.PRODUCT_VERSION,buildNumber:process.env.GITHUB_RUN_NUMBER}:await selectRelease(platform)||initialBuild();
+ displayName(platform,selected.version);
  const supplied=process.env.PRODUCT_WORK;if(supplied&&!insideTarget(supplied))throw Error('编译现场不属于本产品target');
  const work=supplied?directory(supplied):task('build',platform),env=environment(work);let safe=true,complete=false;
  try{
   await prepareTools(work,platform,env);const project=await prepare(work,platform,env);await native(platform,project,work,env);
-  const version=process.env.PRODUCT_VERSION||initialVersion,formal=process.env.GITHUB_ACTIONS==='true';
-  const number=formal?process.env.GITHUB_RUN_NUMBER:
-   (/^version:\s*[^+\s]+(?:\+(\d+))?/mu.exec(readFileSync(join(root,'pubspec.yaml'),'utf8'))?.[1]||'1');
+  const version=selected.version,number=selected.buildNumber;
   const args=['--release','--build-name',version,'--build-number',number,'--no-pub'];const output=directory(join(work,'artifact')),title=artifactBaseName(platform,version);
   if(platform==='android'){
    if(formal&&!process.env.ANDROID_KEY_PROPERTIES)throw Error('正式Android签名输入缺失');

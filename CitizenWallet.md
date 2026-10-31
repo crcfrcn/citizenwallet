@@ -273,7 +273,7 @@ Android本机安装器沿用现有APP_KEY，与公民App按同名APP_KEY共用�
 
 ## 本机编译资源与版本来源
 
-本机compile的数字构建号只读取本产品pubspec.yaml，原本没有后缀时仍为1；不消费GitHub Run编号或控制台任务号。Pub和Cargo复用本产品原锁缓存，Git仅允许本地资源。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
+iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机compile沿用本平台最新成功正式Release的产品版本和对应成功Run构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub和Cargo复用本产品原锁缓存，Git仅允许本地资源。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
 
 ## 通用本机签名交付
 

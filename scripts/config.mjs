@@ -66,7 +66,6 @@ export function describeConfiguration(){return JSON.parse(JSON.stringify(manifes
 export const repository="crcfrcn/citizenwallet";
 export const tools=Object.freeze({"node": "25.2.1", "rust": "1.97.1", "flutter": "3.47.2", "buildTools": "36.0.0", "ndk": "28.2.13676358", "gradle": "9.1.0", "agp": "9.0.1", "kotlin": "2.2.20", "cocoapods": "1.17.0"});
 export const platforms=Object.freeze({"ios": "iOS", "android": "Android"});
-export const initialVersion="1.0.0";
 
 // 本产品Workflow坐标声明。
 export const workflows=Object.freeze({"ios":"ios.yml","android":"android.yml"});
