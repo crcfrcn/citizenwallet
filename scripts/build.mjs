@@ -9,6 +9,18 @@ import {homedir} from 'node:os';
 import {tools,repository,platforms,initialVersion} from './config.mjs';
 export const root=fileURLToPath(new URL('../',import.meta.url));
 const controller=new AbortController();
+// Apple嵌套代码及权限由本产品交付，不让安装器猜测产品结构。
+export function appleSigning(app, entitlements = null) {
+ const targets=[];
+ const visit=directory=>{for(const name of readdirSync(directory).sort()){
+  const file=join(directory,name),info=lstatSync(file);
+  if(info.isSymbolicLink())continue;
+  if(info.isDirectory())visit(file);
+  if(name.endsWith('.framework')||name.endsWith('.dylib')||name.endsWith('.appex'))targets.push({path:relative(app,file).split(sep).join('/'),entitlements:null});
+ }};
+ visit(app);return [...targets,{path:'.',entitlements}];
+}
+
 export function displayName(platform,version){
  if(!Object.hasOwn(platforms,platform)||typeof version!=='string'||version.length>64||!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version))throw Error('产品平台或版本无效');
  return productTitle+'·'+platforms[platform]+'·v'+version;
@@ -285,7 +297,7 @@ export async function compile(platform){
   if(files.length!==1)throw Error('本机编译产物缺失或不唯一');
   const sdk=process.env.ANDROID_HOME,androidTools=platform==='android'?{adb:join(sdk,'platform-tools/adb'),
    apksigner:join(sdk,'build-tools',tools.buildTools,'apksigner'),apkanalyzer:join(sdk,'cmdline-tools/latest/bin/apkanalyzer')}:{};
-  process.stdout.write('TATA_COMPILE '+JSON.stringify({schema:1,product_id:'citizenwallet',platform,work,artifact:join(output,files[0]),tools:androidTools,
+  process.stdout.write('TATA_COMPILE '+JSON.stringify({schema:1,product_id:'citizenwallet',platform,work,artifact:join(output,files[0]),tools:androidTools,signing:platform==='ios'?appleSigning(join(output,files[0])):[],
    environment:platform==='android'?{JAVA_HOME:process.env.JAVA_HOME,ANDROID_HOME:sdk}:{}})+'\n');
   for await(const part of process.stdin)if(part.length)throw Error('编译消费通道只接受EOF');controller.signal.throwIfAborted();
  }});}finally{if(owned)rmSync(owned,{recursive:true,force:true});}

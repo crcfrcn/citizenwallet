@@ -219,3 +219,23 @@ test('Google上传同一验收AAB并提交后回读，缺配置或任一步失�
   assert.equal(calls.some(value=>value[1].includes('/tracks')),false);assert.deepEqual(readFileSync(join(work,'artifact',name)),bytes);
  }
 });
+
+// 只检查本产品交付，不引入控制台实现或真实签名资料。
+test('Apple签名清单包含嵌套代码和产品明确的主程序权限',async()=>{
+ const fs=await import('node:fs'),path=await import('node:path');
+ const {appleSigning}=await import('../scripts/build.mjs');
+ const parent=path.join(path.dirname(new URL(import.meta.url).pathname),'../target/test');
+ fs.mkdirSync(parent,{recursive:true});const work=fs.mkdtempSync(path.join(parent,'signing-'));
+ try{
+  const app=path.join(work,'Fixture.app'),framework=path.join(app,'Frameworks/Fixture.framework');
+  fs.mkdirSync(framework,{recursive:true});fs.writeFileSync(path.join(framework,'library.dylib'),'fixture');
+  fs.symlinkSync(framework,path.join(app,'linked'));
+  const plan=appleSigning(app,'/owned/product.entitlements');
+  assert.deepEqual(plan.at(-1),{path:'.',entitlements:'/owned/product.entitlements'});
+  assert.ok(plan.some(item=>item.path==='Frameworks/Fixture.framework'));
+  assert.ok(plan.some(item=>item.path==='Frameworks/Fixture.framework/library.dylib'));
+  assert.ok(plan.every(item=>!item.path.startsWith('linked')));
+  assert.equal(appleSigning(app).at(-1).entitlements,null);
+  assert.throws(()=>appleSigning(path.join(work,'missing')));
+ }finally{fs.rmSync(work,{recursive:true,force:true});}
+});
