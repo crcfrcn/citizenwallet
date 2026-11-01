@@ -9,7 +9,62 @@ import 'package:citizenwallet/signing/payload_decoder.dart';
 import 'package:citizenwallet/signing/role_permission_codec.dart';
 import 'package:citizenwallet/protocol/qr_protocols.dart';
 
+/// 公布合同的合成充值原文，供冷签审阅/字节一致性回归共用。
+String topupText() => [
+  'CitizenServe Topup',
+  'service_origin=https://www.crcfrcn.com',
+  'chain_genesis_hash=0x18847a5dfd263272f2e7727836fe6582f8c4463ff48609df7b96d5e4d9dd24dd',
+  'account_id=0x${'04' * 32}',
+  'package_id=pkg_10',
+  'token=USDC',
+  'network=base',
+  'asset=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+  'recv_address=0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
+  'pay_amount=10000000',
+  'coin_fen=1000000',
+  'config_hash=cf8a54c072fc7a2f2062abd69a59889164a2ae101c1dff9903ec311a8ef27130',
+  'recovery_hash=${'01' * 32}',
+  '',
+].join('\n');
+
 void main() {
+  test('充值原文完整审阅并逐项核对可信配置', () {
+    final raw = topupText(),
+        hex =
+            '0x${utf8.encode(raw).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+    final decoded = PayloadDecoder.decode(hex, expectedAction: 'topup');
+    expect(decoded!.action, 'topup');
+    expect(decoded.reviewFields['pay_amount'], '10 USDC');
+    expect(decoded.reviewFields['coin_fen'], '10000.00 公民币');
+    expect(decoded.fields['account_id'], '0x${'04' * 32}');
+  });
+  test('充值原文字段/换行/金额/收款/资产篡改均不能冷签', () {
+    final raw = topupText();
+    for (final bad in [
+      raw.replaceAll('\n', '\r\n'),
+      raw.trimRight(),
+      '${raw}extra\n',
+      raw.replaceFirst('pay_amount=10000000', 'pay_amount=10000001'),
+      raw.replaceFirst('coin_fen=1000000', 'coin_fen=1'),
+      raw.replaceFirst(
+        '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        '0x${'02' * 20}',
+      ),
+      raw.replaceFirst(
+        '0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
+        '0x${'03' * 20}',
+      ),
+      raw.replaceFirst('CitizenServe Topup', 'CitizenServe Other'),
+    ]) {
+      expect(
+        PayloadDecoder.decode(
+          '0x${utf8.encode(bad).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}',
+          expectedAction: 'topup',
+        ),
+        isNull,
+      );
+    }
+  });
   const registryActorCid = 'ZS001-FRG07-249474503-2026';
   const nrcActorCid = 'LN001-NRC0G-944805165-2026';
   String hexOf(List<int> payload) =>
@@ -216,18 +271,29 @@ void main() {
 
   group('PayloadDecoder', () {
     test('节点部署格式2审阅实际平台版本哈希并拒绝旧格式及坏字节', () {
-      List<int> nodePayload(String version, {String platform = 'arm64'}) => <int>[
-        2, ...'citizenchain'.codeUnits, 1,
-        7, ...'node-01'.codeUnits,
-        10, ...'192.0.2.10'.codeUnits,
-        utf8.encode(platform).length, ...utf8.encode(platform),
-        utf8.encode(version).length, ...utf8.encode(version),
-        ...List<int>.filled(32, 0x22),
-        ...'123456789'.codeUnits, ...u64Le(1800000000),
-        ...List<int>.filled(32, 0x33),
-      ];
+      List<int> nodePayload(String version, {String platform = 'arm64'}) =>
+          <int>[
+            2,
+            ...'citizenchain'.codeUnits,
+            1,
+            7,
+            ...'node-01'.codeUnits,
+            10,
+            ...'192.0.2.10'.codeUnits,
+            utf8.encode(platform).length,
+            ...utf8.encode(platform),
+            utf8.encode(version).length,
+            ...utf8.encode(version),
+            ...List<int>.filled(32, 0x22),
+            ...'123456789'.codeUnits,
+            ...u64Le(1800000000),
+            ...List<int>.filled(32, 0x33),
+          ];
       final payload = nodePayload('1.0.0');
-      final decoded = PayloadDecoder.decode(hexOf(payload), expectedAction:'node_deploy');
+      final decoded = PayloadDecoder.decode(
+        hexOf(payload),
+        expectedAction: 'node_deploy',
+      );
       expect(decoded?.action, 'node_deploy');
       expect(decoded?.fields['deployment_kind'], '权威节点');
       expect(decoded?.fields['node_id'], 'node-01');
@@ -240,26 +306,63 @@ void main() {
       expect(decoded?.summary, '授权部署 权威节点 node-01 到 192.0.2.10');
       expect(PayloadDecoder.decode(hexOf(payload)), isNull);
       final stake = List<int>.from(payload)..[13] = 2;
-      expect(PayloadDecoder.decode(hexOf(stake), expectedAction:'node_deploy')?.fields['deployment_kind'], '权益节点');
+      expect(
+        PayloadDecoder.decode(
+          hexOf(stake),
+          expectedAction: 'node_deploy',
+        )?.fields['deployment_kind'],
+        '权益节点',
+      );
       for (final invalid in [
-        [...payload, 0], payload.sublist(0, payload.length - 1),
+        [...payload, 0],
+        payload.sublist(0, payload.length - 1),
         List<int>.from(payload)..[0] = 1,
         List<int>.from(payload)..[1] = 'x'.codeUnitAt(0),
         List<int>.from(payload)..[13] = 3,
         List<int>.from(payload)..[15] = 45,
         List<int>.from(payload)..[31] = 0xff,
-        [...payload.sublist(0, payload.length - 32), ...List<int>.filled(32, 0)],
+        [
+          ...payload.sublist(0, payload.length - 32),
+          ...List<int>.filled(32, 0),
+        ],
       ]) {
-        expect(PayloadDecoder.decode(hexOf(invalid), expectedAction:'node_deploy'), isNull);
+        expect(
+          PayloadDecoder.decode(hexOf(invalid), expectedAction: 'node_deploy'),
+          isNull,
+        );
       }
-      for (final version in ['1.0.0', '1:2.0-1', '1.0.0-beta', '安装包版本', 'v' * 255]) {
-        expect(PayloadDecoder.decode(hexOf(nodePayload(version)), expectedAction:'node_deploy')?.fields['version'], version);
+      for (final version in [
+        '1.0.0',
+        '1:2.0-1',
+        '1.0.0-beta',
+        '安装包版本',
+        'v' * 255,
+      ]) {
+        expect(
+          PayloadDecoder.decode(
+            hexOf(nodePayload(version)),
+            expectedAction: 'node_deploy',
+          )?.fields['version'],
+          version,
+        );
       }
       for (final version in ['', '1.0\n', 'v' * 256]) {
-        expect(PayloadDecoder.decode(hexOf(nodePayload(version)), expectedAction:'node_deploy'), isNull);
+        expect(
+          PayloadDecoder.decode(
+            hexOf(nodePayload(version)),
+            expectedAction: 'node_deploy',
+          ),
+          isNull,
+        );
       }
       for (final platform in ['', 'arm 64', 'a' * 33]) {
-        expect(PayloadDecoder.decode(hexOf(nodePayload('1.0.0', platform:platform)), expectedAction:'node_deploy'), isNull);
+        expect(
+          PayloadDecoder.decode(
+            hexOf(nodePayload('1.0.0', platform: platform)),
+            expectedAction: 'node_deploy',
+          ),
+          isNull,
+        );
       }
     });
     // 发布授权必须按链端定义完整消费所有 SCALE 字段；同时覆盖 action 绑定与尾字节拒绝，
@@ -321,7 +424,8 @@ void main() {
         for (final platform in productEntry.value) {
           final payload = publishPayload(productEntry.key, platform);
           final action = productEntry.key == 'citizenserve'
-              ? 'citizenserve_cloudflare_publish' : 'publish';
+              ? 'citizenserve_cloudflare_publish'
+              : 'publish';
           final decoded = PayloadDecoder.decode(
             hexOf(payload),
             expectedAction: action,
@@ -373,7 +477,13 @@ void main() {
       final payload = publishPayload('citizenweb', 'web');
       expect(
         PayloadDecoder.decode(
-          hexOf(publishPayload('citizenserve', 'cloudflare', omitCitizenserveConfig: true)),
+          hexOf(
+            publishPayload(
+              'citizenserve',
+              'cloudflare',
+              omitCitizenserveConfig: true,
+            ),
+          ),
           expectedAction: 'citizenserve_cloudflare_publish',
         ),
         isNull,
@@ -392,14 +502,20 @@ void main() {
         ),
         isNull,
       );
-      expect(PayloadDecoder.decode(
-        hexOf(publishPayload('citizenserve', 'cloudflare')),
-        expectedAction: 'publish',
-      ), isNull);
-      expect(PayloadDecoder.decode(
-        hexOf(publishPayload('citizenweb', 'web')),
-        expectedAction: 'citizenserve_cloudflare_publish',
-      ), isNull);
+      expect(
+        PayloadDecoder.decode(
+          hexOf(publishPayload('citizenserve', 'cloudflare')),
+          expectedAction: 'publish',
+        ),
+        isNull,
+      );
+      expect(
+        PayloadDecoder.decode(
+          hexOf(publishPayload('citizenweb', 'web')),
+          expectedAction: 'citizenserve_cloudflare_publish',
+        ),
+        isNull,
+      );
       expect(
         PayloadDecoder.decode(
           hexOf(publishPayload('citizenweb', 'web', previous: '')),
@@ -3283,7 +3399,9 @@ void main() {
   // 用相同 4B 前缀(GMB||0x18 / GMB||0x19)构造的 payload。fixture 是 Rust 切片
   // 导出的副本(canonical 真源 primitives/tests/fixtures),四方逐字节锁步。
   group('二进制前缀域金标(node/citizenapp 构造 ↔ 冷钱包 decode 锁步)', () {
-    final file = File('test/signing/fixtures/binary_prefix_domain_vectors.json');
+    final file = File(
+      'test/signing/fixtures/binary_prefix_domain_vectors.json',
+    );
     if (!file.existsSync()) {
       test('二进制前缀域金标 fixture 尚未生成', () {
         markTestSkipped('缺少 fixture —— 由 Rust 切片导出');

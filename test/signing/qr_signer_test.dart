@@ -1,4 +1,7 @@
 import 'dart:convert';
+
+import 'payload_decoder_test.dart' show topupText;
+
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -47,6 +50,19 @@ void main() {
         '0x${pair.bytes().map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
   });
 
+  test('充值超过256字节仍签完整原文，与SDK raw完全一致', () {
+    final raw = Uint8List.fromList(utf8.encode(topupText()));
+    expect(raw.length, greaterThan(256));
+    final body = SignRequestBody.fromHex(
+      action: QrActions.topup,
+      signerPublicKeyHex: '0x${'04' * 32}',
+      payloadHex: '0x${_hexBytes(raw)}',
+    );
+    expect(QrSigner.signingBytesFor(body), raw);
+    final pair = Keyring.sr25519.fromSeed(Uint8List(32));
+    final signature = pair.sign(raw);
+    expect(pair.verify(QrSigner.signingBytesFor(body), signature), true);
+  });
   group('QrSigner.generateRequestId', () {
     test('生成 base64url 短 ID', () {
       final id = QrSigner.generateRequestId();
@@ -366,20 +382,50 @@ void main() {
   group('QrSigner.signingBytesFor', () {
     test('节点部署使用独立链下签名域，不与生产发布互认', () {
       // 共享协议格式2公开金标，与Rust及Swift使用相同目标、包和挑战。
-      final payload = <int>[2,...'citizenchain'.codeUnits,1,7,...'node-01'.codeUnits,
-        10,...'192.0.2.10'.codeUnits,5,...'arm64'.codeUnits,5,...'1.0.0'.codeUnits,
-        ...List<int>.filled(32,0x22),...'123456789'.codeUnits,
-        ..._u64Le(1800000000),...List<int>.filled(32,0x33)];
-      final node = SignRequestBody.fromHex(action:QrActions.nodeDeploy,
-        signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
-      final publish = SignRequestBody.fromHex(action:QrActions.publish,
-        signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
-      final citizenserve = SignRequestBody.fromHex(action:QrActions.citizenserveCloudflarePublish,
-        signerPublicKeyHex:testSignerPublicKeyHex,payloadHex:'0x${_hexBytes(payload)}');
-      expect(_hexBytes(QrSigner.signingBytesFor(node)),
-        'cfe59b95d1bf3f53eedd4afc1a89ec408d52bed8c110e4e5c0489bfa639989c1');
-      expect(QrSigner.signingBytesFor(node).toList(),isNot(QrSigner.signingBytesFor(publish).toList()));
-      expect(QrSigner.signingBytesFor(citizenserve).toList(),QrSigner.signingBytesFor(publish).toList());
+      final payload = <int>[
+        2,
+        ...'citizenchain'.codeUnits,
+        1,
+        7,
+        ...'node-01'.codeUnits,
+        10,
+        ...'192.0.2.10'.codeUnits,
+        5,
+        ...'arm64'.codeUnits,
+        5,
+        ...'1.0.0'.codeUnits,
+        ...List<int>.filled(32, 0x22),
+        ...'123456789'.codeUnits,
+        ..._u64Le(1800000000),
+        ...List<int>.filled(32, 0x33),
+      ];
+      final node = SignRequestBody.fromHex(
+        action: QrActions.nodeDeploy,
+        signerPublicKeyHex: testSignerPublicKeyHex,
+        payloadHex: '0x${_hexBytes(payload)}',
+      );
+      final publish = SignRequestBody.fromHex(
+        action: QrActions.publish,
+        signerPublicKeyHex: testSignerPublicKeyHex,
+        payloadHex: '0x${_hexBytes(payload)}',
+      );
+      final citizenserve = SignRequestBody.fromHex(
+        action: QrActions.citizenserveCloudflarePublish,
+        signerPublicKeyHex: testSignerPublicKeyHex,
+        payloadHex: '0x${_hexBytes(payload)}',
+      );
+      expect(
+        _hexBytes(QrSigner.signingBytesFor(node)),
+        'cfe59b95d1bf3f53eedd4afc1a89ec408d52bed8c110e4e5c0489bfa639989c1',
+      );
+      expect(
+        QrSigner.signingBytesFor(node).toList(),
+        isNot(QrSigner.signingBytesFor(publish).toList()),
+      );
+      expect(
+        QrSigner.signingBytesFor(citizenserve).toList(),
+        QrSigner.signingBytesFor(publish).toList(),
+      );
     });
     test('公民签名确认使用 GMB OP_SIGN_CITIZEN_IDENTITY 哈希域', () {
       final body = SignRequestBody.fromHex(

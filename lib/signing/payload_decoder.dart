@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import 'package:polkadart_keyring/polkadart_keyring.dart' show Keyring;
 
 import 'chain_constants.dart';
@@ -197,6 +199,7 @@ class PayloadDecoder {
       }
       // 该本机授权没有 pallet/call 前缀，必须由 QR_V1 已登记动作限定后再解码，
       // 防止长度恰好相同的链交易被误识别为默认账户切换。
+      if (expectedAction == 'topup') return _decodeTopup(raw);
       if (expectedAction == 'switch_default_account') {
         final defaultAccountSwitch = _decodeSwitchDefaultAccount(raw);
         if (defaultAccountSwitch != null) {
@@ -216,7 +219,10 @@ class PayloadDecoder {
         if (publish != null) return publish;
       }
       if (expectedAction == 'citizenserve_cloudflare_publish') {
-        final publish = _decodePublishAuthorization(raw, citizenserveCloudflare: true);
+        final publish = _decodePublishAuthorization(
+          raw,
+          citizenserveCloudflare: true,
+        );
         if (publish != null) return publish;
       }
       if (expectedAction == 'node_deploy') {
@@ -617,6 +623,136 @@ class PayloadDecoder {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 消费CitizenServe公开13行授权合同。离线信任快照随产品交付，不联网取配置。
+  static DecodedPayload? _decodeTopup(Uint8List raw) {
+    const keys = [
+      'service_origin',
+      'chain_genesis_hash',
+      'account_id',
+      'package_id',
+      'token',
+      'network',
+      'asset',
+      'recv_address',
+      'pay_amount',
+      'coin_fen',
+      'config_hash',
+      'recovery_hash',
+    ];
+    if (raw.length > 4096) return null;
+    final lines = utf8.decode(raw).split('\n');
+    if (lines.length != 14 ||
+        lines.first != 'CitizenServe Topup' ||
+        lines.last.isNotEmpty) {
+      return null;
+    }
+    final values = <String, String>{};
+    for (var i = 0; i < keys.length; i++) {
+      final prefix = '${keys[i]}=', line = lines[i + 1];
+      if (!line.startsWith(prefix)) return null;
+      final value = line.substring(prefix.length);
+      if (value.isEmpty || value.contains('\r')) return null;
+      values[keys[i]] = value;
+    }
+    if (values['service_origin'] != 'https://www.crcfrcn.com' ||
+        values['chain_genesis_hash'] != ChainConstants.genesisHash ||
+        !RegExp(r'^0x[0-9a-f]{64}$').hasMatch(values['account_id']!) ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(values['recovery_hash']!)) {
+      return null;
+    }
+    // 公开付款配置快照来源为CitizenServe /api/topup/config；不能把任意合约标成稳定币。
+    const rails = [
+      [
+        'USDC',
+        'ethereum',
+        '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+        '6',
+        '0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
+      ],
+      [
+        'USDC',
+        'base',
+        '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        '6',
+        '0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
+      ],
+      [
+        'USDC',
+        'solana',
+        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        '6',
+        'ES4pPjXbsK8Q47PpeCSddNsomxFqDmR9tD7p6j1Crcyi',
+      ],
+      [
+        'USDT',
+        'ethereum',
+        '0xdac17f958d2ee523a2206206994597c13d831ec7',
+        '6',
+        '0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
+      ],
+      [
+        'USDT',
+        'tron',
+        'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        '6',
+        'TB1JA2HBUmfAvRVm9TQvm7RbtkFRSmeuH3',
+      ],
+      [
+        'USDT',
+        'bnb',
+        '0x55d398326f99059ff775485246999027b3197955',
+        '18',
+        '0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
+      ],
+    ];
+    final catalog = [
+      'CitizenServe Topup Config',
+      'service_origin=${values['service_origin']}',
+      'chain_genesis_hash=${ChainConstants.genesisHash}',
+    ];
+    List<String>? selected;
+    for (final rail in rails) {
+      catalog.add('rail=${rail.join('|')}');
+      final unit = BigInt.from(10).pow(int.parse(rail[3]));
+      catalog.add('package=pkg_10|${BigInt.from(10) * unit}|1000000');
+      catalog.add('package=pkg_900|${BigInt.from(900) * unit}|100000000');
+      if (rail[0] == values['token'] && rail[1] == values['network']) {
+        selected = rail;
+      }
+    }
+    if (selected == null ||
+        selected[2] != values['asset'] ||
+        selected[4] != values['recv_address'] ||
+        values['config_hash'] !=
+            sha256.convert(utf8.encode('${catalog.join('\n')}\n')).toString()) {
+      return null;
+    }
+    final amount = switch (values['package_id']) {
+      'pkg_10' => 10,
+      'pkg_900' => 900,
+      _ => 0,
+    };
+    final coin = amount == 10 ? '1000000' : '100000000';
+    if (amount == 0 ||
+        values['pay_amount'] !=
+            (BigInt.from(amount) * BigInt.from(10).pow(int.parse(selected[3])))
+                .toString() ||
+        values['coin_fen'] != coin) {
+      return null;
+    }
+    final review = {
+      ...values,
+      'pay_amount': '$amount ${values['token']}',
+      'coin_fen': '${BigInt.parse(coin) ~/ BigInt.from(100)}.00 公民币',
+    };
+    return DecodedPayload(
+      action: 'topup',
+      summary: '支付 $amount ${values['token']}，充值到指定公民账户',
+      fields: values,
+      reviewFields: review,
+    );
   }
 
   /// 解码 CitizenApp 本机默认账户切换授权。
@@ -2410,12 +2546,15 @@ class PayloadDecoder {
     final nationwide = tierIndex == 1;
     if (nationwide
         ? province.any((byte) => byte != 0) || cityNumber != 0
-        : province.any((byte) => byte < 65 || byte > 90) || cityNumber > 999 ||
-          (tierIndex == 2 && cityNumber != 0)) {
+        : province.any((byte) => byte < 65 || byte > 90) ||
+              cityNumber > 999 ||
+              (tierIndex == 2 && cityNumber != 0)) {
       return null;
     }
-    final regionText = nationwide ? 'CN' : String.fromCharCodes(province) +
-        (tierIndex == 3 ? cityNumber.toString().padLeft(3, '0') : '');
+    final regionText = nationwide
+        ? 'CN'
+        : String.fromCharCodes(province) +
+              (tierIndex == 3 ? cityNumber.toString().padLeft(3, '0') : '');
     offset += 4;
 
     // houses
@@ -3826,7 +3965,10 @@ class PayloadDecoder {
   /// source_sha，32 字节 artifact_sha256；独立公民服务端动作码17再跟随32字节最终Wrangler配置SHA-256；
   /// 然后是previous_deployment_id字符串，
   /// expires_at:u64 LE，nonce:[u8;32]。必须消费全部字节，防止尾部夹带字段。
-  static DecodedPayload? _decodePublishAuthorization(Uint8List bytes, {bool citizenserveCloudflare = false}) {
+  static DecodedPayload? _decodePublishAuthorization(
+    Uint8List bytes, {
+    bool citizenserveCloudflare = false,
+  }) {
     var offset = 0;
     final product = _readStrictBoundedUtf8(bytes, offset, maxLength: 32);
     if (product == null || product.$1.isEmpty) return null;
@@ -3879,7 +4021,8 @@ class PayloadDecoder {
       'windows': 'Windows',
     };
     final hasCloudflareConfiguration = citizenserveCloudflare;
-    if (offset + 20 + 32 + (hasCloudflareConfiguration ? 32 : 0) > bytes.length) {
+    if (offset + 20 + 32 + (hasCloudflareConfiguration ? 32 : 0) >
+        bytes.length) {
       return null;
     }
     final sourceSha = _bytesToLowerHex(bytes.sublist(offset, offset + 20));
@@ -3916,7 +4059,9 @@ class PayloadDecoder {
       'nonce': _bytesToLowerHex(nonce),
     };
     return DecodedPayload(
-      action: citizenserveCloudflare ? 'citizenserve_cloudflare_publish' : 'publish',
+      action: citizenserveCloudflare
+          ? 'citizenserve_cloudflare_publish'
+          : 'publish',
       summary:
           '授权发布 ${productNamesZh[product.$1]} ${version.$1} 到 ${platformNames[platform.$1]}',
       fields: fields,
@@ -3928,7 +4073,9 @@ class PayloadDecoder {
   static DecodedPayload? _decodeNodeDeployAuthorization(Uint8List bytes) {
     const product = 'citizenchain';
     final productBytes = utf8.encode(product);
-    if (bytes.length < 1 + productBytes.length + 1 || bytes[0] != 2) return null;
+    if (bytes.length < 1 + productBytes.length + 1 || bytes[0] != 2) {
+      return null;
+    }
     for (var index = 0; index < productBytes.length; index++) {
       if (bytes[index + 1] != productBytes[index]) return null;
     }
@@ -3939,7 +4086,9 @@ class PayloadDecoder {
     String? readText(int maximum) {
       if (offset >= bytes.length) return null;
       final length = bytes[offset++];
-      if (length < 1 || length > maximum || offset + length > bytes.length) return null;
+      if (length < 1 || length > maximum || offset + length > bytes.length) {
+        return null;
+      }
       final part = bytes.sublist(offset, offset + length);
       offset += length;
       try {
@@ -3953,34 +4102,53 @@ class PayloadDecoder {
     final ip = readText(45);
     final platform = readText(32);
     final version = readText(255);
-    if (nodeId == null || ip == null || platform == null || version == null ||
+    if (nodeId == null ||
+        ip == null ||
+        platform == null ||
+        version == null ||
         !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$').hasMatch(nodeId) ||
         !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$').hasMatch(platform) ||
-        version.runes.any((value) => value < 32 || (value >= 127 && value <= 159)) ||
+        version.runes.any(
+          (value) => value < 32 || (value >= 127 && value <= 159),
+        ) ||
         InternetAddress.tryParse(ip)?.address != ip ||
         offset + 32 + 9 + 8 + 32 != bytes.length) {
       return null;
     }
     final artifactBytes = bytes.sublist(offset, offset + 32);
-    final artifact = _bytesToLowerHex(artifactBytes); offset += 32;
+    final artifact = _bytesToLowerHex(artifactBytes);
+    offset += 32;
     final taskBytes = bytes.sublist(offset, offset + 9);
-    final taskId = String.fromCharCodes(taskBytes); offset += 9;
-    final expiresAt = _readU64Le(bytes, offset); offset += 8;
+    final taskId = String.fromCharCodes(taskBytes);
+    offset += 9;
+    final expiresAt = _readU64Le(bytes, offset);
+    offset += 8;
     final nonceBytes = bytes.sublist(offset, offset + 32);
     final nonce = _bytesToLowerHex(nonceBytes);
     if (nonceBytes.every((value) => value == 0) ||
-        !RegExp(r'^[1-9][0-9]{8}$').hasMatch(taskId) || expiresAt <= 0) {
+        !RegExp(r'^[1-9][0-9]{8}$').hasMatch(taskId) ||
+        expiresAt <= 0) {
       return null;
     }
     final kindName = kind == 1 ? '权威节点' : '权益节点';
-    final fields = <String,String>{
-      'product_id': product, 'deployment_kind': kindName, 'node_id': nodeId,
-      'server_ip': ip, 'platform': platform, 'version': version,
-      'artifact_sha256': artifact, 'task_id': taskId,
-      'expires_at': expiresAt.toString(), 'nonce': nonce,
+    final fields = <String, String>{
+      'product_id': product,
+      'deployment_kind': kindName,
+      'node_id': nodeId,
+      'server_ip': ip,
+      'platform': platform,
+      'version': version,
+      'artifact_sha256': artifact,
+      'task_id': taskId,
+      'expires_at': expiresAt.toString(),
+      'nonce': nonce,
     };
-    return DecodedPayload(action:'node_deploy',summary:'授权部署 $kindName $nodeId 到 $ip',fields:fields,
-      reviewFields:{...fields,'product_id':'公民链'});
+    return DecodedPayload(
+      action: 'node_deploy',
+      summary: '授权部署 $kindName $nodeId 到 $ip',
+      fields: fields,
+      reviewFields: {...fields, 'product_id': '公民链'},
+    );
   }
 
   /// 32 字节账户/公钥 bytes → CitizenChain SS58 地址。

@@ -165,6 +165,16 @@ class OfflineSignService {
       expectedAction: QrActions.actionKeyForCode(body.action),
     );
 
+    if (body.action == QrActions.topup &&
+        decoded != null &&
+        decoded.fields['account_id'] != body.signerPublicKeyHex) {
+      return OfflineSignVerification(
+        decoded: decoded,
+        status: SignDecisionStatus.reject,
+        actionLabel: qrActionLabel,
+        rejectReason: '充值目标账户与签名账户不一致，已拒绝签名',
+      );
+    }
     if (decoded == null) {
       return OfflineSignVerification(
         decoded: null,

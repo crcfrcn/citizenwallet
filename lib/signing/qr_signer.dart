@@ -169,6 +169,8 @@ class QrSigner {
     Uint8List? selfAccountId,
   }) {
     final payload = body.payloadBytes;
+    // 充值使用完整业务原文，热/冷两端均不预hash，不套用链交易>256B转换。
+    if (body.action == QrActions.topup) return payload;
     if (body.action == QrActions.citizenIdentity) {
       return _gmbSigningMessage(_opSignCitizenIdentity, payload);
     }
@@ -209,7 +211,11 @@ class QrSigner {
       // 节点部署只在链下使用共享 QR 协议域，不能与发布或链交易签名互认。
       final prefix = utf8.encode('GMB\u0000TATA_NODE_DEPLOY_V1\u0000');
       final digest = Blake2bDigest(digestSize: 32)
-        ..update(Uint8List.fromList([...prefix, ...payload]), 0, prefix.length + payload.length);
+        ..update(
+          Uint8List.fromList([...prefix, ...payload]),
+          0,
+          prefix.length + payload.length,
+        );
       final result = Uint8List(32);
       digest.doFinal(result, 0);
       return result;

@@ -49,13 +49,15 @@ class QrActions {
       GeneratedQrActionRegistry.actionCodeForKey(key)!;
 
   static int get login => _code('login');
+  static int get topup => _code('topup');
   static int get citizenIdentity => _code('citizen_identity');
   static int get citizenOccupy => _code('citizen_occupy');
   static int get citizenRebind => _code('citizen_rebind');
   static int get switchDefaultAccount => _code('switch_default_account');
   static int get mlsDeviceBind => _code('mls_device_bind');
   static int get publish => _code('publish');
-  static int get citizenserveCloudflarePublish => _code('citizenserve_cloudflare_publish');
+  static int get citizenserveCloudflarePublish =>
+      _code('citizenserve_cloudflare_publish');
   static int get nodeDeploy => _code('node_deploy');
   static int get onchinaAdmin => _code('onchina_admin_action');
   static int get activateAdmin => _code('activate_admin_account');
