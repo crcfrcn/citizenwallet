@@ -280,4 +280,10 @@ iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正�
 产品编译回执TATA_COMPILE通过signing数组交付待签名目标；path为产物内相对路径，主App为“.”，entitlements为产品权限plist路径或null。Apple产品明确列出嵌套代码及主App，Android交付空数组。产品拥有清单与权限，编译及依赖、资源、验收流程不导入控制台实现。控制台按相对路径嵌套深度从内到外签名，不扫描或推定产品结构，不以产品名称选择权限；描述文件授权值及本次身份覆盖对应请求键，产品独有功能权限完整保留。签名结果及错误沿用原任务日志，最终签名与安装仍归通用安装器；独立产品入口保持可执行。
 
 ### 充值信息冷签
-充值动作topup由citizenchain/crates/protocol/registry/actions.yaml唯一登记，字段中文名归fields.yaml；生成登记表由原export_registry产出，不手改。冷钱包严格审阅CitizenServe公开13行原文，固定服务源/公民创世/可信六币轨配置及两档金额，目标账户必须与扫码指定签名账户相同。完整UTF8原文直接sr25519/substrate签名，不预hash，不借登录/转账动作，不把QR会话120秒当付款期限；签后订单ID及实际payer/付款定位不属于签前原文。充值解码与默认账户切换的格式注释各归所属函数；测试覆盖公民账户热/冷原文一致及签名失败不创建订单。未签真实资金、安装或发布。
+充值动作topup由citizenchain/crates/protocol/registry/actions.yaml唯一登记，字段中文名归fields.yaml；生成登记表由原export_registry产出，不手改。冷钱包严格审阅CitizenServe公开13行原文，固定服务源/公民创世/可信六条EVM币轨配置及两档金额，目标账户必须与扫码指定签名账户相同。完整UTF8原文直接sr25519/substrate签名，不预hash，不借登录/转账动作，不把QR会话120秒当付款期限；签后订单ID及实际payer/付款定位不属于签前原文。充值解码与默认账户切换的格式注释各归所属函数；测试覆盖公民账户热/冷原文一致及签名失败不创建订单。未签真实资金、安装或发布。
+
+### EVM充值范围收缩第1步
+当前充值冷签可信付款快照仅含USDC Ethereum/Base、USDT Ethereum/BNB六条EVM币轨，付款配置指纹按15行重算；公民账户13行完整原文、raw sr25519/substrate签名与目标账户核对保持。动作18及权威字段登记未变，不手改协议生成物。
+
+### 第2步EVM资产名单（实施中）
+用户已明确接受六条EVM币轨：USDC/USDT各Ethereum、Base、BNB；新增BNB USDC 0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d精度18、Base USDT 0xfde4c96c8593536e31f229ea8f37b2ada2699bb2精度6，其余四轨不变。付款配置指纹为固定21行，签名原文13行、confirm16字段、完整H绑定及发币时序不变；当前仅源码同步，未部署或改变线上配置值。

@@ -22,7 +22,7 @@ String topupText() => [
   'recv_address=0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
   'pay_amount=10000000',
   'coin_fen=1000000',
-  'config_hash=cf8a54c072fc7a2f2062abd69a59889164a2ae101c1dff9903ec311a8ef27130',
+  'config_hash=d5187416f8cc989084d6731d227a98547bcb826a5167232cb16f4b3b846b14b2',
   'recovery_hash=${'01' * 32}',
   '',
 ].join('\n');
@@ -37,6 +37,41 @@ void main() {
     expect(decoded.reviewFields['pay_amount'], '10 USDC');
     expect(decoded.reviewFields['coin_fen'], '10000.00 公民币');
     expect(decoded.fields['account_id'], '0x${'04' * 32}');
+  });
+  test('六条准确资产和两档套餐均可冷签审阅，新增18位与6位资产金额不混用', () {
+    const rails = [
+      ['USDC', 'ethereum', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 6],
+      ['USDC', 'base', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', 6],
+      ['USDC', 'bnb', '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', 18],
+      ['USDT', 'ethereum', '0xdac17f958d2ee523a2206206994597c13d831ec7', 6],
+      ['USDT', 'base', '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2', 6],
+      ['USDT', 'bnb', '0x55d398326f99059ff775485246999027b3197955', 18],
+    ];
+    for (final rail in rails) {
+      for (final amount in [10, 900]) {
+        final atomic =
+            BigInt.from(amount) * BigInt.from(10).pow(rail[3] as int);
+        final raw = topupText()
+            .replaceFirst('package_id=pkg_10', 'package_id=pkg_$amount')
+            .replaceFirst('token=USDC', 'token=${rail[0]}')
+            .replaceFirst('network=base', 'network=${rail[1]}')
+            .replaceFirst(
+              'asset=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+              'asset=${rail[2]}',
+            )
+            .replaceFirst('pay_amount=10000000', 'pay_amount=$atomic')
+            .replaceFirst(
+              'coin_fen=1000000',
+              'coin_fen=${amount == 10 ? 1000000 : 100000000}',
+            );
+        final decoded = PayloadDecoder.decode(
+          '0x${utf8.encode(raw).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}',
+          expectedAction: 'topup',
+        );
+        expect(decoded, isNotNull, reason: '${rail[0]}/${rail[1]}/$amount');
+        expect(decoded!.fields['pay_amount'], atomic.toString());
+      }
+    }
   });
   test('充值原文字段/换行/金额/收款/资产篡改均不能冷签', () {
     final raw = topupText();

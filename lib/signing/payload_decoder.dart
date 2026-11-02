@@ -680,10 +680,10 @@ class PayloadDecoder {
       ],
       [
         'USDC',
-        'solana',
-        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-        '6',
-        'ES4pPjXbsK8Q47PpeCSddNsomxFqDmR9tD7p6j1Crcyi',
+        'bnb',
+        '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d',
+        '18',
+        '0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
       ],
       [
         'USDT',
@@ -694,10 +694,10 @@ class PayloadDecoder {
       ],
       [
         'USDT',
-        'tron',
-        'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        'base',
+        '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2',
         '6',
-        'TB1JA2HBUmfAvRVm9TQvm7RbtkFRSmeuH3',
+        '0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
       ],
       [
         'USDT',
