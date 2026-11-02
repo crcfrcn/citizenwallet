@@ -18,8 +18,9 @@ class ChainConstants {
 
   /// 当前钱包支持的 Substrate `transaction_version`。
   ///
-  /// 按公民链版本政策，每次正式 Runtime 升级，两个版本各自在此前部署值上加1；
-  /// 本值同步为该次 Runtime 的 transaction_version，旧钱包继续严格拒签。
+  /// 2026-11-01 经正式本机节点的可信RPC读取最终确认状态：
+  /// spec_version=2、transaction_version=1；本值只同步交易版本，不修改链上Runtime。
+  /// 不支持的交易版本继续严格拒签。
   /// 钱包对 spec_version 仍只解析展示；编辑或重复编译不触发版本递增。
-  static const int transactionVersion = 0;
+  static const int transactionVersion = 1;
 }

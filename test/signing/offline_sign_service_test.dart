@@ -656,6 +656,35 @@ void main() {
       );
     });
 
+    test('正式链spec2交易版本1允许冷签，旧版0和未支持版本2仍在签名前拒绝', () {
+      // 与节点transfer_with_remark一致：4/0、20B Ethereum地址加12B EE、u128金额、备注Vec。
+      const destination =
+          '6d66a0cb155051055f3fb3cc73d9230d3fb4d5b5eeeeeeeeeeeeeeeeeeeeeeee';
+      const callData = '0x0400${destination}0100000000000000000000000000000000';
+      for (final transactionVersion in [0, 1, 2]) {
+        final request = _buildTestRequest(
+          requestId: 'offline-formal-chain-version-$transactionVersion',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: _withSigningTailHex(
+            callData,
+            specVersion: 2,
+            transactionVersion: transactionVersion,
+          ),
+          action: QrActions.transferWithRemark,
+        );
+        final verification = service.verifyPayload(request);
+        expect(verification.canSign, transactionVersion == 1);
+        if (transactionVersion == 1) {
+          expect(verification.decoded?.fields['spec_version'], '2');
+          expect(verification.decoded?.fields['transaction_version'], '1');
+          expect(verification.decoded?.action, 'transfer');
+        } else {
+          expect(verification.rejectReason, '交易格式版本不受当前钱包支持，请升级公民钱包');
+        }
+      }
+      expect(walletManager.signCallCount, 0);
+    });
+
     test('链交易严格拒绝错创世、错交易版本和裸 call data，但不锁 spec_version', () {
       const callData =
           '0x0400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0100000000000000000000000000000000';
