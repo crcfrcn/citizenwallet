@@ -717,7 +717,7 @@ class PayloadDecoder {
       catalog.add('rail=${rail.join('|')}');
       final unit = BigInt.from(10).pow(int.parse(rail[3]));
       catalog.add('package=pkg_10|${BigInt.from(10) * unit}|1000000');
-      catalog.add('package=pkg_900|${BigInt.from(900) * unit}|100000000');
+      catalog.add('package=pkg_1000|${BigInt.from(1000) * unit}|100000000');
       if (rail[0] == values['token'] && rail[1] == values['network']) {
         selected = rail;
       }
@@ -731,7 +731,7 @@ class PayloadDecoder {
     }
     final amount = switch (values['package_id']) {
       'pkg_10' => 10,
-      'pkg_900' => 900,
+      'pkg_1000' => 1000,
       _ => 0,
     };
     final coin = amount == 10 ? '1000000' : '100000000';

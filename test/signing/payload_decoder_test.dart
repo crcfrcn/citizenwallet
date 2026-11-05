@@ -22,7 +22,7 @@ String topupText() => [
   'recv_address=0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
   'pay_amount=10000000',
   'coin_fen=1000000',
-  'config_hash=d5187416f8cc989084d6731d227a98547bcb826a5167232cb16f4b3b846b14b2',
+  'config_hash=c3f1987275a32a13d09d5e8afbc105ff1615facecad77d7bcb26ee3a2f579cbc',
   'recovery_hash=${'01' * 32}',
   '',
 ].join('\n');
@@ -48,7 +48,7 @@ void main() {
       ['USDT', 'bnb', '0x55d398326f99059ff775485246999027b3197955', 18],
     ];
     for (final rail in rails) {
-      for (final amount in [10, 900]) {
+      for (final amount in [10, 1000]) {
         final atomic =
             BigInt.from(amount) * BigInt.from(10).pow(rail[3] as int);
         final raw = topupText()
@@ -70,6 +70,7 @@ void main() {
         );
         expect(decoded, isNotNull, reason: '${rail[0]}/${rail[1]}/$amount');
         expect(decoded!.fields['pay_amount'], atomic.toString());
+        expect(decoded.reviewFields['pay_amount'], '$amount ${rail[0]}');
       }
     }
   });

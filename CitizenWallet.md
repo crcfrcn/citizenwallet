@@ -282,8 +282,5 @@ iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正�
 ### 充值信息冷签
 充值动作topup由citizenchain/crates/protocol/registry/actions.yaml唯一登记，字段中文名归fields.yaml；生成登记表由原export_registry产出，不手改。冷钱包严格审阅CitizenServe公开13行原文，固定服务源/公民创世/可信六条EVM币轨配置及两档金额，目标账户必须与扫码指定签名账户相同。完整UTF8原文直接sr25519/substrate签名，不预hash，不借登录/转账动作，不把QR会话120秒当付款期限；签后订单ID及实际payer/付款定位不属于签前原文。充值解码与默认账户切换的格式注释各归所属函数；测试覆盖公民账户热/冷原文一致及签名失败不创建订单。未签真实资金、安装或发布。
 
-### EVM充值范围收缩第1步
-当前充值冷签可信付款快照仅含USDC Ethereum/Base、USDT Ethereum/BNB六条EVM币轨，付款配置指纹按15行重算；公民账户13行完整原文、raw sr25519/substrate签名与目标账户核对保持。动作18及权威字段登记未变，不手改协议生成物。
-
-### 第2步EVM资产名单（实施中）
-用户已明确接受六条EVM币轨：USDC/USDT各Ethereum、Base、BNB；新增BNB USDC 0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d精度18、Base USDT 0xfde4c96c8593536e31f229ea8f37b2ada2699bb2精度6，其余四轨不变。付款配置指纹为固定21行，签名原文13行、confirm16字段、完整H绑定及发币时序不变；当前仅源码同步，未部署或改变线上配置值。
+### 当前EVM充值资产与套餐
+可信付款快照为六条EVM币轨：USDC/USDT各Ethereum、Base、BNB；新增BNB USDC 0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d精度18、Base USDT 0xfde4c96c8593536e31f229ea8f37b2ada2699bb2精度6，其余四轨不变。两档严格限定pkg_10支付10 USDT/USDC充值10,000公民币、pkg_1000支付1000 USDT/USDC充值1,000,000公民币；6位与18位资产按各自精度校验最小单位并显示实际币种。付款配置指纹为固定21行，签名原文13行、confirm16字段、完整H绑定及发币时序保持。
