@@ -4,13 +4,9 @@
 
 ## 聊天功能的唯一产品归属
 
-**聊天客户端的逻辑功能只能在 TataChatSDK 中实现；聊天服务端的逻辑功能只能在 CitizenServe.tatachat 中实现。公民、途遇及其他产品只依赖使用。**
+聊天客户端归公民App的chat普通本地包，随App源码构建；协议唯一源为公民App的network/proto。聊天服务端归CitizenServe的chat模块。本产品不声明独立聊天客户端产品或分发路线。
 
 CitizenWallet 涉及聊天时只作为依赖使用方；本条不代表尚未接入聊天的产品已经具备聊天能力。
-
-- 消息、会话、群组、加密、协议、传输、同步、重试、聊天存储、附件、通话及聊天界面行为，按客户端与服务端职责分别归 TataChatSDK 和 CitizenServe.tatachat；新增功能、缺陷修复和平台差异也必须在所属产品内完成。
-- 消费产品只提供产品入口、身份与业务权益结果、服务地址及授权、主题和公开接口要求的平台配置；只通过公开接口接入，禁止复制、重写、包装成另一套聊天内核或维护产品专属聊天实现。CitizenServe、TuyuServe 的产品身份与权益授权不包含聊天数据面的实现职责。
-- 本机开发直接依赖仓库路径；公民、途遇等产品的正式版本依赖塔塔聊天正式 Release；第三方市场分发使用公开市场版本。依赖使用不以公开市场发布为前置条件，也不改变实现归属。
 
 钱包签名模式由实际签名路由定义；与CitizenSDK通过实际公开接口保持准确命名和闭集。
 
@@ -233,7 +229,6 @@ iOS消费现有原工程与Pod锁，使用CocoaPods官方disable_input_output_pa
 
 Flutter测试使用官方JSON reporter，Bash pipefail与tee将原始报告同时交付控制台和本轮target/test现场的flutter-report.jsonl；工具非零退出、报告解析或原有完整性断言失败均保留报告及现场供取证，不改变原断言，不自动修复业务失败。
 
-
 工具准备唯一归scripts/build.mjs，工作流只准备所属平台外部SDK并调用产品入口，不重复安装Flutter、Rust或CocoaPods，也不安装另一平台Rust目标。原生库通过官方cargo rustc --lib --crate-type按消费者选择：宿主及Android为cdylib，iOS为staticlib；Rust原单测、Flutter原测试、APK及AAB交付均保留。截图保护测试读取物化工程标准路径，业务与安全断言保留；Isar构建细节改为断言CocoaPods官方选项并拒绝旧手写输出清单。
 
 Android在官方android DSL中声明testBuildType = "release"，使AGP9仅为选定Release构建类型创建单测组件，沿用testReleaseUnitTest入口；不恢复同时创建Debug与Release单测的旧全局开关，不新增编译任务或修改业务与安全断言。本机调用通过JAVA_HOME和PATH交付现有Android Studio JBR，配置不安装Java。
@@ -242,19 +237,15 @@ iOS签名静态库的符号验收使用现有Apple nm -g --no-llvm-bc，只读�
 
 Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-global"，正式归档保留全局符号并继续裁剪非全局符号，避免默认All Symbols裁剪影响FFI验收；Debug配置、Rust实现、签名及四个导出断言不变。现有装配回归通过官方plutil解析真实物化工程，核对该声明只落在Runner Release配置；正式IPA仍执行原符号验收。
 
-
 ## 本机编译与GitHub终态清理
 
 本机只通过scripts/build.mjs compile PLATFORM编译当前源码，签名和设备安装由控制台唯一原生安装器负责；产品不实现GitHub安装包下载、最新包缓存或安装回退。
 
 scripts/build.mjs以中文注释明确标出控制台本机编译代码块，唯一入口为compile ios或compile android。本块交付已有~/.cargo/bin及Android SDK/JBR环境，复用同一buildProduct；经TATA_COMPILE和stdin EOF把本轮产物交给原生安装器消费并清场。各端工程和临时目录独立，工具与包复用本仓target/cache；删除自建整库锁、空缓存回退及无用release，沿官方工具自身并发机制处理缓存，避免双端并行时因改用空缓存重复下载Flutter。版本、原锁、正式编译及签名/商店上传流程保持。
 
-
-
 GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。
 
 创建Release使用GitHub CLI官方--target "$GITHUB_SHA"，明确将target_commitish设为本次编译提交；已有Tag仍通过--verify-tag及原Tag SHA回读独立核验。回归模拟GitHub默认目标为main，覆盖省略--target时原准确SHA断言失败并撤回候选，保留附件逐字节回读及损坏附件撤回断言。该附件修复不改业务和控制台。
-
 
 本机蓝色入口统一称塔塔安装器，唯一实现位于塔塔控制台app/source/Installer.swift。钱包scripts/build.mjs的compile PLATFORM调用同一buildProduct完成本机编译并交付本轮App/APK及原声明Android工具入口，调用方消费结束后清场；不再下载GitHub正式包或实现设备安装。GitHub流程仍称塔塔自动化，正式签名、上传和记录保留规则保持。
 
@@ -262,14 +253,12 @@ Android本机安装器沿用现有APP_KEY，与公民App按同名APP_KEY共用�
 
 节点部署冷签只接受公民链·LinuxARM·vX.Y.Z正式标签：字段按UTF-8读取且最多64字节，三段版本为无前导零的非负UInt64，完整保留中文及中点，不转换或接受旧英文别名。原产品、节点类别、目标IP、任务、摘要、期限、nonce、签名域及防重放校验保持；非法UTF-8、错误长度、截断和尾随字节仍拒绝。
 
-
 节点冷签回归同时覆盖格式2真实解码、独立签名域金标、实际签名验签与防重放，以及页面绿色批准和旧格式红色拒签。公开样例与共享协议fixtures/sign_request.json及控制台测试逐字节一致。控制台本机compile入口先调用本产品testProduct完整回归，失败不进入设备安装；所有验证仍使用本产品原依赖锁与工具声明。
 
 本产品scripts/config.mjs的describeAction仅返回repository、workflow、ref、inputs，或既有本地进程命令声明；不导入构建实现、不派发GitHub请求、不处理令牌、版本或历史。控制台使用统一数据接口直接派发并只读观察准确Run；产品GitHub业务归所属既有YAML。本次自动化Run名称使用运行编号，正式构建及产物保持版本名称。已有工具和依赖复用，缺少时才按原声明准备。
 
 本产品配置项统一为name、description、accessLevel、kind、format五个必填字段；不适用规则明确填写“不适用”。name严格使用两组大写字母和一个下划线，同名共用控制台唯一值，当前页仅汇总实际声明的使用产品。操作列固定写入/更换、查看、删除；保密查看保留生物识别。现有配置消费者随声明同步改名，官方工具/API字段保持官方名称，不新增旧名兼容或配置副本。
 描述文件使用CITIZENWALLET_PROFILE，format绑定真实iOS Bundle身份；不能将其它产品描述文件冒认成本产品已配置。
-
 
 ## 本机编译资源与版本来源
 
