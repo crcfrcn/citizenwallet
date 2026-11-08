@@ -292,7 +292,7 @@ export async function verifyAndroidInternal({token=process.env.PLAY_ACCESS_TOKEN
   const response=await fetchImpl(url,{method,redirect:'error',
    signal:AbortSignal.any([controller.signal,AbortSignal.timeout(20000)]),
    headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(method==='POST'?{body:'{}'}:{})});
-  if(!response.ok)throw Error('Google Play 内测回查 HTTP '+response.status);
+  if(!response.ok)throw Error('Google Play 内测回查 '+method+' '+new URL(url).pathname+' HTTP '+response.status);
   return response.status===204?null:response.json();
  }
  const published='RELEASE_LIFECYCLE_STATE_PUBLISHED';
