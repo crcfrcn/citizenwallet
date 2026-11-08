@@ -209,11 +209,13 @@ scripts/config.mjs仅声明产品、工具、平台、配置需求与公开入�
 
 本机与GitHub均沿原始依赖锁执行；本机仅复用已有资源，自动化按原锁准备资源；真实下载、测试、编译、签名或验收失败必须失败。官方缓存只存可再生依赖与编译状态，不含签名材料；恢复/保存故障不阻塞。每轮现场归target/test或target/build的唯一目录，缓存原子领取且不等待，取消等待本轮进程组退出后清理；无法确认退出则保留现场并明确失败。
 
-产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>，以及供Android工作流调用的upload android。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。控制台恢复只观察原Run，产品cleanup命令独立执行历史收尾。成功版本补丁加一，失败不加。商店上传或后续步骤失败时，原always收尾核对本轮Run、attempt、源码和Tag归属后撤回本轮Tag与Release并回查，保留失败Run、日志和Artifact，不占用同版本重试；不删除其他Run的候选。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
+产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>，以及供Android工作流调用的verify-internal android。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。控制台恢复只观察原Run，产品cleanup命令独立执行历史收尾。成功版本补丁加一，失败不加。商店内测交付或回查失败时，原always收尾核对本轮Run、attempt、源码和Tag归属后撤回本轮Tag与Release并回查，保留失败Run、日志和Artifact，不占用同版本重试；不删除其他Run的候选。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
 
 固定Workflow为产品·平台；Run、Job、Artifact、正式Tag、Release及附件显示标签为产品·平台·vX.Y.Z，必要文件扩展名保留。Workflow创建准确源码Tag，正式附件先逐个下载比较再确认正式Release；清理按本产品平台最新成功和非成功终态各留一条，活动任务保留，删除后回查。淘汰旧成功前必须确认新正式Release/Tag与Artifact；不按界面隐藏代替实际删除。
 
-产品测试、塔塔鹿鹿和自动化均通过控制台发起；本机塔塔安装器与GitHub塔塔自动化共用本仓唯一编译实现，分别沿用下述已确认的签名方式。钱包不设独立发布文件、命令或控制台发布按钮。iOS在同一Run的测试、编译、正式附件验收及逐字节回读成功后，沿公民App现有方式调用xcrun altool --upload-package --wait，将同一份IPA上传App Store Connect；上传失败即失败，自动化不提交审核或公开上架。上传复用控制台中已获准的公民App App Store Connect配置，通过现有保密流程交付钱包仓库的APPSTORE_KEYID、APPSTORE_ISSUERID、APPSTORE_PRIVATEKEY，不新增密钥或将值写入源码。私钥仅写本轮signing/appstore现场，上传成败均立即删除，不进入正式附件；原always签名清理和GitHub历史清理保持。IOS_KEY、CITIZENWALLET_PROFILE及导出方式不变，不为上传修改描述文件或重签。Android与公民App各自声明PLAY_SERVICEACCOUNT，按同名共用控制台唯一值；配置复用及追加归属入口已删除，GitHub名称迁移另按准确授权交付，不新增服务账号或密钥；现有服务账号仅追加钱包应用的只读查看及测试轨道权限（含草稿上传），不授予正式发布权限。由Google官方认证Action取得仅androidpublisher作用域的短期令牌，不生成凭据文件；现有scripts/build.mjs的upload android入口调用Google Play官方API，核对本轮proof、AAB字节与版本后创建edit、上传AAB、核对摘要、提交保存，再从新edit回读版本和摘要并删除回读edit，不修改轨道、不公开投放。有审核中的变更、权限、网络或回读失败均明确失败，不自动重发。任何失败先查原因、报告推荐方案，待用户确认后修复并继续。
+产品测试、塔塔鹿鹿和自动化均通过控制台发起。本机塔塔安装器与 GitHub 塔塔自动化共用本仓唯一编译实现。两端只交付内部测试，商店回查本轮构建通过才算自动化成功。
+iOS 沿用现有签名、导出方式与 App Store Connect 凭据。上传前核对钱包应用及「公民钱包」内部组，阻止其他内部组自动接收时上传。该组与公民 App 的「公民」组使用相同测试员。通过 altool 上传同一份已验收 IPA，按本轮版本和构建号查找，确认目标组内的构建可测试。私钥只写入本轮签名现场，由现有清理删除。
+Android 复用公民 App 的两人名单。使用本轮 Workflow 附件及其构建证明，从 Google Play Console 的内部轨道单独上传并推出 AAB。自动化等待该版本出现在内部轨道，并核对本轮 versionCode、PUBLISHED、completed 及 Google 回读的 SHA-256。Google 官方认证 Action 提供短期令牌。只创建和删除用于回查的临时 edit，避免提交 API 将商店后台的其他待审项一起送审。未推出、审核未通过、轨道不匹配或回查超时均不报成功。
 
 钱包平台为ios、android；宿主Rust签名库只作为真实Flutter测试输入。编译使用Flutter 3.47.2、Rust 1.97.1、Gradle 9.1.0、AGP 9.0.1、KGP 2.2.20、NDK 28.2.13676358、CocoaPods 1.17.0。Android使用官方Flutter插件加载器和当前原锁插件支持的KGP/DSL设置，不修订Flutter、Gradle或插件缓存；工程和硬件金库单测按官方布局装配到本轮source-view。图标使用macOS sips与既有原件、尺寸声明，不包含自编图片编解码器。
 
@@ -262,7 +264,7 @@ Android本机安装器沿用现有APP_KEY，与公民App按同名APP_KEY共用�
 
 ## 本机编译资源与版本来源
 
-iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机compile沿用本平台最新成功正式Release的产品版本和对应成功Run构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub和Cargo复用本产品原锁缓存，Git仅允许本地资源。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
+iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机 compile 复用已有的 gh 登录，读取本平台最新成功正式 Release 的产品版本和对应成功 Run 构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub和Cargo复用本产品原锁缓存，Git仅允许本地资源。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
 
 ## 通用本机签名交付
 

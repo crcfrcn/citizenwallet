@@ -6,6 +6,7 @@ import {join,dirname,resolve,relative,sep,basename} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
+import {setTimeout as delay} from 'node:timers/promises';
 import {tools,repository,platforms} from './config.mjs';
 export const root=fileURLToPath(new URL('../',import.meta.url));
 // 初始版号只来自产品pubspec；正式版本由本平台成功Release及来源Run确定。
@@ -14,9 +15,10 @@ function initialBuild(){
  return {version:match[1],buildNumber:match[2]||'1'};
 }
 async function readGitHub(route){
- const response=await fetch('https://api.github.com/repos/'+repository+route,{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Accept:'application/vnd.github+json'}});
- if(!response.ok)throw Error('读取公民钱包正式版本失败：'+response.status);
- return response.json();
+ const env={...process.env,PATH:[process.env.PATH,'/opt/homebrew/bin','/usr/local/bin'].filter(Boolean).join(':'),
+  GH_HOST:'github.com',GH_PROMPT_DISABLED:'1',GH_NO_UPDATE_NOTIFIER:'1',GH_DEBUG:''};
+ return JSON.parse(childProcess.execFileSync('gh',['api','repos/'+repository+route],
+  {env,encoding:'utf8',timeout:30000,maxBuffer:16*1024*1024}));
 }
 export async function selectRelease(platform,read=readGitHub){
  displayName(platform,initialBuild().version);
@@ -274,38 +276,49 @@ export async function packageProduct(platform){
  put(join(output,title+'.sha256'),readdirSync(output).sort().map(name=>sha(readFileSync(join(output,name)))+'  '+name).join('\n')+'\n');put(join(work,'proof.json'),JSON.stringify(proof));
  return {output};
 }
-// Google官方认证Action提供短期访问令牌；这里只上传本轮已验收AAB，不改变发布轨道。
-export async function uploadAndroid({token=process.env.PLAY_ACCESS_TOKEN,fetchImpl=fetch,work=process.env.PRODUCT_WORK,version=process.env.PRODUCT_VERSION,number=process.env.GITHUB_RUN_NUMBER,runID=process.env.GITHUB_RUN_ID,sourceSha=process.env.GITHUB_SHA}={}){
+// 从 Play Console 单独推出内测后回查。自动化不提交 edit，以免夹带后台待审项。
+export async function verifyAndroidInternal({token=process.env.PLAY_ACCESS_TOKEN,fetchImpl=fetch,
+ pause=()=>delay(10000,undefined,{signal:controller.signal}),work=process.env.PRODUCT_WORK,version=process.env.PRODUCT_VERSION,
+ number=process.env.GITHUB_RUN_NUMBER,runID=process.env.GITHUB_RUN_ID,sourceSha=process.env.GITHUB_SHA}={}){
  displayName('android',version);
  if(!insideTarget(work)||!token||!/^\d+$/u.test(number||'')||!/^\d+$/u.test(runID||'')||!/^([a-f0-9]{40})$/u.test(sourceSha||''))throw Error('Google上传输入缺失或无效');
  const name=artifactBaseName('android',version)+'.aab',path=join(work,'artifact',name),info=lstatSync(path);
  if(!info.isFile()||info.isSymbolicLink()||info.size<1)throw Error('Google上传AAB无效');
  const bytes=readFileSync(path),digest=sha(bytes),proof=JSON.parse(readFileSync(join(work,'proof.json'))),asset=proof.assets?.find(value=>value.name===name);
  if(proof.product_id!=='citizenwallet'||proof.platform!=='android'||proof.version!==version||String(proof.run_id)!==runID||proof.source_sha!==sourceSha||asset?.sha256!==digest||asset.size!==bytes.length)throw Error('Google上传AAB与本轮验收不一致');
- const base='https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.crcfrcn.citizenwallet/edits';
- async function request(method,url,body,media=false){
-  let response;try{response=await fetchImpl(url,{method,redirect:'error',signal:AbortSignal.any([controller.signal,AbortSignal.timeout(120000)]),headers:{Authorization:'Bearer '+token,'Content-Type':media?'application/octet-stream':'application/json'},...(body===undefined?{}:{body:media?body:JSON.stringify(body)})});}catch{throw Error('Google上传网络请求未确认，禁止自动重发');}
-  if(!response.ok)throw Error('Google上传HTTP '+response.status);
+ const app='https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.crcfrcn.citizenwallet';
+ const base=app+'/edits';
+ async function request(method,url){
+  const response=await fetchImpl(url,{method,redirect:'error',
+   signal:AbortSignal.any([controller.signal,AbortSignal.timeout(20000)]),
+   headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(method==='POST'?{body:'{}'}:{})});
+  if(!response.ok)throw Error('Google Play 内测回查 HTTP '+response.status);
   return response.status===204?null:response.json();
  }
- const edit=await request('POST',base,{});
- if(typeof edit.id!=='string'||!/^\d+$/u.test(edit.id))throw Error('Google编辑编号无效');
- let committed=false;
- try{
-  const bundle=await request('POST','https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/com.crcfrcn.citizenwallet/edits/'+edit.id+'/bundles?uploadType=media',bytes,true);
-  if(String(bundle.versionCode)!==number||bundle.sha256!==digest)throw Error('Google上传AAB版本或摘要回读不符');
-  // 只保存上传，不指定轨道或提交面向用户的发行；有审核中的变更则明确失败。
-  const result=await request('POST',base+'/'+edit.id+':commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW');
-  if(result.id!==edit.id)throw Error('Google上传保存回执不符');
-  committed=true;
- }finally{if(!committed)await request('DELETE',base+'/'+edit.id);}
- const readback=await request('POST',base,{});
+ const published='RELEASE_LIFECYCLE_STATE_PUBLISHED';
+ let state;
+ for(let attempt=0;attempt<120;attempt++){
+  if(attempt)await pause();
+  const current=await request('GET',app+'/tracks/internal/releases');
+  const matches=current.releases?.filter(row=>row.track==='internal'&&
+   row.activeArtifacts?.some(item=>String(item.versionCode)===number))??[];
+  if(matches.length>1)throw Error('Google Play 本轮内部发布记录不唯一');
+  state=matches[0]?.releaseLifecycleState;
+  if(state===published)break;
+  if(state==='RELEASE_LIFECYCLE_STATE_NOT_APPROVED')throw Error('Google Play 拒绝本轮内部发布');
+ }
+ if(state!==published)throw Error('Google Play 本轮内测回查超时：'+(state??'尚未推出'));
+ const readback=await request('POST',base);
  if(typeof readback.id!=='string'||!/^\d+$/u.test(readback.id))throw Error('Google回读编辑编号无效');
  try{
-  const result=await request('GET',base+'/'+readback.id+'/bundles'),matches=result.bundles?.filter(value=>String(value.versionCode)===number);
+  const url=base+'/'+readback.id;
+  const track=await request('GET',url+'/tracks/internal');
+  if(track.track!=='internal'||!track.releases?.some(row=>row.status==='completed'&&row.versionCodes?.some(code=>String(code)===number)))
+   throw Error('Google Play 本轮内部轨道未完成推出');
+  const result=await request('GET',url+'/bundles'),matches=result.bundles?.filter(value=>String(value.versionCode)===number);
   if(matches?.length!==1||matches[0].sha256!==digest)throw Error('Google已保存AAB回读不符');
  }finally{await request('DELETE',base+'/'+readback.id);}
- return {uploaded:true,platform:'android',version,buildNumber:number};
+ return {verified:true,platform:'android',version,buildNumber:number};
 }
 // ===== 控制台本机编译：node scripts/build.mjs compile ios|android =====
 // 本块只交付现有本机工具的环境，并复用上方唯一buildProduct执行官方编译，不复制编译流程。
@@ -339,7 +352,7 @@ export async function compile(platform){
 async function main(){
  const [command,platform='android',...extra]=process.argv.slice(2);if(extra.length)throw Error('参数过多');
  if(command==='compile')return compile(platform);
- if(command==='upload'&&platform==='android')return uploadAndroid();
+ if(command==='verify-internal'&&platform==='android')return verifyAndroidInternal();
  if(command==='test')return testProduct(platform);if(command==='build')return buildProduct(platform);if(command==='package')return packageProduct(platform);
  throw Error('未知产品命令');
 }
