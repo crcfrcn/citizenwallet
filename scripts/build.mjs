@@ -295,30 +295,22 @@ export async function verifyAndroidInternal({token=process.env.PLAY_ACCESS_TOKEN
   if(!response.ok)throw Error('Google Play 内测回查 '+method+' '+new URL(url).pathname+' HTTP '+response.status);
   return response.status===204?null:response.json();
  }
- const published='RELEASE_LIFECYCLE_STATE_PUBLISHED';
- let state;
  for(let attempt=0;attempt<120;attempt++){
   if(attempt)await pause();
-  const current=await request('GET',app+'/tracks/internal/releases');
-  const matches=current.releases?.filter(row=>row.track==='internal'&&
-   row.activeArtifacts?.some(item=>String(item.versionCode)===number))??[];
-  if(matches.length>1)throw Error('Google Play 本轮内部发布记录不唯一');
-  state=matches[0]?.releaseLifecycleState;
-  if(state===published)break;
-  if(state==='RELEASE_LIFECYCLE_STATE_NOT_APPROVED')throw Error('Google Play 拒绝本轮内部发布');
- }
- if(state!==published)throw Error('Google Play 本轮内测回查超时：'+(state??'尚未推出'));
- const readback=await request('POST',base);
- if(typeof readback.id!=='string'||!/^\d+$/u.test(readback.id))throw Error('Google回读编辑编号无效');
- try{
+  const readback=await request('POST',base);
+  if(typeof readback.id!=='string'||!/^\d+$/u.test(readback.id))throw Error('Google回读编辑编号无效');
   const url=base+'/'+readback.id;
-  const track=await request('GET',url+'/tracks/internal');
-  if(track.track!=='internal'||!track.releases?.some(row=>row.status==='completed'&&row.versionCodes?.some(code=>String(code)===number)))
-   throw Error('Google Play 本轮内部轨道未完成推出');
-  const result=await request('GET',url+'/bundles'),matches=result.bundles?.filter(value=>String(value.versionCode)===number);
-  if(matches?.length!==1||matches[0].sha256!==digest)throw Error('Google已保存AAB回读不符');
- }finally{await request('DELETE',base+'/'+readback.id);}
- return {verified:true,platform:'android',version,buildNumber:number};
+  try{
+   // 新 edit 是已部署状态的快照，只读取后丢弃。
+   const track=await request('GET',url+'/tracks/internal');
+   if(track.track!=='internal')throw Error('Google Play 返回的轨道不是内部轨道');
+   if(!track.releases?.some(row=>row.status==='completed'&&row.versionCodes?.some(code=>String(code)===number)))continue;
+   const result=await request('GET',url+'/bundles'),matches=result.bundles?.filter(value=>String(value.versionCode)===number);
+   if(matches?.length!==1||matches[0].sha256!==digest)throw Error('Google已保存AAB回读不符');
+   return {verified:true,platform:'android',version,buildNumber:number};
+  }finally{await request('DELETE',url);}
+ }
+ throw Error('Google Play 本轮内测回查超时：尚未推出');
 }
 // ===== 控制台本机编译：node scripts/build.mjs compile ios|android =====
 // 本块只交付现有本机工具的环境，并复用上方唯一buildProduct执行官方编译，不复制编译流程。

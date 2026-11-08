@@ -234,16 +234,16 @@ test('Google Play 只接受本轮已推出的内部构建并核对摘要',async 
    assert.equal(options.redirect,'error');assert.equal(options.headers.Authorization,'Bearer synthetic-token');
    const route=endpoint.pathname.slice(prefix.length);assert.equal(endpoint.pathname,prefix+route);
    calls.push(options.method+' '+route);
-   if(options.method==='GET'&&route==='/tracks/internal/releases'){
+   if(options.method==='POST'&&route==='/edits'){
+    assert.equal(options.body,'{}');
     if(failure==='http')return new Response(null,{status:403});
     if(failure==='network')throw Error('synthetic network failure');
-    const state={draft:'DRAFT',review:'IN_REVIEW'}[failure]??'PUBLISHED';
-    return Response.json({releases:[{track:failure==='wrongTrack'?'production':'internal',
-     activeArtifacts:[{versionCode:failure==='old'?41:42}],releaseLifecycleState:'RELEASE_LIFECYCLE_STATE_'+state}]});
+    return Response.json({id:'1'});
    }
-   if(options.method==='POST'&&route==='/edits'){assert.equal(options.body,'{}');return Response.json({id:'1'});}
-   if(options.method==='GET'&&route==='/edits/1/tracks/internal')return Response.json({track:'internal',
-    releases:[{status:failure==='halted'?'halted':'completed',versionCodes:['42']}]});
+   if(options.method==='GET'&&route==='/edits/1/tracks/internal')return Response.json({
+    track:failure==='wrongTrack'?'production':'internal',
+    releases:failure==='review'?[]:[{status:['draft','halted'].includes(failure)?failure:'completed',
+     versionCodes:[failure==='old'?'41':'42']}]});
    if(options.method==='GET'&&route==='/edits/1/bundles')return Response.json({bundles:[
     {versionCode:42,sha256:failure==='digest'?'0'.repeat(64):digest}]});
    if(options.method==='DELETE'&&route==='/edits/1')return new Response(null,{status:failure==='cleanup'?503:204});
@@ -253,12 +253,10 @@ test('Google Play 只接受本轮已推出的内部构建并核对摘要',async 
    work,version,number:'42',runID:'12',sourceSha:'a'.repeat(40)});
   if(failure)await assert.rejects(invoke);else assert.deepEqual(await invoke(),{verified:true,platform:'android',version,buildNumber:'42'});
   if(['token','proof'].includes(failure))assert.equal(calls.length,0);
-  else if(['old','wrongTrack','draft','review','http','network'].includes(failure)){
-   assert.ok(calls.length);assert.deepEqual([...new Set(calls)],['GET /tracks/internal/releases']);
-  }else{
-   assert.deepEqual(calls,['GET /tracks/internal/releases','POST /edits','GET /edits/1/tracks/internal',
-    ...(failure==='halted'?[]:['GET /edits/1/bundles']),'DELETE /edits/1']);
-  }
+  else if(['http','network'].includes(failure))assert.deepEqual(calls,['POST /edits']);
+  else if(['old','draft','review','halted','wrongTrack'].includes(failure))assert.deepEqual(
+   calls,Array.from({length:failure==='wrongTrack'?1:120},()=>['POST /edits','GET /edits/1/tracks/internal','DELETE /edits/1']).flat());
+  else assert.deepEqual(calls,['POST /edits','GET /edits/1/tracks/internal','GET /edits/1/bundles','DELETE /edits/1']);
   assert.deepEqual(readFileSync(join(work,'artifact',name)),bytes);
  }
 });
