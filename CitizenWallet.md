@@ -223,7 +223,7 @@ iOS消费现有原工程与Pod锁，使用CocoaPods官方disable_input_output_pa
 
 签名材料只在获准步骤临时使用，Apple钥匙串搜索列表按原值恢复，本轮profile与临时钥匙串随后删除。test/build.test.mjs覆盖构建规则和失败边界，signing原生测试、现有全部Dart测试及Android硬件金库单测仍由真实官方工具执行。现有XCUITest保留；未执行的真机UI或实际设备安装不得记为通过。
 
-官方工具缺件时由产品入口在本仓target/cache内准备：Flutter官方归档、rustup准确工具链和CocoaPods准确版本；Cargo/Pub/Gradle/Gem用户缓存均交付本产品现场或缓存路径。控制台只交付普通工具路径和获准输入。删除历史资产先移除已验真Tag，再移除其Release，失败重试仍保留归属回执；相关中断回归归test/build.test.mjs。
+本机编译先检查已安装的 Flutter、Rust 工具链与目标、CocoaPods 或 Android SDK、NDK、JDK 和 Gradle。显式路径、系统和用户安装位置、版本管理器及本机已有产品资源均可作为候选，匹配声明和原锁才直接复用。确实缺件时报告检查位置、发现的版本和缺件，本次具体下载授权后才可按原声明补齐。GitHub Runner 仍由产品入口按声明准备 Flutter、Rust 和 CocoaPods。控制台只交付普通工具路径和获准输入。删除历史资产先移除已验真Tag，再移除其Release，失败重试仍保留归属回执；相关中断回归归test/build.test.mjs。
 
 载荷解码只对三处多行if补齐花括号，原条件、return null及后续业务表达式保持，既有断言不变，严格分析规则不关闭。
 
@@ -243,7 +243,7 @@ Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-gl
 
 本机只通过scripts/build.mjs compile PLATFORM编译当前源码，签名和设备安装由控制台唯一原生安装器负责；产品不实现GitHub安装包下载、最新包缓存或安装回退。
 
-scripts/build.mjs以中文注释明确标出控制台本机编译代码块，唯一入口为compile ios或compile android。本块交付已有~/.cargo/bin及Android SDK/JBR环境，复用同一buildProduct；经TATA_COMPILE和stdin EOF把本轮产物交给原生安装器消费并清场。各端工程和临时目录独立，工具与包复用本仓target/cache；删除自建整库锁、空缓存回退及无用release，沿官方工具自身并发机制处理缓存，避免双端并行时因改用空缓存重复下载Flutter。版本、原锁、正式编译及签名/商店上传流程保持。
+scripts/build.mjs以中文注释明确标出控制台本机编译代码块，唯一入口为compile ios或compile android。回归与编译共用一次本机工具检查结果，调用同一 buildProduct。工具和依赖复用本机已有安装与原锁缓存，工程和临时目录归本轮独占。编译子进程只允许本机回环通信，缺件不会由 Flutter、Gradle 或其他子工具联网补齐。标准输出实时报告工具检查、复用路径、依赖准备、回归、编译及产物交付，长步骤每十五秒报告耗时。安装器通过独立 TATA_COMPILE 回执消费产物，stdin EOF 后清理本轮现场。版本、原锁、正式编译及签名/商店上传流程保持。
 
 GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。
 
@@ -264,7 +264,7 @@ Android本机安装器沿用现有APP_KEY，与公民App按同名APP_KEY共用�
 
 ## 本机编译资源与版本来源
 
-iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机 compile 复用已有的 gh 登录，读取本平台最新成功正式 Release 的产品版本和对应成功 Run 构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub和Cargo复用本产品原锁缓存，Git仅允许本地资源。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
+iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机 compile 复用已有的 gh 登录，读取本平台最新成功正式 Release 的产品版本和对应成功 Run 构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub 和 Cargo 使用本机已有依赖并按产品原锁离线校验，Git 仅使用本地资源。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
 
 ## 通用本机签名交付
 

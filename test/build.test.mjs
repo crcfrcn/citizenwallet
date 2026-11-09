@@ -4,9 +4,9 @@ import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSyn
 import {join,dirname,basename} from 'node:path';
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {root,displayName,run,artifactBaseName,packageProduct,verifyAndroidInternal,selectRelease} from '../scripts/build.mjs';
+import {root,displayName,run,artifactBaseName,packageProduct,verifyAndroidInternal,selectRelease,localTools,progress} from '../scripts/build.mjs';
 import {describeAction} from '../scripts/config.mjs';
-import {platforms,repository} from '../scripts/config.mjs';
+import {platforms,repository,tools} from '../scripts/config.mjs';
 const platform=Object.keys(platforms)[0];
 test('配置仅声明和引用，导入不派发、不生成现场',async()=>{
  const config=await import('../scripts/config.mjs');assert.equal(config.describeConfiguration().schema,1);
@@ -17,6 +17,61 @@ test('准确名称和版本边界',()=>{
  assert.match(displayName(platform,'1.2.3'),/·v1\.2\.3$/u);
  for(const version of ['1.2','01.2.3','1.2.3\n','1.2.3-beta',null])assert.throws(()=>displayName(platform,version));
  assert.throws(()=>displayName('other','1.2.3'));
+});
+
+test('钱包缓存为空时复用本机工具，并拒绝缺少Rust目标的现场',async t=>{
+ const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});
+ const home=mkdtempSync(join(parent,'local-tools-'));
+ t.after(()=>rmSync(home,{recursive:true,force:true}));
+ const write=(path,body='',mode=0o600)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,body,{mode});};
+ const executable=(path,body='exit 0')=>write(path,'#!/bin/sh\n'+body+'\n',0o700);
+ const source=join(home,'wallet'),flutter=join(home,'neighbor/target/cache/flutter'),wrong=join(home,'flutter');
+ for(const [path,version] of [[flutter,tools.flutter],[wrong,'0.0.0']]){
+  executable(join(path,'bin/flutter'));
+  const cache=join(path,'bin/cache');
+  write(join(cache,'flutter.version.json'),JSON.stringify({frameworkVersion:version}));
+  executable(join(cache,'dart-sdk/bin/dart'));
+  for(const file of ['flutter_tools.snapshot','android-sdk.stamp','macos-sdk.stamp','artifacts/gradle_wrapper/gradlew',
+   'artifacts/gradle_wrapper/gradlew.bat','artifacts/gradle_wrapper/gradle/wrapper/gradle-wrapper.jar'])write(join(cache,file));
+ }
+ const rust=join(home,'.rustup'),host=process.arch==='arm64'?'aarch64-apple-darwin':'x86_64-apple-darwin';
+ const toolchain=join(rust,'toolchains',tools.rust+'-'+host);
+ executable(join(toolchain,'bin/cargo'));
+ executable(join(toolchain,'bin/rustc'),"printf 'rustc "+tools.rust+"\\n'");
+ const lib=join(toolchain,'lib/rustlib/aarch64-linux-android/lib/libstd-fixture.rlib');write(lib);
+ const sdk=join(home,'Library/Android/sdk'),ndk=join(sdk,'ndk',tools.ndk);
+ for(const file of ['platform-tools/adb','build-tools/'+tools.buildTools+'/apksigner','cmdline-tools/latest/bin/apkanalyzer',
+  'ndk/'+tools.ndk+'/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang'])executable(join(sdk,file));
+ write(join(sdk,'platforms/android-'+tools.buildTools.split('.')[0],'android.jar'));
+ write(join(ndk,'source.properties'),'Pkg.Revision = '+tools.ndk);
+ const java=join(home,'jdk');executable(join(java,'bin/java'));
+ const gradle=join(home,'.gradle'),distribution='gradle-'+tools.gradle+'-bin',wrapper=join(gradle,'wrapper/dists',distribution,'fixture');
+ write(join(wrapper,distribution+'.zip.ok'));executable(join(wrapper,'gradle-'+tools.gradle,'bin/gradle'));
+ const marker=join(home,'unexpected-download');
+ for(const command of ['curl','rustup','gem'])executable(join(home,'bin',command),'touch '+JSON.stringify(marker));
+ const logs=[],options={source,home,input:{FLUTTER_ROOT:wrong,JAVA_HOME:java,PATH:join(home,'bin')},report:line=>logs.push(line)};
+ const env=await localTools('android',options);
+ assert.equal(env.FLUTTER_ROOT,flutter);
+ assert.equal(env.RUSTUP_HOME,rust);
+ assert.equal(env.ANDROID_HOME,sdk);
+ assert.equal(env.ANDROID_NDK_HOME,ndk);
+ assert.equal(env.GRADLE_USER_HOME,gradle);
+ assert.ok(logs.some(line=>line.includes(flutter)));
+ assert.equal(existsSync(join(source,'target/cache')),false);
+ rmSync(lib);
+ await assert.rejects(localTools('android',options),/缺 aarch64-linux-android/u);
+ assert.equal(existsSync(marker),false);
+});
+
+test('阶段开始实时输出，失败日志保留原错误',async()=>{
+ const logs=[],error=Error('编译退出');
+ let fail;
+ const operation=new Promise((_,reject)=>{fail=reject;});
+ const running=progress('编译 APK',()=>operation,line=>logs.push(line));
+ assert.match(logs[0],/编译 APK 开始\n$/u);
+ fail(error);
+ await assert.rejects(running,actual=>actual===error);
+ assert.match(logs[1],/编译 APK 失败 \d+秒\n$/u);
 });
 
 test('真实子进程非零退出和取消均失败',async()=>{
