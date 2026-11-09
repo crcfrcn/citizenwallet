@@ -207,7 +207,7 @@ transaction_version属于框架原生RuntimeVersion，不是新增公民链字�
 
 scripts/config.mjs仅声明产品、工具、平台、配置需求与公开入口引用；不计算版本、不访问GitHub、不启动进程、不生成文件。scripts/build.mjs拥有本产品入口，独立CLI与控制台调用同一实现；导入不执行命令。控制台不拥有产品依赖或流程，不导入其私有宿主模块。
 
-本机与GitHub均沿原始依赖锁执行；本机仅复用已有资源，自动化按原锁准备资源；真实下载、测试、编译、签名或验收失败必须失败。官方缓存只存可再生依赖与编译状态，不含签名材料；恢复/保存故障不阻塞。每轮现场归target/test或target/build的唯一目录，缓存原子领取且不等待，取消等待本轮进程组退出后清理；无法确认退出则保留现场并明确失败。
+本机与GitHub均沿原始依赖锁执行；本机优先复用已有资源，包管理器按原锁补齐缺失依赖，自动化按原锁准备资源；真实下载、测试、编译、签名或验收失败必须失败。官方缓存只存可再生依赖与编译状态，不含签名材料；恢复/保存故障不阻塞。每轮现场归target/test或target/build的唯一目录，缓存原子领取且不等待，取消等待本轮进程组退出后清理；无法确认退出则保留现场并明确失败。
 
 产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>，以及供Android工作流调用的verify-internal android。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。控制台恢复只观察原Run，产品cleanup命令独立执行历史收尾。成功版本补丁加一，失败不加。商店内测交付或回查失败时，原always收尾核对本轮Run、attempt、源码和Tag归属后撤回本轮Tag与Release并回查，保留失败Run、日志和Artifact，不占用同版本重试；不删除其他Run的候选。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
 
@@ -243,7 +243,7 @@ Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-gl
 
 本机只通过scripts/build.mjs compile PLATFORM编译当前源码，签名和设备安装由控制台唯一原生安装器负责；产品不实现GitHub安装包下载、最新包缓存或安装回退。
 
-scripts/build.mjs以中文注释明确标出控制台本机编译代码块，唯一入口为compile ios或compile android。回归与编译共用一次本机工具检查结果，调用同一 buildProduct。工具和依赖复用本机已有安装与原锁缓存，工程和临时目录归本轮独占。编译子进程只允许本机回环通信，缺件不会由 Flutter、Gradle 或其他子工具联网补齐。标准输出实时报告工具检查、复用路径、依赖准备、回归、编译及产物交付，长步骤每十五秒报告耗时。安装器通过独立 TATA_COMPILE 回执消费产物，stdin EOF 后清理本轮现场。版本、原锁、正式编译及签名/商店上传流程保持。
+scripts/build.mjs以中文注释明确标出控制台本机编译代码块，唯一入口为compile ios或compile android。回归与编译共用一次本机工具检查结果，调用同一 buildProduct。工具和依赖复用本机已有安装与原锁缓存，工程和临时目录归本轮独占。依赖准备允许联网。Pub 执行带原锁校验的 get，Cargo 使用 locked，Gradle 沿用产品声明。标准输出实时报告工具检查、复用路径、依赖准备、回归、编译及产物交付，长步骤每十五秒报告耗时。安装器通过独立 TATA_COMPILE 回执消费产物，stdin EOF 后清理本轮现场。版本、原锁、正式编译及签名/商店上传流程保持。
 
 GitHub正式附件文件名唯一采用citizenwallet-ios-vX.Y.Z.ipa及citizenwallet-android-vX.Y.Z.apk/aab，清单和摘要使用同一ASCII基名。中文产品·平台·vX.Y.Z及扩展名由GitHub官方file#label提供显示；Run、Job、Artifact、Tag与Release显示名保持原合同。编译输出、打包证明、验收与逐字节下载回读共同消费artifactBaseName，不假设GitHub保留特殊字符文件名。原cmp、安全、签名与符号断言全部保留。安装仍读取GitHub真实附件名称，IPA/APK直接保存在/Users/rhett/citizenwallet/target/，无新增子目录、框架或发布实现。
 
@@ -264,7 +264,7 @@ Android本机安装器沿用现有APP_KEY，与公民App按同名APP_KEY共用�
 
 ## 本机编译资源与版本来源
 
-iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机 compile 复用已有的 gh 登录，读取本平台最新成功正式 Release 的产品版本和对应成功 Run 构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub 和 Cargo 使用本机已有依赖并按产品原锁离线校验，Git 仅使用本地资源。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
+iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机 compile 复用已有的 gh 登录，读取本平台最新成功正式 Release 的产品版本和对应成功 Run 构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub 和 Cargo 优先使用本机依赖，缺件按产品原锁获取并校验。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
 
 ## 通用本机签名交付
 

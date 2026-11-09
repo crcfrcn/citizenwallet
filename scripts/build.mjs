@@ -43,7 +43,6 @@ export async function selectRelease(platform,read=readGitHub){
  return null;
 }
 const controller=new AbortController();
-const localOnly=Symbol('本机离线构建');
 // Apple嵌套代码及权限由本产品交付，不让安装器猜测产品结构。
 export function appleSigning(app, entitlements = null) {
  const targets=[];
@@ -80,12 +79,6 @@ function sourceView(work,names){
 export async function run(command,args,{cwd=root,env={},capture=false,input,signal=controller.signal}={}){
  signal.throwIfAborted();const environment={...process.env,...env};delete environment.GH_TOKEN;delete environment.GITHUB_TOKEN;
  const tool=basename(command);
- // 本机缺件由预检报告；Flutter、Gradle等子工具也不能隐式联网补件。
- if(env[localOnly]){
-  args=['-p','(version 1) (allow default) (deny network-outbound) (allow network-outbound (remote ip "localhost:*"))',command,...args];
-  command='/usr/bin/sandbox-exec';
-  delete environment[localOnly];
- }
  return new Promise((ok,fail)=>{
   const child=spawn(command,args,{cwd,env:environment,detached:true,stdio:[input===undefined?'ignore':'pipe',capture?'pipe':process.stderr,'pipe']});
   let output='',diagnostic='',failure,timer;
@@ -211,11 +204,11 @@ export async function localTools(platform,{home=homedir(),source=root,input=proc
  ],async path=>{
   const toolchain=join(path,'toolchains',tools.rust+'-'+host);
   if(!executable(join(toolchain,'bin/cargo'))||!executable(join(toolchain,'bin/rustc')))return;
-  const version=(await run(join(toolchain,'bin/rustc'),['--version'],{env:{[localOnly]:true},capture:true})).split(' ')[1];
+  const version=(await run(join(toolchain,'bin/rustc'),['--version'],{capture:true})).split(' ')[1];
   if(version!==tools.rust)return version||'版本未知';
   return entries(join(toolchain,'lib/rustlib',target,'lib')).some(name=>name.startsWith('libstd-'))||tools.rust+'，缺 '+target;
  });
- const env={FLUTTER_ROOT:flutter,RUSTUP_HOME:rust,[localOnly]:true};
+ const env={FLUTTER_ROOT:flutter,RUSTUP_HOME:rust};
  const rustBin=rust?join(rust,'toolchains',tools.rust+'-'+host,'bin'):undefined;
  let podBin;
  if(platform==='ios'){
@@ -227,7 +220,7 @@ export async function localTools(platform,{home=homedir(),source=root,input=proc
    const gemHome=dirname(dirname(path));
    const gemEnv=existsSync(join(gemHome,'specifications','cocoapods-'+tools.cocoapods+'.gemspec'))?{GEM_HOME:gemHome}:{};
    let version;
-   try{version=await run(path,['--version'],{env:{...gemEnv,PATH:bins.join(delimiter),[localOnly]:true},capture:true});}
+   try{version=await run(path,['--version'],{env:{...gemEnv,PATH:bins.join(delimiter)},capture:true});}
    catch{controller.signal.throwIfAborted();return '无法读取版本';}
    if(version===tools.cocoapods){Object.assign(env,gemEnv);return true;}
    return version;
@@ -262,9 +255,6 @@ export async function localTools(platform,{home=homedir(),source=root,input=proc
  if(errors.length)throw Error('本机缺少公民钱包声明的工具或组件，须先取得本次下载授权：\n'+errors.join('\n'));
  env.CARGO_HOME=input.CARGO_HOME||join(home,'.cargo');
  env.PUB_CACHE=input.PUB_CACHE||join(home,'.pub-cache');
- env.GIT_ALLOW_PROTOCOL='file';
- env.CARGO_NET_OFFLINE='true';
- env.npm_config_offline='true';
  env.PATH=candidates([rustBin,podBin,dirname(process.execPath),...bins]).join(delimiter);
  return env;
 }
@@ -325,8 +315,8 @@ async function prepare(work,platform,env){
  }
  const iconOutput=generatePlatformIcons(project,platform);
  if(platform==='android')for(const name of readdirSync(iconOutput))copy(join(iconOutput,name),join(project,'android/app/src/main/res',name));
- await run(flutterExecutable(env),['pub','get','--enforce-lockfile',
-  ...(process.env.GITHUB_ACTIONS==='true'?[]:['--offline'])],{cwd:project,env});
+ // Pub 复用已有缓存，缺失依赖按原锁补齐。
+ await run(flutterExecutable(env),['pub','get','--enforce-lockfile'],{cwd:project,env});
  if(!readFileSync(join(project,'pubspec.lock')).equals(readFileSync(join(root,'pubspec.lock'))))throw Error('Pub原锁改变');
  return project;
 }
@@ -341,7 +331,7 @@ export async function native(target,project,work,env){
   extra={CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER:join(bin,'aarch64-linux-android24-clang'),CC_aarch64_linux_android:join(bin,'aarch64-linux-android24-clang'),AR_aarch64_linux_android:join(bin,'llvm-ar'),CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS:'-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-soname,libcitizenwallet_signer.so'};
  }
  else if(target!=='host')throw Error('未知原生目标');
- if(triple&&!env[localOnly])await run('rustup',['target','add','--toolchain',tools.rust,triple],{env});
+ if(triple&&process.env.GITHUB_ACTIONS==='true')await run('rustup',['target','add','--toolchain',tools.rust,triple],{env});
  // 官方crate-type覆盖仅生成当前消费者需要的库，不额外生成另一种链接产物。
  await run('cargo',['rustc','--lib','--crate-type',target==='ios'?'staticlib':'cdylib','--locked','--release','--manifest-path',manifest,...(triple?['--target',triple]:[])],{env:{...env,...extra},cwd:project});
  const file=join(env.CARGO_TARGET_DIR,...(triple?[triple]:[]),'release',nativeName+(target==='ios'?'.a':target==='android'?'.so':process.platform==='darwin'?'.dylib':'.so'));
@@ -379,7 +369,7 @@ export async function testProduct(platform='android',{installed,stage=silentProg
    const events=readFileSync(report,'utf8').split('\n').filter(Boolean).map(JSON.parse),done=events.filter(value=>value.type==='done');finished=events.filter(value=>value.type==='testDone');
    if(done.length!==1||done[0].success!==true||!finished.length||finished.some(value=>value.skipped||value.result!=='success'))throw Error('Flutter测试失败、跳过或不完整');
   }catch(error){error.keepWork=true;error.message+='；Flutter报告：'+report;throw error;}
-  if(platform==='android')await stage('Android 原生回归',()=>run(join(project,'android/gradlew'),['testReleaseUnitTest','--no-daemon',...(installed?['--offline']:[])],{cwd:join(project,'android'),env}));
+  if(platform==='android')await stage('Android 原生回归',()=>run(join(project,'android/gradlew'),['testReleaseUnitTest','--no-daemon'],{cwd:join(project,'android'),env}));
   return {tests:finished.length,platform};
  }catch(error){safe=!error.keepWork;throw error;}finally{if(safe)rmSync(work,{recursive:true,force:true});}
 }
