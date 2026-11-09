@@ -204,11 +204,11 @@ jobs:
           access_token_scopes: https://www.googleapis.com/auth/androidpublisher
           create_credentials_file: false
           export_environment_variables: false
-      - name: 等待并回查本轮 Google Play 内部测试
-        timeout-minutes: 25
+      - name: 上传正式AAB到Google Play
+        timeout-minutes: 5
         env:
           PLAY_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
-        run: node scripts/build.mjs verify-internal android
+        run: node scripts/build.mjs upload android
       - name: 保存官方缓存
         if: always()
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809

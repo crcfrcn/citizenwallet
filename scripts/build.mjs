@@ -6,7 +6,6 @@ import {join,dirname,resolve,relative,sep,basename,isAbsolute,delimiter} from 'n
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
-import {setTimeout as delay} from 'node:timers/promises';
 import {tools,repository,platforms} from './config.mjs';
 export const root=fileURLToPath(new URL('../',import.meta.url));
 // 初始版号只来自产品pubspec；正式版本由本平台成功Release及来源Run确定。
@@ -161,22 +160,96 @@ function entries(path){
 function metadata(path,parse){
  try{return parse(readFileSync(path,'utf8'));}catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR'||error instanceof SyntaxError)return;throw error;}
 }
+const resourceCaches=Symbol('本机依赖缓存来源');
+const cloneOptions={recursive:true,mode:constants.COPYFILE_FICLONE};
+
+// Gradle 元数据来自一份兼容快照；其他缓存只补同坐标及摘要的不可变产物。
+export function seedGradle(work,homes){
+ const sources=homes.map(home=>join(home,'caches/modules-2'))
+  .filter(path=>existsSync(join(path,'files-2.1')));
+ const primary=sources.find(path=>existsSync(join(path,'metadata-2.107')));
+ if(!primary)return;
+ const snapshot=join(work,'gradle-dependencies'),modules=join(snapshot,'modules-2');
+ cpSync(primary,modules,{...cloneOptions,filter:path=>!path.endsWith('.lock')&&basename(path)!=='gc.properties'});
+ for(const source of sources.filter(path=>path!==primary)){
+  const files=join(source,'files-2.1');
+  cpSync(files,join(modules,'files-2.1'),{...cloneOptions,force:false});
+ }
+ return snapshot;
+}
+
+// Pub 的锁内摘要与官方缓存摘要一致时才借用整包；缺件由原 get 补齐。
+export function seedPub(destination,sources,lock){
+ for(const [,name,record] of lock.matchAll(/^  ([\w]+):\n((?:    [^\n]*\n)+)/gmu)){
+  if(!/^    source: hosted$/mu.test(record))continue;
+  const host=new URL(/^      url: "([^"]+)"$/mu.exec(record)[1]).hostname;
+  const version=/^    version: "([^"]+)"$/mu.exec(record)[1];
+  const checksum=/^      sha256: (["]?)([a-f0-9]{64})\1$/mu.exec(record)[2];
+  const key=name+'-'+version,packagePath=join('hosted',host,key),hashPath=join('hosted-hashes',host,key+'.sha256');
+  if(existsSync(join(destination,packagePath)))continue;
+  const source=sources.find(path=>existsSync(join(path,packagePath,'pubspec.yaml'))&&
+   metadata(join(path,hashPath),text=>text.trim())===checksum);
+  if(!source)continue;
+  const target=join(destination,packagePath);
+  mkdirSync(dirname(target),{recursive:true});
+  const scratch=mkdtempSync(join(dirname(target),'.'+key+'-'));
+  try{
+   cpSync(join(source,packagePath),scratch,cloneOptions);
+   put(join(destination,hashPath),checksum+'\n');
+   try{renameSync(scratch,target);}catch(error){if(!['EEXIST','ENOTEMPTY'].includes(error.code))throw error;}
+  }finally{rmSync(scratch,{recursive:true,force:true});}
+ }
+}
+
+// Cargo 只复用 crates.io 原锁的归档，按归档字节校验后原子写入官方缓存。
+function seedCargo(destination,sources,lock){
+ const cache=join(destination,'registry/cache');
+ const indexes=path=>entries(path).filter(name=>name.startsWith('index.crates.io-')||name.startsWith('github.com-'));
+ const targets=indexes(cache);
+ if(!targets.length)return;
+ for(const record of lock.split('[[package]]').slice(1)){
+  if(!/^source = "registry\+https:\/\/github.com\/rust-lang\/crates.io-index"$/mu.test(record))continue;
+  const [,name]=/^name = "([^"]+)"$/mu.exec(record),[,version]=/^version = "([^"]+)"$/mu.exec(record);
+  const [,checksum]=/^checksum = "([a-f0-9]{64})"$/mu.exec(record);
+  const archive=name+'-'+version+'.crate';
+  for(const index of targets){
+   const target=join(cache,index,archive);
+   if(existsSync(target))continue;
+   let bytes;
+   for(const home of sources){
+    const source=join(home,'registry/cache',index,archive);
+    if(!existsSync(source))continue;
+    const candidate=readFileSync(source);
+    if(sha(candidate)===checksum){bytes=candidate;break;}
+   }
+   if(!bytes)continue;
+   const scratch=target+'.'+randomUUID();
+   try{put(scratch,bytes);renameSync(scratch,target);}finally{rmSync(scratch,{force:true});}
+  }
+ }
+}
 
 // 本机从真实安装位置选择原声明版本；先读现有元数据，避免探测时启动下载器。
-export async function localTools(platform,{home=homedir(),source=root,input=process.env,report=()=>{}}={}){
+export async function localTools(platform,{home=homedir(),source=root,input=process.env,report=()=>{},download=false}={}){
  if(!Object.hasOwn(platforms,platform))throw Error('产品平台无效');
  const cache=join(source,'target/cache');
  const bins=(input.PATH||'').split(delimiter).filter(isAbsolute).concat('/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin');
  const candidates=values=>[...new Set(values.filter(value=>value&&isAbsolute(value)))];
  const workspace=dirname(resolve(source));
- const installed=entries(workspace).map(name=>join(workspace,name,'target/cache'));
+ const installed=candidates([cache,...[workspace,home].flatMap(parent=>entries(parent).map(name=>join(parent,name,'target/cache')))]);
  const errors=[];
- const select=async(name,paths,probe)=>{
+ const select=async(name,paths,probe,provision)=>{
   const found=[];
   for(const path of candidates(paths)){
    const version=await probe(path);
    if(version===true){report('复用 '+name+' '+path);return path;}
    if(version)found.push(path+'（'+version+'）');
+  }
+  if(download&&provision){
+   report('按声明准备缺失资源 '+name);
+   const path=await provision();
+   if(await probe(path)===true)return path;
+   throw Error('下载后核验失败：'+name);
   }
   errors.push(name+'，已查 '+candidates(paths).join('、')+(found.length?'，发现 '+found.join('、'):''));
  };
@@ -187,7 +260,7 @@ export async function localTools(platform,{home=homedir(),source=root,input=proc
   join(home,'flutter'),join(home,'development/flutter'),join(home,'Developer/flutter'),'/opt/homebrew/share/flutter','/usr/local/share/flutter',
   ...['fvm/versions','.fvm/versions'].map(path=>join(home,path,tools.flutter)),
   ...entries('/opt/homebrew/Caskroom/flutter').map(version=>join('/opt/homebrew/Caskroom/flutter',version,'flutter')),
-  join(cache,'flutter'),...installed.map(path=>join(path,'flutter')),
+  join(cache,'flutter-'+tools.flutter,'flutter'),...installed.map(path=>join(path,'flutter')),
  ],path=>{
   const folder=join(path,'bin/cache');
   if(!executable(join(path,'bin/flutter')))return;
@@ -196,9 +269,20 @@ export async function localTools(platform,{home=homedir(),source=root,input=proc
   const required=['flutter_tools.snapshot',platform+'-sdk.stamp','macos-sdk.stamp'];
   if(platform==='android')required.push(...gradleWrapper.map(file=>'artifacts/gradle_wrapper/'+file));
   return executable(join(folder,'dart-sdk/bin/dart'))&&required.every(file=>existsSync(join(folder,file)))||version+'，组件不齐';
+ },async()=>{
+  const destination=directory(join(cache,'flutter-'+tools.flutter));
+  const work=mkdtempSync(join(destination,'prepare-'));
+  const path=join(destination,'flutter');
+  try{
+   await downloadFlutter(work,{FLUTTER_ROOT:join(work,'flutter')});
+   await run(flutterExecutable({FLUTTER_ROOT:join(work,'flutter')}),['precache','--'+platform,'--macos']);
+   try{renameSync(join(work,'flutter'),path);}catch(error){if(!['EEXIST','ENOTEMPTY'].includes(error.code))throw error;}
+   return path;
+  }finally{rmSync(work,{recursive:true,force:true});}
  });
  const host=process.arch==='arm64'?'aarch64-apple-darwin':'x86_64-apple-darwin';
  const target=platform==='ios'?'aarch64-apple-ios':'aarch64-linux-android';
+ let installedRust;
  const rust=await select('Rust '+tools.rust+' / '+target,[
   input.RUSTUP_HOME,join(home,'.rustup'),join(cache,'rustup'),...installed.map(path=>join(path,'rustup')),
  ],async path=>{
@@ -206,7 +290,14 @@ export async function localTools(platform,{home=homedir(),source=root,input=proc
   if(!executable(join(toolchain,'bin/cargo'))||!executable(join(toolchain,'bin/rustc')))return;
   const version=(await run(join(toolchain,'bin/rustc'),['--version'],{capture:true})).split(' ')[1];
   if(version!==tools.rust)return version||'版本未知';
+  installedRust??=path;
   return entries(join(toolchain,'lib/rustlib',target,'lib')).some(name=>name.startsWith('libstd-'))||tools.rust+'，缺 '+target;
+ },async()=>{
+  const path=installedRust||input.RUSTUP_HOME||join(home,'.rustup');
+  const env={RUSTUP_HOME:path,PATH:[join(home,'.cargo/bin'),...bins].join(delimiter)};
+  if(!installedRust)await run('rustup',['toolchain','install',tools.rust,'--profile','minimal','--no-self-update'],{env});
+  await run('rustup',['target','add','--toolchain',tools.rust,target],{env});
+  return path;
  });
  const env={FLUTTER_ROOT:flutter,RUSTUP_HOME:rust};
  const rustBin=rust?join(rust,'toolchains',tools.rust+'-'+host,'bin'):undefined;
@@ -224,37 +315,72 @@ export async function localTools(platform,{home=homedir(),source=root,input=proc
    catch{controller.signal.throwIfAborted();return '无法读取版本';}
    if(version===tools.cocoapods){Object.assign(env,gemEnv);return true;}
    return version;
+  },async()=>{
+   const path=directory(join(cache,'gems'));
+   await run('gem',['install','cocoapods','--version',tools.cocoapods,'--no-document','--install-dir',path],{env:{PATH:bins.join(delimiter),GEM_HOME:path}});
+   return join(path,'bin/pod');
   });
   if(pod)podBin=dirname(pod);
  }else{
   const sdks=[
    input.ANDROID_HOME,input.ANDROID_SDK_ROOT,join(home,'Library/Android/sdk'),
   ];
+  const sdkManager=()=>{
+   for(const sdk of candidates(sdks)){
+    const command=join(sdk,'cmdline-tools/latest/bin/sdkmanager');
+    if(executable(command))return {sdk,command};
+   }
+   throw Error('缺少本机 Android SDK Manager，无法按声明补齐组件');
+  };
+  const androidApi=tools.buildTools.split('.')[0];
   env.ANDROID_HOME=await select('Android SDK / Build Tools '+tools.buildTools,sdks,
    path=>executable(join(path,'platform-tools/adb'))&&executable(join(path,'build-tools',tools.buildTools,'apksigner'))&&
    executable(join(path,'cmdline-tools/latest/bin/apkanalyzer'))&&
-   existsSync(join(path,'platforms/android-'+tools.buildTools.split('.')[0],'android.jar'))||undefined);
+   existsSync(join(path,'platforms/android-'+androidApi,'android.jar'))||undefined,async()=>{
+    const {sdk,command}=sdkManager(),packages=[];
+    if(!executable(join(sdk,'platform-tools/adb')))packages.push('platform-tools');
+    if(!executable(join(sdk,'build-tools',tools.buildTools,'apksigner')))packages.push('build-tools;'+tools.buildTools);
+    if(!existsSync(join(sdk,'platforms/android-'+androidApi,'android.jar')))packages.push('platforms;android-'+androidApi);
+    if(packages.length)await run(command,['--sdk_root='+sdk,...packages]);
+    return sdk;
+   });
   env.ANDROID_NDK_HOME=await select('Android NDK '+tools.ndk,[
    input.ANDROID_NDK_HOME,...candidates([env.ANDROID_HOME,...sdks]).map(path=>join(path,'ndk',tools.ndk)),
   ],path=>{
    const version=metadata(join(path,'source.properties'),text=>/^Pkg.Revision\s*=\s*(\S+)/mu.exec(text)?.[1]);
    return version===tools.ndk&&executable(join(path,'toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang'))||version;
+  },async()=>{
+   const {sdk,command}=sdkManager();
+   await run(command,['--sdk_root='+sdk,'ndk;'+tools.ndk]);
+   return join(sdk,'ndk',tools.ndk);
   });
   const jvms=[join(home,'Library/Java/JavaVirtualMachines'),'/Library/Java/JavaVirtualMachines'];
   env.JAVA_HOME=await select('Android JDK',[input.JAVA_HOME,'/Applications/Android Studio.app/Contents/jbr/Contents/Home',
    ...jvms.flatMap(folder=>entries(folder).map(name=>join(folder,name,'Contents/Home')))],
    path=>executable(join(path,'bin/java'))||undefined);
-  env.GRADLE_USER_HOME=await select('Gradle '+tools.gradle,[
-   input.GRADLE_USER_HOME,join(home,'.gradle'),join(cache,'gradle'),...installed.map(path=>join(path,'gradle')),
-  ],path=>{
+  const gradleHomes=candidates([input.GRADLE_USER_HOME,join(home,'.gradle'),...installed.map(path=>join(path,'gradle'))]);
+  const hasGradle=path=>{
    const distribution='gradle-'+tools.gradle+'-bin',folder=join(path,'wrapper/dists',distribution);
    return entries(folder).some(key=>existsSync(join(folder,key,distribution+'.zip.ok'))&&
-    executable(join(folder,key,'gradle-'+tools.gradle,'bin/gradle')))||undefined;
-  });
+    executable(join(folder,key,'gradle-'+tools.gradle,'bin/gradle')));
+  };
+  env.GRADLE_USER_HOME=gradleHomes.find(hasGradle)||gradleHomes[0];
+  report(hasGradle(env.GRADLE_USER_HOME)?'复用 Gradle '+tools.gradle+' '+env.GRADLE_USER_HOME:
+   'Gradle '+tools.gradle+' 缺失，按 Wrapper 声明补齐');
+  env[resourceCaches]={gradle:gradleHomes.filter(path=>path!==env.GRADLE_USER_HOME)};
  }
  if(errors.length)throw Error('本机缺少公民钱包声明的工具或组件，须先取得本次下载授权：\n'+errors.join('\n'));
  env.CARGO_HOME=input.CARGO_HOME||join(home,'.cargo');
  env.PUB_CACHE=input.PUB_CACHE||join(home,'.pub-cache');
+ env[resourceCaches]={
+  ...env[resourceCaches],
+  pub:candidates([join(home,'.pub-cache'),...installed.map(path=>join(path,'pub'))]).filter(path=>path!==env.PUB_CACHE),
+  cargo:candidates([join(home,'.cargo'),...installed.map(path=>join(path,'cargo'))]).filter(path=>path!==env.CARGO_HOME),
+ };
+ if(platform==='ios'){
+  env.CP_HOME_DIR=input.CP_HOME_DIR||join(home,'.cocoapods');
+  env.CP_CACHE_DIR=input.CP_CACHE_DIR||join(home,'Library/Caches/CocoaPods');
+ }
  env.PATH=candidates([rustBin,podBin,dirname(process.execPath),...bins]).join(delimiter);
  return env;
 }
@@ -274,6 +400,13 @@ const gradleWrapper=['gradlew','gradlew.bat','gradle/wrapper/gradle-wrapper.jar'
 async function flutterCheck(env){
  const result=JSON.parse(await run(flutterExecutable(env),['--version','--machine'],{env,capture:true}));if(result.frameworkVersion!==tools.flutter)throw Error('Flutter版本不符合本产品声明');
 }
+async function downloadFlutter(work,env){
+ const archive=join(work,'flutter.zip');
+ await run('curl',['--fail','--location','--proto','=https','--proto-redir','=https','--retry','3','--output',archive,
+  'https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_'+tools.flutter+'-stable.zip'],{env});
+ await run('/usr/bin/ditto',['-x','-k',archive,dirname(env.FLUTTER_ROOT)],{env});
+ rmSync(archive);
+}
 function environment(work,installed){
  // 工具与包复用本仓现有缓存，缓存并发由官方工具管理；每端可写工程和临时文件仍归自己的work。
  const base=directory(join(root,'target/cache'));
@@ -282,16 +415,13 @@ function environment(work,installed){
   for(const key of ['GEM_HOME','GEM_SPEC_CACHE'])delete env[key];
   Object.assign(env,installed);
  }
- directory(env.CP_HOME_DIR);
+ if(!installed)directory(env.CP_HOME_DIR);
  if(!installed)for(const key of ['PUB_CACHE','CARGO_HOME','RUSTUP_HOME','GEM_HOME','GEM_SPEC_CACHE'])directory(env[key]);
  return env;
 }
 async function prepareTools(work,platform,env){
  // 官方发行件直接展开到本产品缓存；不借用旧资源库或修订工具源码。
- if(!existsSync(flutterExecutable(env))){
-  const archive=join(work,'flutter.zip');await run('curl',['--fail','--location','--retry','3','--output',archive,'https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_'+tools.flutter+'-stable.zip'],{env});
-  await run('/usr/bin/ditto',['-x','-k',archive,dirname(env.FLUTTER_ROOT)],{env});rmSync(archive);
- }
+ if(!existsSync(flutterExecutable(env)))await downloadFlutter(work,env);
  await flutterCheck(env);
  const host=process.arch==='arm64'?'aarch64-apple-darwin':'x86_64-apple-darwin',bin=join(env.RUSTUP_HOME,'toolchains',tools.rust+'-'+host,'bin');
  if(!existsSync(join(bin,'cargo')))await run('rustup',['toolchain','install',tools.rust,'--profile','minimal','--no-self-update'],{env});
@@ -303,6 +433,16 @@ async function prepareTools(work,platform,env){
 }
 
 async function prepare(work,platform,env){
+ const caches=env[resourceCaches];
+ if(caches){
+  delete env[resourceCaches];
+  seedPub(env.PUB_CACHE,caches.pub,readFileSync(join(root,'pubspec.lock'),'utf8'));
+  seedCargo(env.CARGO_HOME,caches.cargo,readFileSync(join(root,'signing/Cargo.lock'),'utf8'));
+  if(platform==='android'&&!process.env.GRADLE_RO_DEP_CACHE){
+   const shared=seedGradle(work,caches.gradle);
+   if(shared)env.GRADLE_RO_DEP_CACHE=shared;
+  }
+ }
  const project=sourceView(work,['lib','test','icons','signing','ios','android','pubspec.yaml','pubspec.lock','Podfile.lock']);
  materializeInputs(root,project);
  put(join(project,'analysis_options.yaml'),'include: package:flutter_lints/flutter.yaml\nanalyzer:\n  exclude:\n    - "**/*.g.dart"\n');
@@ -348,7 +488,7 @@ export async function native(target,project,work,env){
 }
 export async function testProduct(platform='android',{installed,stage=silentProgress}={}){
  nodeCheck();
- if(!installed&&process.env.GITHUB_ACTIONS!=='true')installed=await localTools(platform);
+ if(!installed&&process.env.GITHUB_ACTIONS!=='true')installed=await localTools(platform,{download:true});
  await stage('构建脚本回归',()=>run(process.execPath,['--test','test/build.test.mjs'],{cwd:root}));
  const work=task('test',platform),env=environment(work,installed);let safe=true;
  try{
@@ -375,7 +515,7 @@ export async function testProduct(platform='android',{installed,stage=silentProg
 }
 export async function buildProduct(platform,{consume,installed,stage=silentProgress}={}){
  nodeCheck();const formal=process.env.GITHUB_ACTIONS==='true';
- if(!installed&&!formal)installed=await localTools(platform);
+ if(!installed&&!formal)installed=await localTools(platform,{download:true});
  const selected=formal?{version:process.env.PRODUCT_VERSION,buildNumber:process.env.GITHUB_RUN_NUMBER}:
   await stage('核对本机产物版本',()=>selectRelease(platform))||initialBuild();
  displayName(platform,selected.version);
@@ -415,9 +555,9 @@ export async function packageProduct(platform){
  put(join(output,title+'.sha256'),readdirSync(output).sort().map(name=>sha(readFileSync(join(output,name)))+'  '+name).join('\n')+'\n');put(join(work,'proof.json'),JSON.stringify(proof));
  return {output};
 }
-// 从 Play Console 单独推出内测后回查。自动化不提交 edit，以免夹带后台待审项。
-export async function verifyAndroidInternal({token=process.env.PLAY_ACCESS_TOKEN,fetchImpl=fetch,
- pause=()=>delay(10000,undefined,{signal:controller.signal}),work=process.env.PRODUCT_WORK,version=process.env.PRODUCT_VERSION,
+// 只上传到 Google Play 临时编辑并验证本次上传回执。
+export async function uploadAndroid({token=process.env.PLAY_ACCESS_TOKEN,fetchImpl=fetch,
+ work=process.env.PRODUCT_WORK,version=process.env.PRODUCT_VERSION,
  number=process.env.GITHUB_RUN_NUMBER,runID=process.env.GITHUB_RUN_ID,sourceSha=process.env.GITHUB_SHA}={}){
  displayName('android',version);
  if(!insideTarget(work)||!token||!/^\d+$/u.test(number||'')||!/^\d+$/u.test(runID||'')||!/^([a-f0-9]{40})$/u.test(sourceSha||''))throw Error('Google上传输入缺失或无效');
@@ -425,31 +565,20 @@ export async function verifyAndroidInternal({token=process.env.PLAY_ACCESS_TOKEN
  if(!info.isFile()||info.isSymbolicLink()||info.size<1)throw Error('Google上传AAB无效');
  const bytes=readFileSync(path),digest=sha(bytes),proof=JSON.parse(readFileSync(join(work,'proof.json'))),asset=proof.assets?.find(value=>value.name===name);
  if(proof.product_id!=='citizenwallet'||proof.platform!=='android'||proof.version!==version||String(proof.run_id)!==runID||proof.source_sha!==sourceSha||asset?.sha256!==digest||asset.size!==bytes.length)throw Error('Google上传AAB与本轮验收不一致');
- const app='https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.crcfrcn.citizenwallet';
- const base=app+'/edits';
- async function request(method,url){
-  const response=await fetchImpl(url,{method,redirect:'error',
-   signal:AbortSignal.any([controller.signal,AbortSignal.timeout(20000)]),
-   headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(method==='POST'?{body:'{}'}:{})});
-  if(!response.ok)throw Error('Google Play 内测回查 '+method+' '+new URL(url).pathname+' HTTP '+response.status);
-  return response.status===204?null:response.json();
+ const base='https://androidpublisher.googleapis.com';
+ const app='/androidpublisher/v3/applications/com.crcfrcn.citizenwallet/edits';
+ async function post(path,body,contentType){
+  const response=await fetchImpl(base+path,{method:'POST',redirect:'error',body,
+   signal:AbortSignal.any([controller.signal,AbortSignal.timeout(120000)]),
+   headers:{Authorization:'Bearer '+token,'Content-Type':contentType}});
+  if(!response.ok)throw Error('Google Play上传失败：POST '+path+' HTTP '+response.status);
+  return response.json();
  }
- for(let attempt=0;attempt<120;attempt++){
-  if(attempt)await pause();
-  const readback=await request('POST',base);
-  if(typeof readback.id!=='string'||!/^\d+$/u.test(readback.id))throw Error('Google回读编辑编号无效');
-  const url=base+'/'+readback.id;
-  try{
-   // 新 edit 是已部署状态的快照，只读取后丢弃。
-   const track=await request('GET',url+'/tracks/internal');
-   if(track.track!=='internal')throw Error('Google Play 返回的轨道不是内部轨道');
-   if(!track.releases?.some(row=>row.status==='completed'&&row.versionCodes?.some(code=>String(code)===number)))continue;
-   const result=await request('GET',url+'/bundles'),matches=result.bundles?.filter(value=>String(value.versionCode)===number);
-   if(matches?.length!==1||matches[0].sha256!==digest)throw Error('Google已保存AAB回读不符');
-   return {verified:true,platform:'android',version,buildNumber:number};
-  }finally{await request('DELETE',url);}
- }
- throw Error('Google Play 本轮内测回查超时：尚未推出');
+ const edit=await post(app,'{}','application/json');
+ if(typeof edit.id!=='string'||!/^\d+$/u.test(edit.id))throw Error('Google Play上传编辑编号无效');
+ const receipt=await post('/upload'+app+'/'+edit.id+'/bundles?uploadType=media',bytes,'application/octet-stream');
+ if(String(receipt.versionCode)!==number||receipt.sha256?.toLowerCase()!==digest)throw Error('Google Play上传回执与本轮AAB不符');
+ return {uploaded:true,platform:'android',version,buildNumber:number};
 }
 // ===== 控制台本机编译：node scripts/build.mjs compile ios|android =====
 // 本块只交付现有本机工具的环境，并复用上方唯一buildProduct执行官方编译，不复制编译流程。
@@ -459,6 +588,7 @@ export async function compile(platform){
  if(process.env.GITHUB_ACTIONS==='true')throw Error('本机编译入口不接受GitHub环境');
  nodeCheck();displayName(platform,initialBuild().version);
  const installed=await progress('检查本机工具',()=>localTools(platform,{
+  download:true,
   report:line=>process.stdout.write(new Date().toISOString()+' '+line+'\n'),
  }));
  // 本机更新前执行所属完整回归，真实扫码解码、中文审阅与签名失败不能进入设备安装。
@@ -480,7 +610,7 @@ export async function compile(platform){
 async function main(){
  const [command,platform='android',...extra]=process.argv.slice(2);if(extra.length)throw Error('参数过多');
  if(command==='compile')return compile(platform);
- if(command==='verify-internal'&&platform==='android')return verifyAndroidInternal();
+ if(command==='upload'&&platform==='android')return uploadAndroid();
  if(command==='test')return testProduct(platform);if(command==='build')return buildProduct(platform);if(command==='package')return packageProduct(platform);
  throw Error('未知产品命令');
 }

@@ -2,9 +2,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSync,readdirSync,symlinkSync,chmodSync} from 'node:fs';
 import {join,dirname,basename} from 'node:path';
-import {createHash,generateKeyPairSync} from 'node:crypto';
+import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {root,displayName,run,artifactBaseName,packageProduct,verifyAndroidInternal,selectRelease,localTools,progress} from '../scripts/build.mjs';
+import {root,displayName,run,artifactBaseName,packageProduct,uploadAndroid,selectRelease,localTools,progress,seedGradle,seedPub} from '../scripts/build.mjs';
 import {describeAction} from '../scripts/config.mjs';
 import {platforms,repository,tools} from '../scripts/config.mjs';
 const platform=Object.keys(platforms)[0];
@@ -19,7 +19,7 @@ test('准确名称和版本边界',()=>{
  assert.throws(()=>displayName('other','1.2.3'));
 });
 
-test('钱包缓存为空时复用本机工具，并拒绝缺少Rust目标的现场',async t=>{
+test('复用本机工具，自动补齐缺少的 Rust 目标',async t=>{
  const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});
  const home=mkdtempSync(join(parent,'local-tools-'));
  t.after(()=>rmSync(home,{recursive:true,force:true}));
@@ -50,7 +50,7 @@ test('钱包缓存为空时复用本机工具，并拒绝缺少Rust目标的现�
  const marker=join(home,'unexpected-download');
  for(const command of ['curl','rustup','gem'])executable(join(home,'bin',command),'touch '+JSON.stringify(marker));
  const logs=[],options={source,home,input:{FLUTTER_ROOT:wrong,JAVA_HOME:java,PATH:join(home,'bin')},report:line=>logs.push(line)};
- const env=await localTools('android',options);
+ const env=await localTools('android',{...options,download:true});
  assert.equal(env.FLUTTER_ROOT,flutter);
  assert.equal(env.RUSTUP_HOME,rust);
  assert.equal(env.ANDROID_HOME,sdk);
@@ -58,9 +58,50 @@ test('钱包缓存为空时复用本机工具，并拒绝缺少Rust目标的现�
  assert.equal(env.GRADLE_USER_HOME,gradle);
  assert.ok(logs.some(line=>line.includes(flutter)));
  assert.equal(existsSync(join(source,'target/cache')),false);
- rmSync(lib);
- await assert.rejects(localTools('android',options),/缺 aarch64-linux-android/u);
  assert.equal(existsSync(marker),false);
+ rmSync(lib);
+ executable(join(home,'bin/rustup'),"printf '%s\\n' \"$*\" > "+JSON.stringify(marker)+"\ntouch "+JSON.stringify(lib));
+ assert.equal((await localTools('android',{...options,download:true})).RUSTUP_HOME,rust);
+ assert.equal(readFileSync(marker,'utf8').trim(),'target add --toolchain '+tools.rust+' aarch64-linux-android');
+});
+
+test('Gradle 快照从多个本机缓存复用产物，只保留一份兼容元数据',t=>{
+ const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});
+ const work=mkdtempSync(join(parent,'gradle-reuse-'));
+ t.after(()=>rmSync(work,{recursive:true,force:true}));
+ const homes=['a','b'].map(name=>join(work,name)),prefix='caches/modules-2';
+ const put=(home,file,contents)=>{
+  const path=join(home,prefix,file);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,contents);
+ };
+ put(homes[0],'metadata-2.107/first.bin','元数据');
+ put(homes[0],'modules-2.lock','活动锁');
+ put(homes[0],'files-2.1/org/a/1/hash/a.jar','a');
+ put(homes[1],'metadata-2.107/other.bin','另一份元数据');
+ put(homes[1],'files-2.1/org/b/1/hash/b.jar','b');
+ const cache=join(seedGradle(work,homes),'modules-2');
+ assert.equal(readFileSync(join(cache,'files-2.1/org/a/1/hash/a.jar'),'utf8'),'a');
+ assert.equal(readFileSync(join(cache,'files-2.1/org/b/1/hash/b.jar'),'utf8'),'b');
+ assert.deepEqual(readdirSync(join(cache,'metadata-2.107')),['first.bin']);
+ assert.equal(existsSync(join(cache,'modules-2.lock')),false);
+});
+
+test('Pub 按原锁从其他缓存复用并跳过摘要不符的包',t=>{
+ const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});
+ const work=mkdtempSync(join(parent,'pub-reuse-'));
+ t.after(()=>rmSync(work,{recursive:true,force:true}));
+ const source=join(work,'source'),destination=join(work,'destination'),checksum='a'.repeat(64);
+ const lock=['first','second'].map(name=>
+  '  '+name+':\n    description:\n      sha256: '+checksum+'\n      url: "https://pub.dev"\n    source: hosted\n    version: "1.0.0"\n').join('');
+ for(const name of ['first','second']){
+  const packagePath=join(source,'hosted/pub.dev',name+'-1.0.0');
+  const hash=join(source,'hosted-hashes/pub.dev',name+'-1.0.0.sha256');
+  mkdirSync(packagePath,{recursive:true});mkdirSync(dirname(hash),{recursive:true});
+  writeFileSync(join(packagePath,'pubspec.yaml'),'name: '+name);
+  writeFileSync(hash,name==='first'?checksum:'b'.repeat(64));
+ }
+ seedPub(destination,[source],lock);
+ assert.equal(readFileSync(join(destination,'hosted/pub.dev/first-1.0.0/pubspec.yaml'),'utf8'),'name: first');
+ assert.equal(existsSync(join(destination,'hosted/pub.dev/second-1.0.0')),false);
 });
 
 test('阶段开始实时输出，失败日志保留原错误',async()=>{
@@ -208,58 +249,26 @@ else throw Error('不允许的合成GitHub命令');
 
 // 执行真实上传步骤，Apple工具仅用本仓合成命令模拟，不读取现有凭据或访问Apple。
 test('iOS验收成功后上传同一IPA，上传失败与缺少凭据均失败且私钥现场清理',async t=>{
- const workflow=readFileSync(join(root,'.github/workflows/ios.yml'),'utf8'),start=workflow.indexOf('      - name: 上传正式IPA并回查TestFlight内部测试'),end=workflow.indexOf('\n      - ',start+1),block=workflow.slice(start,end),marker='        run: |\n';
+ const workflow=readFileSync(join(root,'.github/workflows/ios.yml'),'utf8'),start=workflow.indexOf('      - name: 上传正式IPA到App Store Connect'),end=workflow.indexOf('\n      - ',start+1),block=workflow.slice(start,end),marker='        run: |\n';
  assert.ok(start>workflow.indexOf('      - name: 创建正式Tag和Release并逐件回读'));assert.ok(end>start);assert.doesNotMatch(block,/continue-on-error|if: always/u);
  const script=block.slice(block.indexOf(marker)+marker.length).split('\n').map(line=>line.startsWith('          ')?line.slice(10):line).join('\n');
- for(const failure of ['', 'upload','old','external','otherAuto','pending','APPSTORE_KEYID','APPSTORE_ISSUERID','APPSTORE_PRIVATEKEY']){
+ for(const failure of ['', 'upload','APPSTORE_KEYID','APPSTORE_ISSUERID','APPSTORE_PRIVATEKEY']){
   const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const work=mkdtempSync(join(parent,'appstore-'));t.after(()=>rmSync(work,{recursive:true,force:true}));
   const signing=join(work,'signing');mkdirSync(signing);mkdirSync(join(work,'artifact'));
   const ipa=join(work,'artifact',artifactBaseName('ios','1.2.3')+'.ipa');writeFileSync(ipa,'synthetic IPA');
-  const source=join(work,'upload.mjs'),argsFile=join(work,'args.json'),mock=join(work,'apple.mjs');
-  const key=generateKeyPairSync('ec',{namedCurve:'prime256v1'}).privateKey.export({type:'pkcs8',format:'pem'});
+  const source=join(work,'upload.mjs'),argsFile=join(work,'args.json');
+  const key='fixture';
   writeFileSync(source,`import {readFileSync,writeFileSync} from 'node:fs';import assert from 'node:assert/strict';import {join} from 'node:path';assert.equal(readFileSync(join(process.env.API_PRIVATE_KEYS_DIR,'AuthKey_'+process.env.APPSTORE_KEYID+'.p8'),'utf8'),process.env.APPSTORE_PRIVATEKEY+'\\n');writeFileSync(process.env.MOCK_ARGUMENTS,JSON.stringify(process.argv.slice(2)));process.exit(Number(process.env.MOCK_EXIT));`);
-  writeFileSync(mock,`
-   import assert from 'node:assert/strict';
-   import timers from 'node:timers/promises';
-   import {syncBuiltinESMExports} from 'node:module';
-   timers.setTimeout=async()=>{};syncBuiltinESMExports();
-   const group='6ec038a5-5ab0-4822-8fd4-e0de401c0e7f',mode=process.env.MOCK_MODE;
-   let assigned=false;
-   globalThis.fetch=async(raw,options)=>{
-    const url=new URL(raw);assert.equal(url.origin,'https://api.appstoreconnect.apple.com');
-    assert.match(options.headers.Authorization,/^Bearer [^.]+\\.[^.]+\\.[^.]+$/u);
-    if(url.pathname==='/v1/apps/6800953630')return Response.json({data:{attributes:{bundleId:'ios.citizenwallet'}}});
-    if(url.pathname==='/v1/apps/6800953630/betaGroups')return Response.json({data:[
-     {id:group,attributes:{isInternalGroup:mode!=='external',hasAccessToAllBuilds:false}},
-     {id:'other',attributes:{isInternalGroup:true,hasAccessToAllBuilds:mode==='otherAuto'}}
-    ]});
-    if(url.pathname==='/v1/builds'){
-     assert.equal(url.searchParams.get('filter[app]'),'6800953630');
-     assert.equal(url.searchParams.get('filter[version]'),'42');
-     return Response.json({data:[{id:'build',attributes:{version:mode==='old'?'41':'42',processingState:'VALID'},
-      relationships:{preReleaseVersion:{data:{id:'version'}}}}],
-      included:[{id:'version',type:'preReleaseVersions',attributes:{version:'1.2.3',platform:'IOS'}}]});
-    }
-    if(url.pathname==='/v1/builds/build/buildBetaDetail')return Response.json({data:{attributes:{
-     internalBuildState:assigned?'IN_BETA_TESTING':'READY_FOR_BETA_TESTING'}}});
-    assert.equal(url.pathname,'/v1/betaGroups/'+group+'/relationships/builds');
-    if(options.method==='POST'){
-     assert.equal(assigned,false);
-     assert.deepEqual(JSON.parse(options.body),{data:[{id:'build',type:'builds'}]});
-     assigned=true;return new Response(null,{status:204});
-    }
-    return Response.json({data:assigned&&mode!=='pending'?[{id:'build',type:'builds'}]:[]});
-   };`);
   const executable=join(work,'xcrun');writeFileSync(executable,'#!/bin/sh\nexec "$NODE_BINARY" "$MOCK_SOURCE" "$@"\n');chmodSync(executable,0o700);
   const env={PRODUCT_WORK:work,PRODUCT_VERSION:'1.2.3',GITHUB_RUN_NUMBER:'42',APPSTORE_KEYID:'SYNTHETIC',
-   APPSTORE_ISSUERID:'synthetic-issuer',APPSTORE_PRIVATEKEY:key,NODE_OPTIONS:'--import='+mock,NODE_BINARY:process.execPath,
-   MOCK_SOURCE:source,MOCK_ARGUMENTS:argsFile,MOCK_EXIT:failure==='upload'?'7':'0',MOCK_MODE:failure,
+   APPSTORE_ISSUERID:'synthetic-issuer',APPSTORE_PRIVATEKEY:key,NODE_BINARY:process.execPath,
+   MOCK_SOURCE:source,MOCK_ARGUMENTS:argsFile,MOCK_EXIT:failure==='upload'?'7':'0',
    PATH:work+':'+dirname(process.execPath)+':'+process.env.PATH};
   if(failure.startsWith('APPSTORE_'))env[failure]='';
   if(failure)await assert.rejects(run('/bin/bash',['-c',script],{env,capture:true}));else await run('/bin/bash',['-c',script],{env,capture:true});
   assert.equal(existsSync(join(signing,'appstore')),false);
-  if(failure.startsWith('APPSTORE_')||['external','otherAuto'].includes(failure))assert.equal(existsSync(argsFile),false);
-  else assert.deepEqual(JSON.parse(readFileSync(argsFile)),['altool','--upload-package',ipa,'--api-key','SYNTHETIC','--api-issuer','synthetic-issuer','--wait','--output-format','json']);
+  if(failure.startsWith('APPSTORE_'))assert.equal(existsSync(argsFile),false);
+  else assert.deepEqual(JSON.parse(readFileSync(argsFile)),['altool','--upload-package',ipa,'--api-key','SYNTHETIC','--api-issuer','synthetic-issuer','--output-format','json']);
   assert.equal(readFileSync(ipa,'utf8'),'synthetic IPA');
  }
 });
@@ -274,45 +283,35 @@ test('钱包两平台不再声明独立发布动作或发布文件',()=>{
  assert.ok(workflow.indexOf('      - name: Google官方认证')>workflow.indexOf('      - name: 创建正式Tag和Release并逐件回读'));
  assert.match(workflow,/google-github-actions\/auth@[a-f0-9]{40}/u);assert.match(workflow,/create_credentials_file: false/u);
  assert.match(workflow,/access_token_scopes: https:\/\/www.googleapis.com\/auth\/androidpublisher/u);
- assert.match(workflow,/run: node scripts\/build.mjs verify-internal android/u);
+ assert.match(workflow,/run: node scripts\/build.mjs upload android/u);
 });
 
-// 模拟 Play Console 单独推出后的回执，任何情况下都不上传或提交编辑。
-test('Google Play 只接受本轮已推出的内部构建并核对摘要',async t=>{
- for(const failure of ['', 'token','proof','http','network','old','wrongTrack','draft','review','halted','digest','cleanup']){
+test('Google Play 上传已验收 AAB，只接受本次上传回执',async t=>{
+ for(const failure of ['', 'token','proof','edit','upload','digest','version']){
   const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const work=mkdtempSync(join(parent,'google-'));t.after(()=>rmSync(work,{recursive:true,force:true}));
   const version='1.2.3',name=artifactBaseName('android',version)+'.aab',bytes=Buffer.from('synthetic AAB'),digest=createHash('sha256').update(bytes).digest('hex');mkdirSync(join(work,'artifact'));writeFileSync(join(work,'artifact',name),bytes);
   writeFileSync(join(work,'proof.json'),JSON.stringify({product_id:'citizenwallet',platform:'android',version,source_sha:'a'.repeat(40),run_id:12,assets:[{name,size:bytes.length,sha256:failure==='proof'?'0'.repeat(64):digest}]}));
-  const calls=[],prefix='/androidpublisher/v3/applications/com.crcfrcn.citizenwallet';
+  const calls=[],prefix='/androidpublisher/v3/applications/com.crcfrcn.citizenwallet/edits';
   const fetchImpl=async(url,options)=>{
-   const endpoint=new URL(url);assert.equal(endpoint.origin,'https://androidpublisher.googleapis.com');
+   const endpoint=new URL(url);
+   assert.equal(endpoint.origin,'https://androidpublisher.googleapis.com');
    assert.equal(options.redirect,'error');assert.equal(options.headers.Authorization,'Bearer synthetic-token');
-   const route=endpoint.pathname.slice(prefix.length);assert.equal(endpoint.pathname,prefix+route);
-   calls.push(options.method+' '+route);
-   if(options.method==='POST'&&route==='/edits'){
+   assert.equal(options.method,'POST');
+   calls.push(endpoint.pathname);
+   if(endpoint.pathname===prefix){
     assert.equal(options.body,'{}');
-    if(failure==='http')return new Response(null,{status:403});
-    if(failure==='network')throw Error('synthetic network failure');
-    return Response.json({id:'1'});
+    return failure==='edit'?new Response(null,{status:403}):Response.json({id:'1'});
    }
-   if(options.method==='GET'&&route==='/edits/1/tracks/internal')return Response.json({
-    track:failure==='wrongTrack'?'production':'internal',
-    releases:failure==='review'?[]:[{status:['draft','halted'].includes(failure)?failure:'completed',
-     versionCodes:[failure==='old'?'41':'42']}]});
-   if(options.method==='GET'&&route==='/edits/1/bundles')return Response.json({bundles:[
-    {versionCode:42,sha256:failure==='digest'?'0'.repeat(64):digest}]});
-   if(options.method==='DELETE'&&route==='/edits/1')return new Response(null,{status:failure==='cleanup'?503:204});
-   assert.fail('出现未声明的 Google Play 请求');
+   assert.equal(endpoint.pathname,'/upload'+prefix+'/1/bundles');
+   assert.equal(endpoint.search,'?uploadType=media');
+   assert.deepEqual(options.body,bytes);
+   return failure==='upload'?new Response(null,{status:503}):Response.json({
+    versionCode:failure==='version'?41:42,sha256:failure==='digest'?'0'.repeat(64):digest});
   };
-  const invoke=()=>verifyAndroidInternal({token:failure==='token'?'':'synthetic-token',fetchImpl,pause:async()=>{},
+  const invoke=()=>uploadAndroid({token:failure==='token'?'':'synthetic-token',fetchImpl,
    work,version,number:'42',runID:'12',sourceSha:'a'.repeat(40)});
-  if(failure)await assert.rejects(invoke);else assert.deepEqual(await invoke(),{verified:true,platform:'android',version,buildNumber:'42'});
-  if(['token','proof'].includes(failure))assert.equal(calls.length,0);
-  else if(['http','network'].includes(failure))assert.deepEqual(calls,['POST /edits']);
-  else if(['old','draft','review','halted','wrongTrack'].includes(failure))assert.deepEqual(
-   calls,Array.from({length:failure==='wrongTrack'?1:120},()=>['POST /edits','GET /edits/1/tracks/internal','DELETE /edits/1']).flat());
-  else assert.deepEqual(calls,['POST /edits','GET /edits/1/tracks/internal','GET /edits/1/bundles','DELETE /edits/1']);
-  assert.deepEqual(readFileSync(join(work,'artifact',name)),bytes);
+  if(failure)await assert.rejects(invoke);else assert.deepEqual(await invoke(),{uploaded:true,platform:'android',version,buildNumber:'42'});
+  assert.deepEqual(calls,['token','proof'].includes(failure)?[]:failure==='edit'?[prefix]:[prefix,'/upload'+prefix+'/1/bundles']);
  }
 });
 

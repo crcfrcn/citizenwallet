@@ -201,7 +201,7 @@ SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction�
 
 propose_enact_law的原四字节地域槽按两字节原省码加u16小端原省内市号解码，不再按u32数字省码展示。全国明确四零字节；省级为两位大写字母和零市号；市级为原省码及原三位市号数值，展示补齐原前导零。非法层级、字母或地域形状拒签，不回退全国。复用原确认页scope_code字段及行政区代码标签显示CN、原省码或原省码加市号，不新增控件或扫码交互。CID、CN、现有省市规则及宪法修改流程保持。
 
-transaction_version属于框架原生RuntimeVersion，不是新增公民链字段。遵循CitizenChainRuntime.md的统一政策，每次正式Runtime升级，spec_version和transaction_version各自在此前实际部署值上加1；本钱包chain_constants.dart同步支持该次交易版本。编辑、测试或重复编译不递增版本，不按改动种类另作判断，也不把spec_version当成transaction_version。钱包支持值已按正式节点最终确认状态同步为transaction_version=1（spec_version=2）；本次不执行链上升级。现有offline_sign_service交易版本严格相等拒签机制不改，测试以支持版本加一构造不支持版本，避免把某个固定合法版本永久当作错误。既有载荷夹具增加原字母、省内市号、不同省同市号及非法值断言；全国改为合法四零字节。均仅为源码维护，未运行测试、类型检查、编译、安装或签名。
+transaction_version属于框架原生RuntimeVersion，不是新增公民链字段。遵循CitizenChainRuntime.md的统一政策，每次正式Runtime升级，spec_version和transaction_version各自在此前实际部署值上加1；本钱包chain_constants.dart同步支持该次交易版本。编辑、测试或重复编译不递增版本，不按改动种类另作判断，也不把spec_version当成transaction_version。钱包支持值按正式节点最终确认区块 86 同步为 transaction_version=2（spec_version=3）。现有offline_sign_service交易版本严格相等拒签机制不改，测试以支持版本加一构造不支持版本，避免把某个固定合法版本永久当作错误。既有载荷夹具增加原字母、省内市号、不同省同市号及非法值断言；全国改为合法四零字节。均仅为源码维护，未运行测试、类型检查、编译、安装或签名。
 
 ## 当前编译与自动化合同
 
@@ -209,13 +209,13 @@ scripts/config.mjs仅声明产品、工具、平台、配置需求与公开入�
 
 本机与GitHub均沿原始依赖锁执行；本机优先复用已有资源，包管理器按原锁补齐缺失依赖，自动化按原锁准备资源；真实下载、测试、编译、签名或验收失败必须失败。官方缓存只存可再生依赖与编译状态，不含签名材料；恢复/保存故障不阻塞。每轮现场归target/test或target/build的唯一目录，缓存原子领取且不等待，取消等待本轮进程组退出后清理；无法确认退出则保留现场并明确失败。
 
-产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>，以及供Android工作流调用的verify-internal android。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。控制台恢复只观察原Run，产品cleanup命令独立执行历史收尾。成功版本补丁加一，失败不加。商店内测交付或回查失败时，原always收尾核对本轮Run、attempt、源码和Tag归属后撤回本轮Tag与Release并回查，保留失败Run、日志和Artifact，不占用同版本重试；不删除其他Run的候选。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
+产品命令：node scripts/build.mjs test <平台>、build <平台>、candidate <平台>、automate <平台>、cleanup <平台>，以及供Android工作流调用的upload android。自动化按准确main提交和平台Workflow执行，派发前检查活动Run，官方派发回执直接提供Run ID；不确定不补发。控制台恢复只观察原Run，产品cleanup命令独立执行历史收尾。成功版本补丁加一，失败不加。商店上传失败时，原always收尾核对本轮Run、attempt、源码和Tag归属后撤回本轮Tag与Release并回查，保留失败Run、日志和Artifact，不占用同版本重试；不删除其他Run的候选。自动化候选版本仅存在本轮派生工程与产物，不回写产品版本和依赖锁。
 
 固定Workflow为产品·平台；Run、Job、Artifact、正式Tag、Release及附件显示标签为产品·平台·vX.Y.Z，必要文件扩展名保留。Workflow创建准确源码Tag，正式附件先逐个下载比较再确认正式Release；清理按本产品平台最新成功和非成功终态各留一条，活动任务保留，删除后回查。淘汰旧成功前必须确认新正式Release/Tag与Artifact；不按界面隐藏代替实际删除。
 
-产品测试、塔塔鹿鹿和自动化均通过控制台发起。本机塔塔安装器与 GitHub 塔塔自动化共用本仓唯一编译实现。两端只交付内部测试，商店回查本轮构建通过才算自动化成功。
-iOS 沿用现有签名、导出方式与 App Store Connect 凭据。上传前核对钱包应用及「公民钱包」内部组，阻止其他内部组自动接收时上传。该组与公民 App 的「公民」组使用相同测试员。通过 altool 上传同一份已验收 IPA，按本轮版本和构建号查找，确认目标组内的构建可测试。私钥只写入本轮签名现场，由现有清理删除。
-Android 复用公民 App 的两人名单。使用本轮 Workflow 附件及其构建证明，从 Google Play Console 的内部轨道单独上传并推出 AAB。自动化等待该版本出现在内部轨道，并核对本轮 versionCode、PUBLISHED、completed 及 Google 回读的 SHA-256。Google 官方认证 Action 提供短期令牌。只创建和删除用于回查的临时 edit，避免提交 API 将商店后台的其他待审项一起送审。未推出、审核未通过、轨道不匹配或回查超时均不报成功。
+产品测试、塔塔鹿鹿和自动化均通过控制台发起。本机塔塔安装器与 GitHub 塔塔自动化共用本仓唯一编译实现。两端商店步骤以本次上传回执为准，上传失败则 Run 失败。
+iOS 沿用现有签名、导出方式与 App Store Connect 凭据。通过 altool 上传同一份已验收 IPA。私钥只写入本轮签名现场，由现有清理删除。TestFlight 分组独立处理。
+Android 使用 Google 官方认证 Action 交付短期令牌，将本轮已验收的 AAB 上传到 Google Play 临时编辑。只核对上传响应中的 versionCode 和 SHA-256。临时编辑不自动提交，上传回执只证明 Google 接收了本轮 AAB。内测推出在 Play Console 独立处理。
 
 钱包平台为ios、android；宿主Rust签名库只作为真实Flutter测试输入。编译使用Flutter 3.47.2、Rust 1.97.1、Gradle 9.1.0、AGP 9.0.1、KGP 2.2.20、NDK 28.2.13676358、CocoaPods 1.17.0。Android使用官方Flutter插件加载器和当前原锁插件支持的KGP/DSL设置，不修订Flutter、Gradle或插件缓存；工程和硬件金库单测按官方布局装配到本轮source-view。图标使用macOS sips与既有原件、尺寸声明，不包含自编图片编解码器。
 
@@ -223,7 +223,7 @@ iOS消费现有原工程与Pod锁，使用CocoaPods官方disable_input_output_pa
 
 签名材料只在获准步骤临时使用，Apple钥匙串搜索列表按原值恢复，本轮profile与临时钥匙串随后删除。test/build.test.mjs覆盖构建规则和失败边界，signing原生测试、现有全部Dart测试及Android硬件金库单测仍由真实官方工具执行。现有XCUITest保留；未执行的真机UI或实际设备安装不得记为通过。
 
-本机编译先检查已安装的 Flutter、Rust 工具链与目标、CocoaPods 或 Android SDK、NDK、JDK 和 Gradle。显式路径、系统和用户安装位置、版本管理器及本机已有产品资源均可作为候选，匹配声明和原锁才直接复用。确实缺件时报告检查位置、发现的版本和缺件，本次具体下载授权后才可按原声明补齐。GitHub Runner 仍由产品入口按声明准备 Flutter、Rust 和 CocoaPods。控制台只交付普通工具路径和获准输入。删除历史资产先移除已验真Tag，再移除其Release，失败重试仍保留归属回执；相关中断回归归test/build.test.mjs。
+本机编译先检查已安装的 Flutter、Rust 工具链与目标、CocoaPods 或 Android SDK、NDK、JDK 和 Gradle。显式路径、系统和用户安装位置、版本管理器及本机已有产品资源均可作为候选，匹配声明和原锁才直接复用。确实缺件时按原声明和原锁由官方工具自动补齐。Pub 按锁内摘要复用本机包缓存，Cargo 按原锁校验归档后复用，CocoaPods 使用本机已有的官方缓存。Gradle 同时使用本机可写缓存和本轮兼容的只读依赖快照，缺少的依赖由原仓库补齐。GitHub Runner 仍由产品入口按声明准备 Flutter、Rust 和 CocoaPods。控制台只交付普通工具路径和获准输入。删除历史资产先移除已验真Tag，再移除其Release，失败重试仍保留归属回执；相关中断回归归test/build.test.mjs。
 
 载荷解码只对三处多行if补齐花括号，原条件、return null及后续业务表达式保持，既有断言不变，严格分析规则不关闭。
 
