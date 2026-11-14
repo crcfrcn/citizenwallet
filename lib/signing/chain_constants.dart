@@ -18,9 +18,9 @@ class ChainConstants {
 
   /// 当前钱包支持的 Substrate `transaction_version`。
   ///
-  /// 2026-11-08 经正式本机节点可信 RPC 确认区块 86：
-  /// spec_version=3、transaction_version=2。
+  /// 提案 ID 扩宽候选配套交易版本：3。
+  /// 升级前实链为 spec_version=3、transaction_version=2，发布时须重新核对。
   /// 不支持的交易版本继续严格拒签。
   /// 钱包对 spec_version 仍只解析展示；编辑或重复编译不触发版本递增。
-  static const int transactionVersion = 2;
+  static const int transactionVersion = 3;
 }

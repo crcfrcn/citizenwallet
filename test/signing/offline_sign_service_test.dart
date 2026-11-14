@@ -541,8 +541,8 @@ void main() {
 
     test('signParsedRequest should sign normal internal_vote (统一入口)', () async {
       // 所有管理员投票走 InternalVote(20).cast(0)
-      // payload = [0x14][0x00][u64 LE proposal_id=1][Personal=0][approve=1] + 扩展尾
-      final payloadHex = _withSigningTailHex('0x140001000000000000000001');
+      // payload = [0x14][0x00][Compact<u128> proposal_id=1][Personal=0][approve=1] + 扩展尾
+      final payloadHex = _withSigningTailHex('0x1400040001');
       final request = _buildTestRequest(
         requestId: 'offline-req-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -571,7 +571,7 @@ void main() {
     });
 
     test('同一请求 id 到期前只能签名一次', () async {
-      final payloadHex = _withSigningTailHex('0x140001000000000000000001');
+      final payloadHex = _withSigningTailHex('0x1400040001');
       final request = _buildTestRequest(
         requestId: 'offline-replay-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -673,10 +673,10 @@ void main() {
           action: QrActions.transferWithRemark,
         );
         final verification = service.verifyPayload(request);
-        expect(verification.canSign, transactionVersion == 2);
-        if (transactionVersion == 2) {
+        expect(verification.canSign, transactionVersion == ChainConstants.transactionVersion);
+        if (transactionVersion == ChainConstants.transactionVersion) {
           expect(verification.decoded?.fields['spec_version'], '3');
-          expect(verification.decoded?.fields['transaction_version'], '2');
+          expect(verification.decoded?.fields['transaction_version'], ChainConstants.transactionVersion.toString());
           expect(verification.decoded?.action, 'transfer');
         } else {
           expect(verification.rejectReason, '交易格式版本不受当前钱包支持，请升级公民钱包');
@@ -1058,7 +1058,7 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-unknown-account',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: _withSigningTailHex('0x140001000000000000000001'),
+        payloadHex: _withSigningTailHex('0x1400010000000000000000000000000000000001'),
         action: QrActions.internalVote,
       );
 
