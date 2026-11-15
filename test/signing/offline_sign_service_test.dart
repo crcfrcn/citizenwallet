@@ -9,6 +9,7 @@ import 'package:citizenwallet/signing/chain_constants.dart';
 import 'package:citizenwallet/wallet/native_sr25519.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 import 'package:citizenwallet/signing/offline_sign_service.dart';
+import 'package:citizenwallet/signing/payload_decoder.dart';
 import 'package:citizenwallet/protocol/qr_protocols.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
@@ -541,8 +542,8 @@ void main() {
 
     test('signParsedRequest should sign normal internal_vote (统一入口)', () async {
       // 所有管理员投票走 InternalVote(20).cast(0)
-      // payload = [0x14][0x00][Compact<u128> proposal_id=1][Personal=0][approve=1] + 扩展尾
-      final payloadHex = _withSigningTailHex('0x1400040001');
+      // payload = [0x14][0x00][u128_le proposal_id=1][Personal=0][approve=1] + 扩展尾
+      final payloadHex = _withSigningTailHex('0x1400010000000000000000000000000000000001');
       final request = _buildTestRequest(
         requestId: 'offline-req-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -570,8 +571,39 @@ void main() {
       );
     });
 
+    test('非法表决bool即使携带合法签名尾也拒签且不调用签名器', () async {
+      final id = List<int>.filled(16, 0)..[0] = 1;
+      final cases = <(int, List<int>)>[
+        (QrActions.internalVote, [20, 0, ...id, 0]),
+        (QrActions.jointVote, [21, 0, ...id, ..._scaleString('LN001-NRC0G-944805165-2026'), ..._scaleString('COMMITTEE_MEMBER')]),
+        (QrActions.castReferendum, [21, 1, ...id]),
+        (QrActions.castRepresentativeVote, [26, 1, ...id, ..._scaleString('HOUSE_MEMBER')]),
+        (QrActions.castLegislationReferendum, [26, 2, ...id]),
+        (QrActions.executiveSign, [26, 3, ...id]),
+        (QrActions.overrideSign, [26, 4, ...id]),
+        (QrActions.guardVote, [26, 5, ...id]),
+      ];
+      for (var index = 0; index < cases.length; index++) {
+        final (action, prefix) = cases[index];
+        for (final value in [2, 255]) {
+          final request = _buildTestRequest(
+            requestId: 'invalid-vote-bool-$index-$value',
+            signerPublicKey: signingAccount.accountId,
+            payloadHex: _withSigningTailHex('0x${_toHex([...prefix, value])}'),
+            action: action,
+          );
+          expect(service.verifyPayload(request).status, SignDecisionStatus.reject);
+          await expectLater(
+            service.signParsedRequest(accountId: signingAccount.accountId, request: request),
+            throwsA(isA<OfflineSignException>()),
+          );
+        }
+      }
+      expect(walletManager.signCallCount, 0);
+    });
+
     test('同一请求 id 到期前只能签名一次', () async {
-      final payloadHex = _withSigningTailHex('0x1400040001');
+      final payloadHex = _withSigningTailHex('0x1400010000000000000000000000000000000001');
       final request = _buildTestRequest(
         requestId: 'offline-replay-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -602,7 +634,8 @@ void main() {
 
     test('signParsedRequest 拒绝 action 与 payload 不一致', () async {
       // decode 成功但 QR action 和 decoded.action 不一致 → 红色拒签。
-      final payloadHex = _withSigningTailHex('0x1400070000000000000001');
+      final payloadHex = _withSigningTailHex('0x1400070000000000000000000000000000000001');
+      expect(PayloadDecoder.decode(payloadHex)?.action, 'internal_vote');
       final request = _buildTestRequest(
         requestId: 'offline-req-test-action-mismatch',
         signerPublicKey: signingAccount.accountId,

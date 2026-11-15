@@ -67,8 +67,8 @@ class DecodedCidAccountAuthorizationTemplate {
     required this.expectedBindingRevision,
     required this.expiresAt,
     required int accountOffset,
-  })  : _payload = Uint8List.fromList(payload),
-        _accountOffset = accountOffset;
+  }) : _payload = Uint8List.fromList(payload),
+       _accountOffset = accountOffset;
 
   final Uint8List _payload;
   final int _accountOffset;
@@ -528,13 +528,13 @@ class PayloadDecoder {
         return switch (callIndex) {
           PalletRegistry.publishPostCall => _decodePublishPost(bytes),
           PalletRegistry.subscribeCall => _decodeSubscriptionChange(
-              bytes,
-              action: 'subscribe',
-              actionText: '订阅',
-            ),
+            bytes,
+            action: 'subscribe',
+            actionText: '订阅',
+          ),
           PalletRegistry.cancelSubscriptionCall => _decodeCancelSubscription(
-              bytes,
-            ),
+            bytes,
+          ),
           PalletRegistry.setCreatorPlansCall => _decodeSetCreatorPlans(bytes),
           PalletRegistry.changeSubscriptionPlanCall =>
             _decodeSubscriptionChange(
@@ -557,8 +557,8 @@ class PayloadDecoder {
           PalletRegistry.proposeMintCall => _decodeProposeAssetMint(bytes),
           PalletRegistry.proposeBurnCall => _decodeProposeAssetBurn(bytes),
           PalletRegistry.proposeCloseAssetCall => _decodeProposeAssetClose(
-              bytes,
-            ),
+            bytes,
+          ),
           PalletRegistry.proposeAssetTransferCall =>
             _decodeProposeAssetTransfer(bytes),
           PalletRegistry.proposeMonitorFreezeCall =>
@@ -1110,26 +1110,10 @@ class PayloadDecoder {
   // 统一入口:所有业务 pallet(admins/resolution_destroy/grandpa_key/
   // entity_manage/multisig_transfer 五路)的机构岗位选民/个人管理员投票都走 InternalVote::cast(20.0),
   // 冷钱包不按业务 pallet 分路解码投票 payload。
-  /// 仅接受规范、完整范围Compact<u128>提案号。
-  static (BigInt, int)? _readCompactProposal(Uint8List bytes) {
-    final (v, n) = _decodeCompactBigInt(bytes, 2);
-    if (v == null || n == 0 || v.isNegative || v.bitLength > 128) return null;
-    final minimal = v < BigInt.from(64)
-        ? 1
-        : v < BigInt.from(16384)
-            ? 2
-            : v < (BigInt.one << 30)
-                ? 4
-                : 1 + ((v.bitLength + 7) ~/ 8);
-    if (n != minimal || 2 + n >= bytes.length) return null;
-    return (v, 2 + n);
-  }
-
   static DecodedPayload? _decodeInternalVote(Uint8List bytes) {
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    var offset = proposal.$2;
+    if (bytes.length < 20) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    var offset = 18;
     final claim = bytes[offset++];
     String? voterRoleCode;
     if (claim == 1) {
@@ -1141,8 +1125,9 @@ class PayloadDecoder {
       return null;
     }
     if (offset >= bytes.length) return null;
-    if (bytes[offset] > 1) return null;
-    final approve = bytes[offset++] != 0;
+    final approveByte = bytes[offset++];
+    if (approveByte > 1) return null;
+    final approve = approveByte == 1;
     if (!_hasValidSigningTail(bytes, offset)) return null;
     final voteText = approve ? '赞成' : '反对';
     return DecodedPayload(
@@ -1158,7 +1143,7 @@ class PayloadDecoder {
   }
 
   // VotingEngine(9) / finalize_proposal(3)
-  // 格式：[0x09][0x03][proposal_id:Compact<u128>]
+  // 格式：[0x09][0x03][proposal_id:u128_le]
   //
   // 任意账户触发终态执行,无需签投票语义。引擎核心 lifecycle extrinsic。
   static DecodedPayload? _decodeFinalizeProposal(Uint8List bytes) {
@@ -1212,17 +1197,17 @@ class PayloadDecoder {
   // JointVote(21) / cast_admin(0)
   // 格式：[0x15][0x00][proposal_id:u128_le][cid_number][voter_role_code][approve]
   static DecodedPayload? _decodeJointVote(Uint8List bytes) {
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    final cidRead = _readCidNumber(bytes, proposal.$2);
+    if (bytes.length < 20) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    final cidRead = _readCidNumber(bytes, 18);
     if (cidRead == null) return null;
     final cidNumber = cidRead.$1;
     final roleRead = _readRoleCode(bytes, cidRead.$2);
     if (roleRead == null || roleRead.$2 >= bytes.length) return null;
     final voterRoleCode = roleRead.$1;
-    if (bytes[roleRead.$2] > 1) return null;
-    final approve = bytes[roleRead.$2] != 0;
+    final approveByte = bytes[roleRead.$2];
+    if (approveByte > 1) return null;
+    final approve = approveByte == 1;
     final callEnd = roleRead.$2 + 1;
     if (!_hasValidSigningTail(bytes, callEnd)) return null;
     final voteText = approve ? '赞成' : '反对';
@@ -1240,14 +1225,13 @@ class PayloadDecoder {
   }
 
   // JointVote(21) / cast_referendum(1)
-  // 格式：[0x15][0x01][proposal_id:Compact<u128>][approve:bool]
+  // 格式：[0x15][0x01][proposal_id:u128_le][approve:bool]
   static DecodedPayload? _decodeCastReferendum(Uint8List bytes) {
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    if (bytes[proposal.$2] > 1 || !_hasValidSigningTail(bytes, proposal.$2 + 1))
-      return null;
-    final approve = bytes[proposal.$2] != 0;
+    if (bytes.length < 19 || !_hasValidSigningTail(bytes, 19)) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    final approveByte = bytes[18];
+    if (approveByte > 1) return null;
+    final approve = approveByte == 1;
     final voteText = approve ? '赞成' : '反对';
 
     return DecodedPayload(
@@ -1261,12 +1245,11 @@ class PayloadDecoder {
   }
 
   // ElectionVote(22) / cast_popular_vote(2)
-  // SCALE:[22][2][proposal_id:Compact<u128>][candidate_subject(cid_number+account_id)]。
+  // SCALE:[22][2][proposal_id:u128][candidate_subject(cid_number+account_id)]。
   static DecodedPayload? _decodeCastPopularVote(Uint8List bytes) {
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    final candidate = _readCitizenSubject(bytes, proposal.$2);
+    if (bytes.length < 51) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    final candidate = _readCitizenSubject(bytes, 18);
     if (candidate == null || !_hasValidSigningTail(bytes, candidate.$3)) {
       return null;
     }
@@ -1282,12 +1265,11 @@ class PayloadDecoder {
   }
 
   // ElectionVote(22) / cast_mutual_vote(3)
-  // SCALE:[22][3][proposal_id:Compact<u128>][voter_role_code][candidate_subject]。
+  // SCALE:[22][3][proposal_id:u128][voter_role_code][candidate_subject]。
   static DecodedPayload? _decodeCastMutualVote(Uint8List bytes) {
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    final role = _readRoleCode(bytes, proposal.$2);
+    if (bytes.length < 52) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    final role = _readRoleCode(bytes, 18);
     if (role == null) return null;
     final candidate = _readCitizenSubject(bytes, role.$2);
     if (candidate == null || !_hasValidSigningTail(bytes, candidate.$3)) {
@@ -1392,8 +1374,7 @@ class PayloadDecoder {
     final text = cidNumber.split('-').last;
     final year = int.tryParse(text);
     // 年份为 u32；至少四位补零，保留旧 CID，拒绝越界及新增的歧义前导零。
-    return year != null &&
-        year <= 0xffffffff &&
+    return year != null && year <= 0xffffffff &&
         year.toString().padLeft(4, '0') == text;
   }
 
@@ -1401,7 +1382,7 @@ class PayloadDecoder {
   static bool _isStructuredCitizenCid(String cidNumber) {
     return _isStructuredInstitutionCid(cidNumber) &&
         RegExp(r'^[A-Z0-9]{5}-CTZN[A-Z0-9]-[0-9]{9}-[0-9]{4,10}$')
-            .hasMatch(cidNumber);
+        .hasMatch(cidNumber);
   }
 
   // 清算行管理员解密（非链上交易，二进制前缀域）。
@@ -2022,7 +2003,8 @@ class PayloadDecoder {
     String? actorRoleCode,
     int assetId,
     int next,
-  })? _readOnchainAssetHeader(Uint8List bytes, {bool withActorRole = false}) {
+  })?
+  _readOnchainAssetHeader(Uint8List bytes, {bool withActorRole = false}) {
     final actorRead = _readCidNumber(bytes, 2);
     if (actorRead == null) return null;
     var offset = actorRead.$2;
@@ -2084,7 +2066,8 @@ class PayloadDecoder {
 
     if (offset + 4 + 16 > bytes.length) return null;
     if (!_hasValidSigningTail(bytes, offset + 4 + 16)) return null;
-    final regularThreshold = bytes[offset] |
+    final regularThreshold =
+        bytes[offset] |
         (bytes[offset + 1] << 8) |
         (bytes[offset + 2] << 16) |
         (bytes[offset + 3] << 24);
@@ -2401,8 +2384,9 @@ class PayloadDecoder {
     if (offset + proofSignatureBytes > bytes.length) return null;
     offset += proofSignatureBytes;
     if (!_hasValidSigningTail(bytes, offset)) return null;
-    final keyHex =
-        keyBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final keyHex = keyBytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
     return DecodedPayload(
       action: emergencyRecovery
           ? 'propose_emergency_grandpa_key_recovery'
@@ -2610,14 +2594,14 @@ class PayloadDecoder {
     if (nationwide
         ? province.any((byte) => byte != 0) || cityNumber != 0
         : province.any((byte) => byte < 65 || byte > 90) ||
-            cityNumber > 999 ||
-            (tierIndex == 2 && cityNumber != 0)) {
+              cityNumber > 999 ||
+              (tierIndex == 2 && cityNumber != 0)) {
       return null;
     }
     final regionText = nationwide
         ? 'CN'
         : String.fromCharCodes(province) +
-            (tierIndex == 3 ? cityNumber.toString().padLeft(3, '0') : '');
+              (tierIndex == 3 ? cityNumber.toString().padLeft(3, '0') : '');
     offset += 4;
 
     // houses
@@ -2824,13 +2808,12 @@ class PayloadDecoder {
     required String action,
     required String summaryTemplate,
   }) {
-    // call_data: 2 + Compact<u128> 编码长度 + 1（表决方向）
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    if (bytes[proposal.$2] > 1 || !_hasValidSigningTail(bytes, proposal.$2 + 1))
-      return null;
-    final approve = bytes[proposal.$2] != 0;
+    // call_data: 2 + 16 + 1 = 19
+    if (bytes.length < 19 || !_hasValidSigningTail(bytes, 19)) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    final approveByte = bytes[18];
+    if (approveByte > 1) return null;
+    final approve = approveByte == 1;
     final voteText = approve ? '赞成' : '反对';
     return DecodedPayload(
       action: action,
@@ -2845,15 +2828,15 @@ class PayloadDecoder {
   }
 
   // LegislationVote(26) / cast_representative_vote(1)
-  // SCALE: [26][1][proposal_id:Compact<u128>][voter_role_code:RoleCode][approve]
+  // SCALE: [26][1][proposal_id:u128_le][voter_role_code:RoleCode][approve]
   static DecodedPayload? _decodeCastRepresentativeVote(Uint8List bytes) {
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    final roleRead = _readRoleCode(bytes, proposal.$2);
+    if (bytes.length < 21) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    final roleRead = _readRoleCode(bytes, 18);
     if (roleRead == null || roleRead.$2 >= bytes.length) return null;
-    if (bytes[roleRead.$2] > 1) return null;
-    final approve = bytes[roleRead.$2] != 0;
+    final approveByte = bytes[roleRead.$2];
+    if (approveByte > 1) return null;
+    final approve = approveByte == 1;
     final callEnd = roleRead.$2 + 1;
     if (!_hasValidSigningTail(bytes, callEnd)) return null;
     final voteText = approve ? '赞成' : '反对';
@@ -2869,14 +2852,13 @@ class PayloadDecoder {
   }
 
   // LegislationVote(26) / cast_referendum_vote(2)
-  // SCALE: [26][2][proposal_id:Compact<u128>][approve:bool]
+  // SCALE: [26][2][proposal_id:u128_le][approve:bool]
   static DecodedPayload? _decodeCastLegislationReferendum(Uint8List bytes) {
-    final proposal = _readCompactProposal(bytes);
-    if (proposal == null) return null;
-    final proposalId = proposal.$1;
-    if (bytes[proposal.$2] > 1 || !_hasValidSigningTail(bytes, proposal.$2 + 1))
-      return null;
-    final approve = bytes[proposal.$2] != 0;
+    if (bytes.length < 19 || !_hasValidSigningTail(bytes, 19)) return null;
+    final proposalId = _readU128Le(bytes, 2);
+    final approveByte = bytes[18];
+    if (approveByte > 1) return null;
+    final approve = approveByte == 1;
     final voteText = approve ? '赞成' : '反对';
 
     return DecodedPayload(
@@ -3256,7 +3238,8 @@ class PayloadDecoder {
     Map<String, String> fields,
     Map<String, String> reviewFields,
     int next,
-  })? _readVotingIdentityPayload(Uint8List bytes, int offset) {
+  })?
+  _readVotingIdentityPayload(Uint8List bytes, int offset) {
     final (cidNumber, afterCid) = _readUtf8Vec(bytes, offset);
     if (cidNumber == null || cidNumber.isEmpty || cidNumber.length > 32) {
       return null;
@@ -3338,7 +3321,8 @@ class PayloadDecoder {
     Map<String, String> fields,
     Map<String, String> reviewFields,
     int next,
-  })? _readCandidateIdentityPayload(Uint8List bytes, int offset) {
+  })?
+  _readCandidateIdentityPayload(Uint8List bytes, int offset) {
     final voting = _readVotingIdentityPayload(bytes, offset);
     if (voting == null) return null;
     offset = voting.next;
@@ -3622,28 +3606,27 @@ class PayloadDecoder {
 
     final fieldNames = switch (callIndex) {
       PalletRegistry.setAddressNameCall => const [
-          'province_code',
-          'city_code',
-          'town_code',
-          'address_name_code',
-          'address_name',
-        ],
+        'province_code',
+        'city_code',
+        'town_code',
+        'address_name_code',
+        'address_name',
+      ],
       PalletRegistry.removeAddressNameCall => const [
-          'province_code',
-          'city_code',
-          'town_code',
-          'address_name_code',
-        ],
+        'province_code',
+        'city_code',
+        'town_code',
+        'address_name_code',
+      ],
       PalletRegistry.setAddressCall ||
-      PalletRegistry.removeAddressCall =>
-        const [
-          'province_code',
-          'city_code',
-          'town_code',
-          'address_name_code',
-          'address_local_no',
-          'address_detail',
-        ],
+      PalletRegistry.removeAddressCall => const [
+        'province_code',
+        'city_code',
+        'town_code',
+        'address_name_code',
+        'address_local_no',
+        'address_detail',
+      ],
       _ => null,
     };
     if (fieldNames == null) return null;
@@ -3870,11 +3853,11 @@ class PayloadDecoder {
   }
 
   static String? _billingPeriodLabel(int value) => switch (value) {
-        0 => '月付',
-        1 => '季付',
-        2 => '年付',
-        _ => null,
-      };
+    0 => '月付',
+    1 => '季付',
+    2 => '年付',
+    _ => null,
+  };
 
   static bool _isValidTierId(String value) =>
       value.isNotEmpty && value.codeUnits.every((unit) => unit <= 0x7f);
@@ -4324,7 +4307,8 @@ class PayloadDecoder {
         return (BigInt.from(val), 2);
       case 2:
         if (offset + 4 > bytes.length) return (null, 0);
-        final val = ((bytes[offset + 3] << 24) |
+        final val =
+            ((bytes[offset + 3] << 24) |
                 (bytes[offset + 2] << 16) |
                 (bytes[offset + 1] << 8) |
                 bytes[offset]) >>
@@ -4473,15 +4457,17 @@ class PayloadDecoder {
   }
 
   static String _adminReviewValue(List<_DecodedAdminPerson> admins) {
-    return admins.map((admin) {
-      final name = '${admin.familyName}${admin.givenName}';
-      final cid = admin.citizenCidNumber;
-      final profile = [
-        if (name.isNotEmpty) name,
-        if (cid != null && cid.isNotEmpty) cid,
-      ].join(' / ');
-      return '${profile.isEmpty ? '资料待完善' : profile}(${_bytesToSs58(admin.accountBytes)})';
-    }).join('、');
+    return admins
+        .map((admin) {
+          final name = '${admin.familyName}${admin.givenName}';
+          final cid = admin.citizenCidNumber;
+          final profile = [
+            if (name.isNotEmpty) name,
+            if (cid != null && cid.isNotEmpty) cid,
+          ].join(' / ');
+          return '${profile.isEmpty ? '资料待完善' : profile}(${_bytesToSs58(admin.accountBytes)})';
+        })
+        .join('、');
   }
 
   /// 机构治理共用读取器；对外只返回人数、展示文本和新偏移。
@@ -4587,7 +4573,8 @@ class PayloadDecoder {
         final name = _readUtf8Vec(bytes, offset);
         if (name.$1 == null ||
             name.$1!.isEmpty ||
-            utf8.encode(name.$1!).length > 128) return null;
+            utf8.encode(name.$1!).length > 128)
+          return null;
         offset = name.$2;
         if (offset >= bytes.length || bytes[offset] > 1) return null;
         final termRequired = bytes[offset++] == 1;
@@ -4627,7 +4614,8 @@ class PayloadDecoder {
         final name = _readUtf8Vec(bytes, offset);
         if (name.$1 == null ||
             name.$1!.isEmpty ||
-            utf8.encode(name.$1!).length > 128) return null;
+            utf8.encode(name.$1!).length > 128)
+          return null;
         offset = name.$2;
         continue;
       }
@@ -4659,7 +4647,8 @@ class PayloadDecoder {
       final moduleTag = _readUtf8Vec(bytes, offset);
       if (moduleTag.$1 == null ||
           moduleTag.$1!.isEmpty ||
-          utf8.encode(moduleTag.$1!).length > 32) return null;
+          utf8.encode(moduleTag.$1!).length > 32)
+        return null;
       offset = moduleTag.$2;
       if (offset + 5 > bytes.length) return null;
       final actionCode = _readU32Le(bytes, offset);
@@ -4703,7 +4692,8 @@ class PayloadDecoder {
       offset += 4;
       if (registration &&
           ((termRequired == true && (start == 0 || end < start)) ||
-              (termRequired == false && (start != 0 || end != 0)))) return null;
+              (termRequired == false && (start != 0 || end != 0))))
+        return null;
       final source = bytes[offset++];
       if (registration ? source > 5 : source != 5) return null;
       final (refLength, refSize) = _decodeCompactU32(bytes, offset);
@@ -4715,7 +4705,8 @@ class PayloadDecoder {
       // 新建/改任职为Registry空引用；其余仅可透传存量引用，真实性由Runtime与链状态核验。
       if (registration &&
           ((!retainedAllowed && (source != 1 || refLength != 0)) ||
-              (retainedAllowed && refLength == 0 && source != 1))) return null;
+              (retainedAllowed && refLength == 0 && source != 1)))
+        return null;
       final status = bytes[offset++];
       if (registration ? status != 0 : status > 1) return null;
       if (registration) {
@@ -4813,7 +4804,7 @@ class PayloadDecoder {
   /// 严格读取 `CidOccupyAuthorization` 模板:
   /// genesis_hash + cid_number + account_id(零槽) + revision=0 + expires_at。
   static DecodedCidAccountAuthorizationTemplate?
-      readCidOccupyAuthorizationTemplate(Uint8List bytes) {
+  readCidOccupyAuthorizationTemplate(Uint8List bytes) {
     if (bytes.length < 33 || (bytes[32] & 0x03) != 0) return null;
     var offset = 32;
     final cidRead = _readCidNumber(bytes, offset);
@@ -4841,7 +4832,7 @@ class PayloadDecoder {
   /// 严格读取 `CidRebindAuthorization` 模板:
   /// genesis_hash + cid_number + current_account_id + new_account_id(零槽) + revision + expires_at。
   static DecodedCidAccountAuthorizationTemplate?
-      readCidRebindAuthorizationTemplate(Uint8List bytes) {
+  readCidRebindAuthorizationTemplate(Uint8List bytes) {
     if (bytes.length < 65 || (bytes[32] & 0x03) != 0) return null;
     var offset = 32;
     final cidRead = _readCidNumber(bytes, offset);
@@ -4934,9 +4925,9 @@ class PayloadDecoder {
     final yuan = fen ~/ BigInt.from(100);
     final remainder = (fen % BigInt.from(100)).toInt().abs();
     final intStr = yuan.toString().replaceAllMapped(
-          RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-          (m) => '${m[1]},',
-        );
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (m) => '${m[1]},',
+    );
     return '$intStr.${remainder.toString().padLeft(2, '0')}';
   }
 
