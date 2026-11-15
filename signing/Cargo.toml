@@ -9,17 +9,21 @@ edition = "2021"
 authors = ["VoyagerRhett <chinanation@icloud.com>"]
 repository = "https://github.com/crcfrcn/citizenwallet"
 license = "MIT"
-description = "CitizenWallet 冷钱包 sr25519 签名原生库"
+description = "CitizenWallet 冷钱包 sr25519 与 ML-DSA-65 离线签名库"
 
 [lib]
 path = "lib.rs"
-# 冷钱包永久离线，只需sr25519签名，不需要链；绝不引入轻节点。
+# 冷钱包永久离线，仅链接账户签名能力，不链接节点或轻客户端。
 crate-type = ["cdylib", "staticlib"]
 name = "citizenwallet_signer"
 
 [dependencies]
+mldsa = { path = "../../citizenchain/runtime/transaction/mldsa", default-features = false, features = ["ffi"] }
 schnorrkel = { version = "=0.11.5", default-features = false, features = ["preaudit_deprecated", "alloc", "getrandom"] }
 zeroize = "=1.9.0"
+
+[features]
+operation = ["mldsa/pq-only"]
 
 [profile.release]
 opt-level = "z"        # 冷钱包体积优先

@@ -28,9 +28,9 @@ bool isLoginSignRequestExpired(LoginSignRequestEnvelope c) {
   return now >= (c.expiresAt ?? 0);
 }
 
-/// 登录请求的签名公钥必须与当前选中钱包 AccountId 完全一致。
+/// 登录请求的目标 AccountId 必须与当前选中账户完全一致。
 ///
-/// 当前 sr25519 账户的 AccountId32 直接取签名公钥 32 字节；双方文本都必须已经是
+/// 兼容字段 u 表示 AccountId，不表示完整 PQ 公钥；双方文本都必须已经是
 /// 小写 `0x` 加 64 位十六进制，不在安全边界内做补前缀、大小写转换或 trim。
 bool loginRequestTargetsAccountId(
   LoginSignRequestEnvelope request,

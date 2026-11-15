@@ -7,6 +7,7 @@ import 'package:citizenwallet/wallet/wallet_mini_secret.dart';
 import 'package:isar_community/isar.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 import 'package:citizenwallet/wallet/native_sr25519.dart';
+import 'package:citizenwallet/wallet/native_mldsa.dart';
 import 'package:citizenwallet/signing/chain_constants.dart';
 import 'package:citizenwallet/storage/wallet_isar.dart';
 import 'package:citizenwallet/protocol/qr_protocols.dart';
@@ -44,11 +45,11 @@ class Account {
   final String masterId;
   final int accountIndex;
 
-  /// 小写 `0x` + 64 位十六进制（= 派生公钥原字节）。
+  /// 固定 32 字节 AccountId：sr 为公钥原字节，PQ 为公钥的域隔离哈希。
   final String accountId;
   final String accountName;
 
-  /// SS58 只在展示和二维码边界由唯一账户公钥按本链前缀编码。
+  /// SS58 仅在展示和二维码边界由 AccountId 按本链前缀编码。
   String get ss58Address => Keyring().encodeAddress(
         WalletManager._hexToBytes(accountId),
         ChainConstants.ss58Prefix,
@@ -81,6 +82,7 @@ class WalletSignResult {
     required this.signatureHex,
   });
 
+  /// 响应 u 的兼容字段名，内容始终为 AccountId，不承载完整 PQ 公钥。
   final String signerPublicKey;
   final String alg;
   final String signatureHex;
@@ -173,7 +175,7 @@ class WalletManager {
   }
 
   // ── 创建 / 导入 / 加账户 ──
-  /// 新建钱包：生成助记词 → 派生账户0（`//0`）→ 存 master 种子 + 助记词。
+  /// 新建钱包：生成助记词 → 派生经典、量子账户0（`//0`）→ 存 master 种子 + 助记词。
   ///
   /// [wordCount] 助记词个数，12（默认）、18 或 24。助记词同时一次性返回展示。
   Future<WalletCreationResult> createWallet({
@@ -196,7 +198,7 @@ class WalletManager {
     return _establishWallet(mnemonic, password: password);
   }
 
-  /// 导入钱包：校验助记词 → 派生账户0（`//0`）→ 存 master 种子 + 助记词。
+  /// 导入钱包：校验助记词 → 派生经典、量子账户0（`//0`）→ 存 master 种子 + 助记词。
   Future<WalletCreationResult> importWallet(
     String mnemonic, {
     String password = '',
@@ -225,13 +227,15 @@ class WalletManager {
       password: password,
     );
     try {
-      // 账户0 = //0（无 bare 根）。其 accountId 即 master 指纹。
-      final acct0 = _deriveAccount(seed, 0);
-      final masterId = acct0;
-
+      // 同一助记词下分别派生两种账户0，开发期仍以经典账户作为钱包指纹。
+      final quantum = _deriveAccount(seed, 0, pq: true);
+      final classical =
+          NativeMldsa.defaultAlgorithm == 1 ? _deriveAccount(seed, 0) : null;
+      final masterId = classical ?? quantum;
       final result = await _appendWalletAtomic(
         masterId: masterId,
-        primary: acct0,
+        classical: classical,
+        quantum: quantum,
       );
       try {
         await _writeMasterMiniSecretKey(masterId, seed);
@@ -263,9 +267,13 @@ class WalletManager {
 
   /// 在指定钱包下新增账户：读存储种子，派生 `//index`（不产生新助记词）。
   ///
-  /// [index] 为空 = 添加"下一个"(max+1);非空 = 指定序号(`1..maxAccountIndex`,
+  /// [index] 为空 = 添加所选签名方式的下一个序号;非空 = 指定序号(`1..maxAccountIndex`,
   /// 用于恢复非连续账户 / 加别处已注资的特定账户)。序号可非连续。校验先于读种子。
-  Future<Account> addAccount(String masterId, {int? index}) async {
+  Future<Account> addAccount(String masterId, {int? index, bool? pq}) async {
+    final usePq = pq ?? (NativeMldsa.defaultAlgorithm == 2);
+    if (!usePq && NativeMldsa.defaultAlgorithm == 2) {
+      throw const WalletAuthException('运行期仅支持量子账户派生');
+    }
     // 非法显式序号在读取种子前拒绝；事务内仍复核范围和重复以保护最终写入。
     if (index != null && (index < 1 || index > maxAccountIndex)) {
       throw const WalletAuthException('账户序号需在 1–$maxAccountIndex');
@@ -283,11 +291,20 @@ class WalletManager {
     try {
       late AccountEntity entity;
       await isar.writeTxn(() async {
-        final accounts = await isar.accountEntitys
-            .filter()
-            .masterIdEqualTo(masterId)
-            .findAll();
-        final existing = accounts.map((e) => e.accountIndex).toSet();
+        final query = isar.accountEntitys.filter().masterIdEqualTo(masterId);
+        final accounts = index == null
+            ? await query.findAll()
+            : await query.accountIndexEqualTo(index).findAll();
+        // 签名来源由本钱包的真实派生公钥判断，不按名称或钱包指纹推断。
+        final classicIds = <int, String>{};
+        final existing = accounts
+            .where((account) {
+              final classic = classicIds.putIfAbsent(account.accountIndex,
+                  () => _deriveAccount(seed, account.accountIndex));
+              return (account.accountId != classic) == usePq;
+            })
+            .map((account) => account.accountIndex)
+            .toSet();
         final int targetIndex;
         if (index == null) {
           final maxIndex = existing.fold<int>(-1, (m, i) => i > m ? i : m);
@@ -300,17 +317,17 @@ class WalletManager {
             throw const WalletAuthException('账户序号需在 1–$maxAccountIndex');
           }
           if (existing.contains(index)) {
-            throw WalletAuthException('账户$index 已存在');
+            throw WalletAuthException('${usePq ? '量子' : '经典'}账户$index 已存在');
           }
           targetIndex = index;
         }
 
-        final derived = _deriveAccount(seed, targetIndex);
+        final derived = _deriveAccount(seed, targetIndex, pq: usePq);
         entity = AccountEntity()
           ..masterId = masterId
           ..accountIndex = targetIndex
           ..accountId = derived
-          ..accountName = '账户$targetIndex';
+          ..accountName = '${usePq ? '量子' : '经典'}账户$targetIndex';
         await isar.accountEntitys.put(entity);
       });
       return _toAccount(entity);
@@ -492,8 +509,10 @@ class WalletManager {
   }
 
   // ── 签名（按账户；读种子现场派生，签名完成立即清零可控密钥缓冲）──
-  Future<Uint8List> signForAccount(String accountId, Uint8List payload) =>
-      _signWithAccount(accountId, payload);
+  Future<Uint8List> signForAccount(String accountId, Uint8List payload,
+          {Uint8List? transactionReview}) =>
+      _signWithAccount(accountId, payload,
+          transactionReview: transactionReview);
 
   Future<WalletSignResult> signUtf8ForAccount(
     String accountId,
@@ -522,7 +541,7 @@ class WalletManager {
       );
       return WalletSignResult(
         signerPublicKey: accountId,
-        alg: 'sr25519',
+        alg: signature.length == 64 ? 'sr25519' : 'ml-dsa-65',
         signatureHex: '0x${_toHex(signature.toList(growable: false))}',
       );
     } catch (_) {
@@ -535,11 +554,12 @@ class WalletManager {
     }
   }
 
-  /// 定位账户 → 读种子 → 派生 → 校验公钥 → 签名；所有可控私钥缓冲在本方法内清零。
+  /// 定位账户 → 读种子 → 派生 → 核对派生的 AccountId → 签名；所有可控私钥缓冲在本方法内清零。
   Future<Uint8List> _signWithAccount(
     String accountId,
     Uint8List payload, {
     int? expiresAt,
+    Uint8List? transactionReview,
   }) async {
     // 在任何硬件解密/生物识别前先拒绝过期请求，避免无意义地调取根机密。
     if (expiresAt != null &&
@@ -565,10 +585,22 @@ class WalletManager {
         final localAccountId = _accountIdFromBytes(
           NativeSr25519.publicKeyOf(childBytes),
         );
-        if (localAccountId != acct.accountId) {
+        final message = transactionReview == null
+            ? payload
+            : NativeMldsa.reviewMessage(
+                _hexToBytes(accountId), transactionReview);
+        if (localAccountId == acct.accountId) {
+          if (NativeMldsa.defaultAlgorithm == 2) {
+            throw const WalletAuthException('运行期不支持sr账户签名');
+          }
+          return NativeSr25519.sign(childBytes, message);
+        }
+        final result = NativeMldsa.sign(childBytes, message);
+        if (_accountIdFromBytes(NativeMldsa.accountId(result.publicKey)) !=
+            acct.accountId) {
           throw const WalletAuthException('本地签名密钥与账户不一致，请重新导入钱包');
         }
-        return NativeSr25519.sign(childBytes, payload);
+        return NativeMldsa.encodeSignature(result.publicKey, result.signature);
       } finally {
         childBytes.fillRange(0, childBytes.length, 0);
         _zeroList(child);
@@ -644,7 +676,10 @@ class WalletManager {
       final childBytes = Uint8List.fromList(childMiniSecretKey);
       try {
         if (_accountIdFromBytes(NativeSr25519.publicKeyOf(childBytes)) !=
-            accountId) {
+                accountId &&
+            _accountIdFromBytes(
+                    NativeMldsa.accountId(NativeMldsa.publicKey(childBytes))) !=
+                accountId) {
           throw const WalletAuthException('本地私钥与账户不一致，请重新导入钱包');
         }
         // String 仅在用户明确导出私钥的 UI 边界生成；内部存取和签名始终保持字节。
@@ -660,8 +695,8 @@ class WalletManager {
 
   // ── 派生 ──
   /// 从 master mini-secret 派生账户 [index]（全部 `//index` 硬派生，无 bare 根）,
-  /// 返回该账户公钥 accountId；SS58由展示边界即时编码。
-  String _deriveAccount(List<int> seed, int index) {
+  /// 返回对应算法派生的固定 AccountId；SS58 由展示边界即时编码。
+  String _deriveAccount(List<int> seed, int index, {bool pq = false}) {
     if (index < 0) {
       throw ArgumentError.value(index, 'index', '不能为负');
     }
@@ -669,7 +704,9 @@ class WalletManager {
     final childBytes = Uint8List.fromList(childMiniSecretKey);
     try {
       final accountId = _accountIdFromBytes(
-        NativeSr25519.publicKeyOf(childBytes),
+        pq
+            ? NativeMldsa.accountId(NativeMldsa.publicKey(childBytes))
+            : NativeSr25519.publicKeyOf(childBytes),
       );
       return accountId;
     } finally {
@@ -716,7 +753,8 @@ class WalletManager {
       if (miniSecretKey.length != 32) {
         throw const WalletAuthException('钱包 MiniSecretKey 长度异常，请重新导入钱包');
       }
-      if (_deriveAccount(miniSecretKey, 0) != masterId) {
+      if (_deriveAccount(miniSecretKey, 0, pq: false) != masterId &&
+          _deriveAccount(miniSecretKey, 0, pq: true) != masterId) {
         throw const WalletAuthException('钱包 MiniSecretKey 归属异常，请重新导入钱包');
       }
       return miniSecretKey;
@@ -826,10 +864,11 @@ class WalletManager {
   }
 
   // ── 内部工具 ──
-  /// 原子建钱包：同一事务分配 walletIndex、写 WalletEntity + 账户0（`//0`）。
+  /// 原子建钱包：同一事务分配钱包序号并保存两种账户0（`//0`）。
   Future<(Wallet, Account)> _appendWalletAtomic({
     required String masterId,
-    required String primary,
+    required String? classical,
+    required String quantum,
   }) async {
     final isar = await WalletIsar.instance.db();
     late int walletIndex;
@@ -861,12 +900,17 @@ class WalletManager {
         ..sortOrder = sortOrder;
       await isar.walletEntitys.put(wallet);
 
-      final account = AccountEntity()
-        ..masterId = masterId
-        ..accountIndex = 0
-        ..accountId = primary
-        ..accountName = '账户0';
-      await isar.accountEntitys.put(account);
+      for (final entry in [
+        if (classical != null) (classical, '经典账户0'),
+        (quantum, '量子账户0'),
+      ]) {
+        final account = AccountEntity()
+          ..masterId = masterId
+          ..accountIndex = 0
+          ..accountId = entry.$1
+          ..accountName = entry.$2;
+        await isar.accountEntitys.put(account);
+      }
     });
 
     return (
@@ -879,8 +923,8 @@ class WalletManager {
       Account(
         masterId: masterId,
         accountIndex: 0,
-        accountId: primary,
-        accountName: '账户0',
+        accountId: masterId,
+        accountName: classical == null ? '量子账户0' : '经典账户0',
       ),
     );
   }

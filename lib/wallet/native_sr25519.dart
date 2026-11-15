@@ -30,6 +30,7 @@ class NativeSr25519 {
   static const String _libBase = 'libcitizenwallet_signer';
 
   static final DynamicLibrary _lib = _open();
+  static DynamicLibrary get library => _lib;
 
   /// 加载原生签名库。
   ///

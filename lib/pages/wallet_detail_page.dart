@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../helpers/screenshot_guard.dart';
+import '../wallet/native_mldsa.dart';
 import '../wallet/wallet_manager.dart';
 import 'account_detail_page.dart';
 import 'app_theme.dart';
@@ -97,8 +98,8 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
             event == 'protection_failed'
                 ? '屏幕保护不可用，助记词已隐藏'
                 : event == 'screenshot_taken'
-                ? '检测到截屏，助记词已隐藏。请勿截屏保存助记词。'
-                : '检测到屏幕录制，助记词已隐藏',
+                    ? '检测到截屏，助记词已隐藏。请勿截屏保存助记词。'
+                    : '检测到屏幕录制，助记词已隐藏',
           ),
           duration: const Duration(seconds: 3),
         ),
@@ -158,15 +159,7 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
     }
   }
 
-  // 只作展示；最终编号仍由本产品WalletManager在写事务内分配。
-  int? get _nextIndex {
-    final maximum = _accounts
-        .map((e) => e.accountIndex)
-        .fold<int>(-1, (m, e) => e > m ? e : m);
-    return maximum >= WalletManager.maxAccountIndex ? null : maximum + 1;
-  }
-
-  /// 混合式添加:默认"下一个" + 高级"指定序号"(恢复非连续账户 / 特定注资账户)。
+  /// 添加账户底部菜单：经典和量子各提供下一个、指定序号两个入口。
   void _showAddAccountSheet() {
     if (_addingAccount) return;
     showModalBottomSheet(
@@ -186,25 +179,45 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
+              if (NativeMldsa.defaultAlgorithm == 1) ...[
+                _sheetItem(
+                  icon: Icons.add_circle_outline,
+                  label: '添加经典账户',
+                  subtitle: '派生下一个经典账户',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _doAdd(pq: false);
+                  },
+                ),
+                const SizedBox(height: 8),
+                _sheetItem(
+                  icon: Icons.tag_rounded,
+                  label: '指定经典账户',
+                  subtitle: '填 1–${WalletManager.maxAccountIndex}（恢复特定账户）',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _promptIndexAndAdd(pq: false);
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
               _sheetItem(
                 icon: Icons.add_circle_outline,
-                label: '添加下一个账户',
-                subtitle: _nextIndex == null ? '已达账户序号上限' : '将派生 //$_nextIndex',
-                onTap: _nextIndex == null
-                    ? null
-                    : () {
-                        Navigator.pop(context);
-                        _doAdd();
-                      },
+                label: '添加量子账户',
+                subtitle: '派生下一个量子账户',
+                onTap: () {
+                  Navigator.pop(context);
+                  _doAdd(pq: true);
+                },
               ),
               const SizedBox(height: 8),
               _sheetItem(
                 icon: Icons.tag_rounded,
-                label: '指定序号添加',
+                label: '指定量子账户',
                 subtitle: '填 1–${WalletManager.maxAccountIndex}（恢复特定账户）',
                 onTap: () {
                   Navigator.pop(context);
-                  _promptIndexAndAdd();
+                  _promptIndexAndAdd(pq: true);
                 },
               ),
             ],
@@ -275,7 +288,7 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
     );
   }
 
-  Future<void> _promptIndexAndAdd() async {
+  Future<void> _promptIndexAndAdd({required bool pq}) async {
     final controller = TextEditingController();
     final raw = await showDialog<String>(
       context: context,
@@ -309,14 +322,15 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
           .showSnackBar(const SnackBar(content: Text('请输入有效序号')));
       return;
     }
-    await _doAdd(index: index);
+    await _doAdd(index: index, pq: pq);
   }
 
-  Future<void> _doAdd({int? index}) async {
+  Future<void> _doAdd({int? index, required bool pq}) async {
     if (_addingAccount) return;
     setState(() => _addingAccount = true);
     try {
-      await _walletManager.addAccount(widget.wallet.masterId, index: index);
+      await _walletManager.addAccount(widget.wallet.masterId,
+          index: index, pq: pq);
       await _load();
     } catch (e) {
       if (!mounted) return;

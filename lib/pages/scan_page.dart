@@ -1,3 +1,4 @@
+import '../wallet/native_mldsa.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -44,6 +45,7 @@ class _ScanPageState extends State<ScanPage> {
       widget.scannerController ?? ScannerController();
   final WalletManager _walletManager = WalletManager();
   bool _handled = false;
+  final Set<String> _qrFrames = {};
   bool _torchOn = false;
   bool _closing = false;
 
@@ -93,6 +95,29 @@ class _ScanPageState extends State<ScanPage> {
 
   Future<void> _handleCode(String raw) async {
     if (_handled) return;
+    if (raw.startsWith('GMBQR1:')) {
+      try {
+        if (_qrFrames.isNotEmpty &&
+            _qrFrames.first.split(':')[1] != raw.split(':')[1]) {
+          _qrFrames.clear();
+        }
+        if (_qrFrames.length >= 64 && !_qrFrames.contains(raw)) {
+          throw const FormatException('Too many QR frames');
+        }
+        _qrFrames.add(raw);
+        final complete = NativeMldsa.joinFrames(_qrFrames);
+        if (complete == null) {
+          _controller.resetDetection();
+          return;
+        }
+        raw = complete;
+        _qrFrames.clear();
+      } on Object {
+        _qrFrames.clear();
+        _controller.resetDetection();
+        return;
+      }
+    }
     _handled = true;
     try {
       await _controller.stop();

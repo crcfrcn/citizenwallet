@@ -351,7 +351,7 @@ void main() {
   String cidForYear(String year, {bool citizen = false}) {
     final r5 = citizen ? 'CN000' : 'GD001';
     final code = citizen ? 'CTZN' : 'CGOV';
-    final payload = '${r5}${code}000000001$year';
+    final payload = '$r5${code}000000001$year';
     const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     var total = 0;
     for (var i = 0; i < payload.length; i++) {

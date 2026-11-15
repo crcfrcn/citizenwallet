@@ -393,14 +393,14 @@ void main() {
     await tester.pump();
 
     // 账户0:两位数以内保持 `#xx` 单行整串。
-    expect(find.text('#0'), findsOneWidget);
+    expect(find.text('#0'), findsNWidgets(2));
     // 账户100:整串 `#100` 不复存在,# 与数字拆分各自成行。
     expect(find.text('#100'), findsNothing);
     expect(find.text('#'), findsOneWidget);
     expect(find.text('100'), findsOneWidget);
     await releasePage(tester);
   });
-  testWidgets('到顶禁用顺序添加并保留指定序号入口，八位徽章正常展示', (tester) async {
+  testWidgets('经典账户到顶仍保留四种添加入口，八位徽章正常展示', (tester) async {
     late Wallet wallet;
     await tester.runAsync(() async {
       final created = await WalletManager().importWallet(kDevPhrase);
@@ -415,12 +415,10 @@ void main() {
     expect(find.text('19890604'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, '添加账户'));
     await tester.pumpAndSettle();
-    expect(find.text('已达账户序号上限'), findsOneWidget);
-    final tile = find
-        .ancestor(of: find.text('添加下一个账户'), matching: find.byType(InkWell))
-        .first;
-    expect(tester.widget<InkWell>(tile).onTap, isNull);
-    expect(find.text('指定序号添加'), findsOneWidget);
+    for (final label in ['添加经典账户', '指定经典账户', '添加量子账户', '指定量子账户']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    expect(find.text('选择账户签名方式'), findsNothing);
     await releasePage(tester);
   });
 }

@@ -6,7 +6,7 @@ import {join,dirname,resolve,relative,sep,basename,isAbsolute,delimiter} from 'n
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
-import {tools,repository,platforms} from './config.mjs';
+import {tools,repository,platforms,chainRepository} from './config.mjs';
 export const root=fileURLToPath(new URL('../',import.meta.url));
 // 初始版号只来自产品pubspec；正式版本由本平台成功Release及来源Run确定。
 function initialBuild(){
@@ -19,6 +19,7 @@ async function readGitHub(route){
  return JSON.parse(childProcess.execFileSync('gh',['api','repos/'+repository+route],
   {env,encoding:'utf8',timeout:30000,maxBuffer:16*1024*1024}));
 }
+// 仅供塔塔自动化选择正式发布记录，本机编译和安装不调用此入口。
 export async function selectRelease(platform,read=readGitHub){
  displayName(platform,initialBuild().version);
  const releases=[];
@@ -445,6 +446,11 @@ async function prepare(work,platform,env){
  }
  const project=sourceView(work,['lib','test','icons','signing','ios','android','pubspec.yaml','pubspec.lock','Podfile.lock']);
  materializeInputs(root,project);
+ // 直接引用唯一核心；缺少本机源码时仅为本轮构建浅克隆公民链，不复制或生成模块实现。
+ const localChain=resolve(root,'../citizenchain'),chain=existsSync(join(localChain,'runtime/transaction/mldsa/Cargo.toml'))?localChain:join(work,'citizenchain');
+ if(chain!==localChain)await run('git',['clone','--depth=1','--branch','main','https://github.com/'+chainRepository+'.git',chain],{env});
+ const signingManifest=join(project,'signing/Cargo.toml'),sharedMldsa=relative(dirname(signingManifest),join(chain,'runtime/transaction/mldsa')).split(sep).join('/');
+ writeFileSync(signingManifest,readFileSync(signingManifest,'utf8').replace('path = "../../citizenchain/runtime/transaction/mldsa"','path = '+JSON.stringify(sharedMldsa)));
  put(join(project,'analysis_options.yaml'),'include: package:flutter_lints/flutter.yaml\nanalyzer:\n  exclude:\n    - "**/*.g.dart"\n');
  if(platform==='android'){
   const sdk=env.ANDROID_HOME||process.env.ANDROID_HOME||process.env.ANDROID_SDK_ROOT;if(!sdk)throw Error('缺少官方Android SDK');
@@ -475,9 +481,10 @@ export async function native(target,project,work,env){
  // 官方crate-type覆盖仅生成当前消费者需要的库，不额外生成另一种链接产物。
  await run('cargo',['rustc','--lib','--crate-type',target==='ios'?'staticlib':'cdylib','--locked','--release','--manifest-path',manifest,...(triple?['--target',triple]:[])],{env:{...env,...extra},cwd:project});
  const file=join(env.CARGO_TARGET_DIR,...(triple?[triple]:[]),'release',nativeName+(target==='ios'?'.a':target==='android'?'.so':process.platform==='darwin'?'.dylib':'.so'));
- // iOS验收已生成的机器码符号，官方选项避免Apple nm解析Rust上游bitcode；四个导出断言不变。
+ // iOS验收已生成的机器码符号，官方选项避免Apple nm解析Rust上游bitcode；保留四个 sr 导出并核对全部 mldsa 共用接口。
  const symbols=await run(target==='android'?join(ndk,'toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-nm'):'nm',target==='android'?['-D','--defined-only',file]:['-g',...(target==='ios'?['--no-llvm-bc']:[]),file],{env,capture:true});
  for(const name of ['derive_hard','public_key','sign','verify'])if(!new RegExp('(?:^|\\s)_?citizen_sr25519_'+name+'(?:\\s|$)','mu').test(symbols))throw Error('原生签名导出缺失：'+name);
+ for(const name of ['mldsa_default_algorithm','mldsa_public_key','mldsa_sign','mldsa_verify','mldsa_account_id','mldsa_review_message','mldsa_signature_encode','mldsa_signature_decode','qr_encode','qr_join'])if(!new RegExp('(?:^|\\s)_?gmb_'+name+'(?:\\s|$)','mu').test(symbols))throw Error('原生签名导出缺失：gmb_'+name);
  if(target==='ios'){const output=directory(join(work,'native/ios'));copy(file,join(output,basename(file)));env.CITIZENWALLET_NATIVE_IOS_DIR=output;}
  if(target==='android'){
   const output=directory(join(work,'native/android/arm64-v8a'));copy(file,join(output,basename(file)));env.CITIZENWALLET_NATIVE_ANDROID_DIR=dirname(output);
@@ -516,8 +523,7 @@ export async function testProduct(platform='android',{installed,stage=silentProg
 export async function buildProduct(platform,{consume,installed,stage=silentProgress}={}){
  nodeCheck();const formal=process.env.GITHUB_ACTIONS==='true';
  if(!installed&&!formal)installed=await localTools(platform,{download:true});
- const selected=formal?{version:process.env.PRODUCT_VERSION,buildNumber:process.env.GITHUB_RUN_NUMBER}:
-  await stage('核对本机产物版本',()=>selectRelease(platform))||initialBuild();
+ const selected=formal?{version:process.env.PRODUCT_VERSION,buildNumber:process.env.GITHUB_RUN_NUMBER}:initialBuild();
  displayName(platform,selected.version);
  const supplied=process.env.PRODUCT_WORK;if(supplied&&!insideTarget(supplied))throw Error('编译现场不属于本产品target');
  const work=supplied?directory(supplied):task('build',platform),env=environment(work,installed);let safe=true,complete=false;
@@ -525,7 +531,8 @@ export async function buildProduct(platform,{consume,installed,stage=silentProgr
   if(!installed)await prepareTools(work,platform,env);
   const project=await stage('编译工程与原锁依赖准备',()=>prepare(work,platform,env));
   await stage('目标平台原生库构建',()=>native(platform,project,work,env));
-  const version=selected.version,number=selected.buildNumber;
+  // 本机直接编译源码；Android 构建号按本机时间生成，不读取正式 Release 或 Run。
+  const version=selected.version,number=!formal&&platform==='android'?String(Math.floor(Date.now()/1000)):selected.buildNumber;
   const args=['--release','--build-name',version,'--build-number',number,'--no-pub'];const output=directory(join(work,'artifact')),title=artifactBaseName(platform,version);
   if(platform==='android'){
    if(formal&&!process.env.ANDROID_KEY_PROPERTIES)throw Error('正式Android签名输入缺失');

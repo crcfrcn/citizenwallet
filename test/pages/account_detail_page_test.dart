@@ -29,7 +29,7 @@ void main() {
     await tester.pump();
 
     // 公开信息在(主标签+括号副标签合成一个 Text.rich,按整串纯文本匹配)。
-    expect(find.text('公钥（给电脑看的）'), findsOneWidget);
+    expect(find.text('账户标识（给电脑看的）'), findsOneWidget);
     expect(find.text('账户地址（给人看的）'), findsOneWidget);
 
     // 需求1:账户详情不再显示派生路径。

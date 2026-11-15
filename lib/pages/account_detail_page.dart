@@ -8,7 +8,7 @@ import '../wallet/wallet_manager.dart';
 import 'app_theme.dart';
 import 'widgets/wallet_qr_dialog.dart';
 
-/// Lv3 账户详情：某钱包(master)下单个账户的公钥、ss58、私钥（账户名可点击改名）。
+/// Lv3 账户详情：某钱包(master)下单个账户的 AccountId、SS58、私钥（账户名可点击改名）。
 ///
 /// model B 全 `//index`：每账户私钥（child mini-secret）独立、单向,导出单账户只
 /// 暴露该账户,不牵连根/兄弟。私钥展示前需生物识别 + 防截屏 + 纯文本不可复制。
@@ -89,8 +89,8 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
             event == 'protection_failed'
                 ? '屏幕保护不可用，私钥已隐藏'
                 : event == 'screenshot_taken'
-                ? '检测到截屏，私钥已隐藏。请勿截屏保存私钥。'
-                : '检测到屏幕录制，私钥已隐藏',
+                    ? '检测到截屏，私钥已隐藏。请勿截屏保存私钥。'
+                    : '检测到屏幕录制，私钥已隐藏',
           ),
           duration: const Duration(seconds: 3),
         ),
@@ -344,7 +344,7 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
             decoration: AppTheme.cardDecoration(radius: AppTheme.radiusLg),
             child: Column(
               children: [
-                _infoTile('公钥', '（给电脑看的）', account.accountId),
+                _infoTile('账户标识', '（给电脑看的）', account.accountId),
                 const Divider(height: 1, indent: 16, endIndent: 16),
                 _infoTile('账户地址', '（给人看的）', account.ss58Address),
                 const Divider(height: 1, indent: 16, endIndent: 16),
@@ -383,7 +383,7 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                 fontWeight: FontWeight.w500,
               ),
               children: [
-                // 与公钥、账户地址的括号副标题使用同一视觉层级。
+                // 与账户标识、账户地址的括号副标题使用同一视觉层级。
                 TextSpan(
                   text: '（只能自己悄悄看）',
                   style: TextStyle(

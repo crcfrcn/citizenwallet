@@ -18,7 +18,7 @@ class ChainConstants {
 
   /// 当前钱包支持的 Substrate `transaction_version`。
   ///
-  /// 提案 ID 扩宽候选配套交易版本：3。
+  /// 候选交易版本仍为3；V5格式不替代transaction_version，正式切换须按链上基线核对。
   /// 升级前实链为 spec_version=3、transaction_version=2，发布时须重新核对。
   /// 不支持的交易版本继续严格拒签。
   /// 钱包对 spec_version 仍只解析展示；编辑或重复编译不触发版本递增。

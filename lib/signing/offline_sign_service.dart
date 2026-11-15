@@ -54,8 +54,8 @@ enum SignDecisionStatus { normal, reject }
 /// 离线签名执行服务。
 class OfflineSignService {
   OfflineSignService({WalletManager? walletManager, QrSigner? signer})
-    : _walletManager = walletManager ?? WalletManager(),
-      _signer = signer ?? QrSigner();
+      : _walletManager = walletManager ?? WalletManager(),
+        _signer = signer ?? QrSigner();
 
   final WalletManager _walletManager;
   final QrSigner _signer;
@@ -131,8 +131,8 @@ class OfflineSignService {
         'cid_number': authorization.cidNumber,
         if (authorization.currentAccountId != null)
           'current_account_id': authorization.currentAccountId!,
-        'expected_binding_revision': authorization.expectedBindingRevision
-            .toString(),
+        'expected_binding_revision':
+            authorization.expectedBindingRevision.toString(),
         'expires_at': authorization.expiresAt.toString(),
       };
       final decodedDomain = DecodedPayload(
@@ -180,8 +180,7 @@ class OfflineSignService {
         decoded: null,
         status: SignDecisionStatus.reject,
         actionLabel: qrActionLabel,
-        rejectReason:
-            body.payloadBytes.length == 32 &&
+        rejectReason: body.payloadBytes.length == 32 &&
                 QrActions.isChainAction(body.action)
             ? '普通链交易不能只签 32 字节哈希，已拒绝签名'
             : '签名载荷无法解码，已拒绝签名',
@@ -280,8 +279,7 @@ class OfflineSignService {
       final payloadSigner = decoded.fields['account_id'];
       final payloadExpiresAt = int.tryParse(decoded.fields['expires_at'] ?? '');
       final envelopeExpiresAt = request.expiresAt;
-      final expiryMatches =
-          payloadExpiresAt != null &&
+      final expiryMatches = payloadExpiresAt != null &&
           envelopeExpiresAt != null &&
           (payloadExpiresAt == envelopeExpiresAt ||
               payloadExpiresAt == envelopeExpiresAt * 1000);
@@ -392,12 +390,12 @@ class OfflineSignService {
     }
 
     // 首次绑定/换绑:b.u 留空,账户由用户自选并填入授权模板的零槽,跳过 b.u 相等校验。
-    // 其余动作:当前 sr25519 的 AccountId32 与 signer public key 字节相同,只允许完全相等,不做归一化。
+    // 其余动作逐字核对所选 AccountId 与兼容字段 u，不把 PQ 账户哈希当作公钥。
     if (!QrActions.isSelfAccountDomainAction(body.action) &&
         account.accountId != body.signerPublicKeyHex) {
       throw const OfflineSignException(
         OfflineSignErrorCode.accountMismatch,
-        '签名请求中的公钥与所选账户不一致',
+        '签名请求指定的账户与所选账户不一致',
       );
     }
 
@@ -444,20 +442,29 @@ class OfflineSignService {
       signature = await _walletManager.signForAccount(
         account.accountId,
         payloadBytes,
+        transactionReview:
+            QrActions.isChainAction(body.action) && !QrActions.isRuntimeHashOnly(body.action)
+                ? body.payloadBytes : null,
       );
     } catch (_) {
       await SignedQrRequestStore.release(requestId);
       rethrow;
     }
 
+    final algorithm = signature.length == 64 ? 1 : 2;
+    if (body.alg != 0 && body.alg != algorithm) {
+      await SignedQrRequestStore.release(requestId);
+      throw const OfflineSignException(
+          OfflineSignErrorCode.accountMismatch, '签名算法与账户不一致');
+    }
     return _signer.buildResponse(
       request: request,
       signatureHex: '0x${_toHex(signature)}',
       // 占号/换绑:请求 b.u 空,响应 b.u 用钱包自选账户带回,供 OnChina 取 account_id。
       signerPublicKeyHexOverride:
           QrActions.isSelfAccountDomainAction(body.action)
-          ? account.accountId
-          : null,
+              ? account.accountId
+              : null,
     );
   }
 

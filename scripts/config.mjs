@@ -64,6 +64,8 @@ export function describeConfiguration(){return JSON.parse(JSON.stringify(manifes
 
 // 只有产品、工具和入口声明；所有执行函数归build.mjs。
 export const repository="crcfrcn/citizenwallet";
+// 共享交易认证核心的源码仓库；构建时优先复用本机公民链源码。
+export const chainRepository='crcfrcn/citizenchain';
 export const tools=Object.freeze({"node": "25.2.1", "rust": "1.97.1", "flutter": "3.47.2", "buildTools": "36.0.0", "ndk": "28.2.13676358", "gradle": "9.1.0", "agp": "9.0.1", "kotlin": "2.2.20", "cocoapods": "1.17.0"});
 export const platforms=Object.freeze({"ios": "iOS", "android": "Android"});
 

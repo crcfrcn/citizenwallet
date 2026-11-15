@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/wallet/wallet_mini_secret.dart';
 import 'package:citizenwallet/signing/chain_constants.dart';
 import 'package:citizenwallet/wallet/native_sr25519.dart';
+import 'package:citizenwallet/wallet/native_mldsa.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 import 'package:citizenwallet/signing/offline_sign_service.dart';
 import 'package:citizenwallet/signing/payload_decoder.dart';
@@ -81,56 +82,59 @@ List<int> _mlsDeviceBindPayload({
   required String cidNumber,
   required String accountId,
   required int issuedAtMillis,
-}) => <int>[
-  ..._scaleString(cidNumber),
-  ..._u64Le(4),
-  ..._scaleString(accountId),
-  ..._scaleString('0x${'ab' * 32}'),
-  ..._u64Le(issuedAtMillis),
-];
+}) =>
+    <int>[
+      ..._scaleString(cidNumber),
+      ..._u64Le(4),
+      ..._scaleString(accountId),
+      ..._scaleString('0x${'ab' * 32}'),
+      ..._u64Le(issuedAtMillis),
+    ];
 
 List<int> _squareAccountActionPayload({
   required String accountId,
   required int expiresAt,
   String action = 'cancel_membership',
-}) => <int>[
-  ..._scaleString(action),
-  ..._scaleString(accountId),
-  ..._scaleString('sqa_test'),
-  ..._u64Le(expiresAt * 1000),
-];
+}) =>
+    <int>[
+      ..._scaleString(action),
+      ..._scaleString(accountId),
+      ..._scaleString('sqa_test'),
+      ..._u64Le(expiresAt * 1000),
+    ];
 
 List<int> _occupyAuthorizationTemplate(String cid, int expiresAt) => [
-  ..._hexToBytes(ChainConstants.genesisHash),
-  cid.length << 2,
-  ...cid.codeUnits,
-  ...List<int>.filled(32, 0),
-  ..._u64Le(0),
-  ..._u64Le(expiresAt),
-];
+      ..._hexToBytes(ChainConstants.genesisHash),
+      cid.length << 2,
+      ...cid.codeUnits,
+      ...List<int>.filled(32, 0),
+      ..._u64Le(0),
+      ..._u64Le(expiresAt),
+    ];
 
 List<int> _rebindAuthorizationTemplate(String cid, int expiresAt) => [
-  ..._hexToBytes(ChainConstants.genesisHash),
-  cid.length << 2,
-  ...cid.codeUnits,
-  ...List<int>.filled(32, 0x55),
-  ...List<int>.filled(32, 0),
-  ..._u64Le(7),
-  ..._u64Le(expiresAt),
-];
+      ..._hexToBytes(ChainConstants.genesisHash),
+      cid.length << 2,
+      ...cid.codeUnits,
+      ...List<int>.filled(32, 0x55),
+      ...List<int>.filled(32, 0),
+      ..._u64Le(7),
+      ..._u64Le(expiresAt),
+    ];
 
 List<int> _switchDefaultAccountPayload({
   required String currentDefaultAccountId,
   required int expiresAt,
-}) => [
-  ..._hexToBytes(ChainConstants.genesisHash),
-  ..._hexToBytes(currentDefaultAccountId),
-  2 << 2,
-  ...List<int>.filled(32, 0x55),
-  ..._hexToBytes(currentDefaultAccountId),
-  ..._u64Le(expiresAt),
-  ...List<int>.filled(16, 0x66),
-];
+}) =>
+    [
+      ..._hexToBytes(ChainConstants.genesisHash),
+      ..._hexToBytes(currentDefaultAccountId),
+      2 << 2,
+      ...List<int>.filled(32, 0x55),
+      ..._hexToBytes(currentDefaultAccountId),
+      ..._u64Le(expiresAt),
+      ...List<int>.filled(16, 0x66),
+    ];
 
 /// 中文注释：公民服务端独立动作在产物摘要后追加最终配置摘要；
 /// 其它产品仍使用原 SCALE 发布布局和相同发布签名域。
@@ -138,36 +142,37 @@ List<int> _publishAuthorizationPayload({
   required String product,
   required String platform,
   required int expiresAt,
-}) => <int>[
-  ..._scaleString(product),
-  ..._scaleString(platform),
-  ..._scaleString('1.2.3'),
-  ...List<int>.generate(20, (index) => index + 1),
-  ...List<int>.generate(32, (index) => index + 21),
-  if (product == 'citizenserve') ...List<int>.filled(32, 0x44),
-  ..._scaleString('deployment-stable-1'),
-  ..._u64Le(expiresAt),
-  ...List<int>.filled(32, 0x66),
-];
+}) =>
+    <int>[
+      ..._scaleString(product),
+      ..._scaleString(platform),
+      ..._scaleString('1.2.3'),
+      ...List<int>.generate(20, (index) => index + 1),
+      ...List<int>.generate(32, (index) => index + 21),
+      if (product == 'citizenserve') ...List<int>.filled(32, 0x44),
+      ..._scaleString('deployment-stable-1'),
+      ..._u64Le(expiresAt),
+      ...List<int>.filled(32, 0x66),
+    ];
 
 // 与共享协议及控制台使用同一公开样例；仅替换本轮期限，不要求Tag或源码提交。
 List<int> _nodeDeployPayload(int expiresAt) => <int>[
-  2,
-  ...'citizenchain'.codeUnits,
-  1,
-  7,
-  ...'node-01'.codeUnits,
-  10,
-  ...'192.0.2.10'.codeUnits,
-  5,
-  ...'arm64'.codeUnits,
-  5,
-  ...'1.0.0'.codeUnits,
-  ...List<int>.filled(32, 0x22),
-  ...'123456789'.codeUnits,
-  ..._u64Le(expiresAt),
-  ...List<int>.filled(32, 0x33),
-];
+      2,
+      ...'citizenchain'.codeUnits,
+      1,
+      7,
+      ...'node-01'.codeUnits,
+      10,
+      ...'192.0.2.10'.codeUnits,
+      5,
+      ...'arm64'.codeUnits,
+      5,
+      ...'1.0.0'.codeUnits,
+      ...List<int>.filled(32, 0x22),
+      ...'123456789'.codeUnits,
+      ..._u64Le(expiresAt),
+      ...List<int>.filled(32, 0x33),
+    ];
 
 void main() {
   test('充值签名指定账户须与原文目标相同，未知动作不能冒用', () {
@@ -327,7 +332,7 @@ void main() {
       expect(
         _verifySr25519(
           signerPublicKeyHex: response.body.signerPublicKeyHex,
-          message: QrSigner.signingBytesFor(request.body),
+          message: _messageForRequest(request),
           signatureHex: response.body.signatureHex,
         ),
         isTrue,
@@ -380,7 +385,7 @@ void main() {
       expect(
         _verifySr25519(
           signerPublicKeyHex: response.body.signerPublicKeyHex,
-          message: QrSigner.signingBytesFor(request.body),
+          message: _messageForRequest(request),
           signatureHex: response.body.signatureHex,
         ),
         isTrue,
@@ -435,7 +440,7 @@ void main() {
       expect(
         _verifySr25519(
           signerPublicKeyHex: response.body.signerPublicKeyHex,
-          message: QrSigner.signingBytesFor(request.body),
+          message: _messageForRequest(request),
           signatureHex: response.body.signatureHex,
         ),
         isTrue,
@@ -490,7 +495,7 @@ void main() {
       expect(
         _verifySr25519(
           signerPublicKeyHex: response.body.signerPublicKeyHex,
-          message: QrSigner.signingBytesFor(request.body),
+          message: _messageForRequest(request),
           signatureHex: response.body.signatureHex,
         ),
         isTrue,
@@ -543,7 +548,8 @@ void main() {
     test('signParsedRequest should sign normal internal_vote (统一入口)', () async {
       // 所有管理员投票走 InternalVote(20).cast(0)
       // payload = [0x14][0x00][u128_le proposal_id=1][Personal=0][approve=1] + 扩展尾
-      final payloadHex = _withSigningTailHex('0x1400010000000000000000000000000000000001');
+      final payloadHex =
+          _withSigningTailHex('0x1400010000000000000000000000000000000001');
       final request = _buildTestRequest(
         requestId: 'offline-req-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -564,7 +570,7 @@ void main() {
       expect(
         _verifySr25519(
           signerPublicKeyHex: response.body.signerPublicKeyHex,
-          message: Uint8List.fromList(payloadBytes),
+          message: _messageForRequest(request),
           signatureHex: response.body.signatureHex,
         ),
         isTrue,
@@ -575,9 +581,21 @@ void main() {
       final id = List<int>.filled(16, 0)..[0] = 1;
       final cases = <(int, List<int>)>[
         (QrActions.internalVote, [20, 0, ...id, 0]),
-        (QrActions.jointVote, [21, 0, ...id, ..._scaleString('LN001-NRC0G-944805165-2026'), ..._scaleString('COMMITTEE_MEMBER')]),
+        (
+          QrActions.jointVote,
+          [
+            21,
+            0,
+            ...id,
+            ..._scaleString('LN001-NRC0G-944805165-2026'),
+            ..._scaleString('COMMITTEE_MEMBER')
+          ]
+        ),
         (QrActions.castReferendum, [21, 1, ...id]),
-        (QrActions.castRepresentativeVote, [26, 1, ...id, ..._scaleString('HOUSE_MEMBER')]),
+        (
+          QrActions.castRepresentativeVote,
+          [26, 1, ...id, ..._scaleString('HOUSE_MEMBER')]
+        ),
         (QrActions.castLegislationReferendum, [26, 2, ...id]),
         (QrActions.executiveSign, [26, 3, ...id]),
         (QrActions.overrideSign, [26, 4, ...id]),
@@ -592,9 +610,11 @@ void main() {
             payloadHex: _withSigningTailHex('0x${_toHex([...prefix, value])}'),
             action: action,
           );
-          expect(service.verifyPayload(request).status, SignDecisionStatus.reject);
+          expect(
+              service.verifyPayload(request).status, SignDecisionStatus.reject);
           await expectLater(
-            service.signParsedRequest(accountId: signingAccount.accountId, request: request),
+            service.signParsedRequest(
+                accountId: signingAccount.accountId, request: request),
             throwsA(isA<OfflineSignException>()),
           );
         }
@@ -603,7 +623,8 @@ void main() {
     });
 
     test('同一请求 id 到期前只能签名一次', () async {
-      final payloadHex = _withSigningTailHex('0x1400010000000000000000000000000000000001');
+      final payloadHex =
+          _withSigningTailHex('0x1400010000000000000000000000000000000001');
       final request = _buildTestRequest(
         requestId: 'offline-replay-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -634,7 +655,8 @@ void main() {
 
     test('signParsedRequest 拒绝 action 与 payload 不一致', () async {
       // decode 成功但 QR action 和 decoded.action 不一致 → 红色拒签。
-      final payloadHex = _withSigningTailHex('0x1400070000000000000000000000000000000001');
+      final payloadHex =
+          _withSigningTailHex('0x1400070000000000000000000000000000000001');
       expect(PayloadDecoder.decode(payloadHex)?.action, 'internal_vote');
       final request = _buildTestRequest(
         requestId: 'offline-req-test-action-mismatch',
@@ -706,10 +728,12 @@ void main() {
           action: QrActions.transferWithRemark,
         );
         final verification = service.verifyPayload(request);
-        expect(verification.canSign, transactionVersion == ChainConstants.transactionVersion);
+        expect(verification.canSign,
+            transactionVersion == ChainConstants.transactionVersion);
         if (transactionVersion == ChainConstants.transactionVersion) {
           expect(verification.decoded?.fields['spec_version'], '3');
-          expect(verification.decoded?.fields['transaction_version'], ChainConstants.transactionVersion.toString());
+          expect(verification.decoded?.fields['transaction_version'],
+              ChainConstants.transactionVersion.toString());
           expect(verification.decoded?.action, 'transfer');
         } else {
           expect(verification.rejectReason, '交易格式版本不受当前钱包支持，请升级公民钱包');
@@ -767,7 +791,16 @@ void main() {
       final roleBytes = role.codeUnits;
       final price = List<int>.filled(16, 0)..[0] = 100;
       final payloadHex = _withSigningTailHex(
-        '0x${_toHex([34, 5, cidBytes.length << 2, ...cidBytes, roleBytes.length << 2, ...roleBytes, 2, ...price])}',
+        '0x${_toHex([
+              34,
+              5,
+              cidBytes.length << 2,
+              ...cidBytes,
+              roleBytes.length << 2,
+              ...roleBytes,
+              2,
+              ...price
+            ])}',
       );
       final request = _buildTestRequest(
         requestId: 'offline-platform-price',
@@ -804,7 +837,8 @@ void main() {
       expect(verification.decoded?.fields['expected_price_fen'], contains('分'));
     });
 
-    test('verifyPayload rejects platform price payload with mismatched action', () {
+    test('verifyPayload rejects platform price payload with mismatched action',
+        () {
       const cid = 'GZ018-SFGYR-201206100-2026';
       final cidBytes = cid.codeUnits;
       const role = 'GENESIS_PRODUCT_MANAGER';
@@ -814,7 +848,16 @@ void main() {
         requestId: 'offline-platform-price-mismatch',
         signerPublicKey: signingAccount.accountId,
         payloadHex: _withSigningTailHex(
-          '0x${_toHex([34, 5, cidBytes.length << 2, ...cidBytes, roleBytes.length << 2, ...roleBytes, 0, ...price])}',
+          '0x${_toHex([
+                34,
+                5,
+                cidBytes.length << 2,
+                ...cidBytes,
+                roleBytes.length << 2,
+                ...roleBytes,
+                0,
+                ...price
+              ])}',
         ),
         action: QrActions.transferWithRemark,
       );
@@ -828,7 +871,8 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-hash-only-reject',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        payloadHex:
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         action: QrActions.privateInstitutionGovernance,
       );
 
@@ -921,7 +965,11 @@ void main() {
               ? '0x${'aa' * 32}'
               : signingAccount.accountId,
           payloadHex: _withSigningTailHex(
-            '0x${_toHex([10, 5, ..._scaleString('CN202-CTZN6-123456789-1234')])}',
+            '0x${_toHex([
+                  10,
+                  5,
+                  ..._scaleString('CN202-CTZN6-123456789-1234')
+                ])}',
           ),
           action: 0x0a05,
           expiresAt: invalid == 'expired'
@@ -963,7 +1011,7 @@ void main() {
       expect(
         _verifySr25519(
           signerPublicKeyHex: signingAccount.accountId,
-          message: QrSigner.signingBytesFor(request.body),
+          message: _messageForRequest(request),
           signatureHex: response.body.signatureHex,
         ),
         isTrue,
@@ -1067,7 +1115,8 @@ void main() {
     test('signParsedRequest should reject wrong signer public key', () async {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-0002',
-        signerPublicKey: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        signerPublicKey:
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         payloadHex: '0x0102',
         action: QrActions.login,
       );
@@ -1091,13 +1140,15 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-unknown-account',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: _withSigningTailHex('0x1400010000000000000000000000000000000001'),
+        payloadHex:
+            _withSigningTailHex('0x1400010000000000000000000000000000000001'),
         action: QrActions.internalVote,
       );
 
       expect(
         () => service.signParsedRequest(
-          accountId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0',
+          accountId:
+              '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0',
           request: request,
         ),
         throwsA(
@@ -1190,12 +1241,23 @@ class _FakeWalletManager extends WalletManager {
   }
 
   @override
-  Future<Uint8List> signForAccount(String accountId, Uint8List payload) async {
+  Future<Uint8List> signForAccount(String accountId, Uint8List payload,
+      {Uint8List? transactionReview}) async {
     signCallCount += 1;
     final account = await ensureAccount();
     if (accountId != account.accountId) {
       throw const WalletAuthException('未找到指定账户');
     }
-    return NativeSr25519.sign(_hexToBytes(_miniSecretHex!), payload);
+    final message = transactionReview == null ? payload : NativeMldsa.reviewMessage(_hexToBytes(accountId), transactionReview);
+    return NativeSr25519.sign(_hexToBytes(_miniSecretHex!), message);
   }
+}
+
+// 使用同一公开核心核对链交易摘要，业务域签名与hash-only升级请求保持原字节。
+Uint8List _messageForRequest(SignRequestEnvelope request) {
+  final body = request.body;
+  if (QrActions.isChainAction(body.action) && !QrActions.isRuntimeHashOnly(body.action)) {
+    return NativeMldsa.reviewMessage(_hexToBytes(body.signerPublicKeyHex), body.payloadBytes);
+  }
+  return QrSigner.signingBytesFor(body);
 }

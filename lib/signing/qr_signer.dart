@@ -162,8 +162,8 @@ class QrSigner {
     }
   }
 
-  /// Substrate 交易签名必须复刻 SignedPayload::using_encoded:
-  /// payload <= 256B 时签原文,>256B 时签 blake2_256(payload)。
+  /// 保留业务签名域；普通链交易由账户签名端将完整审阅材料转换为 V5 摘要。
+  /// Runtime 升级的 hash-only 请求已携带最终摘要，不再次转换。
   static Uint8List signingBytesFor(
     SignRequestBody body, {
     Uint8List? selfAccountId,
@@ -219,13 +219,6 @@ class QrSigner {
       final result = Uint8List(32);
       digest.doFinal(result, 0);
       return result;
-    }
-    if (QrActions.isChainAction(body.action) && payload.length > 256) {
-      final digest = Blake2bDigest(digestSize: 32)
-        ..update(payload, 0, payload.length);
-      final out = Uint8List(32);
-      digest.doFinal(out, 0);
-      return out;
     }
     return payload;
   }

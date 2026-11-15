@@ -14,6 +14,8 @@ import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/qr_protocols.dart';
 import 'package:citizenwallet/protocol/signature_message.dart';
 import 'package:citizenwallet/wallet/wallet_manager.dart';
+import 'package:citizenwallet/wallet/native_mldsa.dart';
+import 'package:citizenwallet/wallet/native_sr25519.dart';
 import 'package:citizenwallet/wallet/wallet_secure_keys.dart';
 
 const String kDevPhrase =
@@ -237,8 +239,11 @@ void main() {
     expect(result.wallet.masterId, result.primaryAccount.accountId);
 
     final accounts = await manager.getAccounts(result.wallet.masterId);
-    expect(accounts.length, 1);
-    expect(accounts.single.accountId, result.primaryAccount.accountId);
+    expect(accounts.length, 2);
+    expect(accounts.map((account) => account.accountIndex), [0, 0]);
+    expect(accounts.map((account) => account.accountName), ['经典账户0', '量子账户0']);
+    expect(accounts.first.accountId, result.primaryAccount.accountId);
+    expect(accounts.last.accountId, isNot(accounts.first.accountId));
   });
 
   test('18词创建、备份与重新导入恢复同一账户和密码派生', () async {
@@ -393,13 +398,67 @@ void main() {
     expect(a2.accountId, kAccount2Id);
 
     final accounts = await manager.getAccounts(created.wallet.masterId);
-    expect(accounts.map((e) => e.accountIndex).toList(), [0, 1, 2]);
+    expect(accounts.map((e) => e.accountIndex).toList(), [0, 0, 1, 2]);
   });
 
   test('钱包错误文案保留业务消息并隐藏内部运行时细节', () {
     expect(walletErrorMessage(const WalletAuthException('账户已存在')), '账户已存在');
     expect(walletErrorMessage(Exception('助记词无效')), '助记词无效');
     expect(walletErrorMessage(UnsupportedError('只读缓冲区')), '钱包操作失败，请重试');
+  });
+
+  test('经典账户链交易仅签账户绑定的V5摘要，原始业务签名保持', () async {
+    final created = await manager.importWallet(kDevPhrase);
+    final accountId = created.primaryAccount.accountId;
+    final review = Uint8List.fromList(List<int>.filled(400, 0x55));
+    final signature = await manager.signForAccount(accountId, review, transactionReview: review);
+    final public = Uint8List.fromList(List<int>.generate(32, (i) => int.parse(accountId.substring(2 + i * 2, 4 + i * 2), radix: 16)));
+    final message = NativeMldsa.reviewMessage(public, review);
+    expect(NativeSr25519.verify(public, signature, message), isTrue);
+    expect(NativeSr25519.verify(public, signature, review), isFalse);
+    final raw = await manager.signForAccount(accountId, review);
+    expect(NativeSr25519.verify(public, raw, review), isTrue);
+  });
+
+  test('同一钱包量子账户与 SDK 派生一致，按所选方式追加并签名', () async {
+    final created = await manager.importWallet(kDevPhrase);
+    final accounts = await manager.getAccounts(created.wallet.masterId);
+    final quantum =
+        accounts.singleWhere((account) => account.accountName == '量子账户0');
+    expect(quantum.accountId,
+        '0x2bf4ba2c02f8ed54231f3fa5b969f74af25c1176e031f420279e07c9dbdc9013');
+    final review = Uint8List.fromList([1, 2, 3]);
+    final signature = await manager.signForAccount(quantum.accountId, review,
+        transactionReview: review);
+    expect(signature.length, 5261);
+    final public = signature.sublist(0, NativeMldsa.publicBytes);
+    final account = NativeMldsa.accountId(public);
+    final message = NativeMldsa.reviewMessage(account, review);
+    expect(
+        NativeMldsa.verify(
+            public, signature.sublist(NativeMldsa.publicBytes), message),
+        isTrue);
+    expect(
+        NativeMldsa.verify(
+            public, signature.sublist(NativeMldsa.publicBytes), review),
+        isFalse);
+    final next = await manager.addAccount(created.wallet.masterId, pq: true);
+    final classicNext =
+        await manager.addAccount(created.wallet.masterId, pq: false);
+    expect(next.accountIndex, 1);
+    expect(classicNext.accountIndex, 1);
+    expect(next.accountName, '量子账户1');
+    expect(classicNext.accountName, '经典账户1');
+    expect(next.accountId, isNot(classicNext.accountId));
+    await expectLater(
+      manager.addAccount(created.wallet.masterId, index: 1, pq: true),
+      throwsA(isA<WalletAuthException>()),
+    );
+    final nextSignature = await manager.signForAccount(next.accountId, review);
+    expect(nextSignature.length, 5261);
+    expect(next.accountId, isNot(quantum.accountId));
+    expect(quantum.accountId,
+        '0x2bf4ba2c02f8ed54231f3fa5b969f74af25c1176e031f420279e07c9dbdc9013');
   });
 
   test('signForAccount 产出可被该账户公钥验证的签名', () async {
@@ -580,7 +639,7 @@ void main() {
 
     expect(results.where((ok) => ok), hasLength(1));
     expect(await manager.getWallets(), hasLength(1));
-    expect(await manager.getAccounts(kAccount0Id), hasLength(1));
+    expect(await manager.getAccounts(kAccount0Id), hasLength(2));
   });
 
   test('getAccountByAccountId 精确命中/未知返回 null(扫码定位边界)', () async {
@@ -608,7 +667,7 @@ void main() {
     await manager.deleteAccount(a1.accountId);
 
     final accounts = await manager.getAccounts(created.wallet.masterId);
-    expect(accounts.map((e) => e.accountIndex).toList(), [0, 2]);
+    expect(accounts.map((e) => e.accountIndex).toList(), [0, 0, 2]);
     expect(await manager.getWallets(), hasLength(1));
   });
 
@@ -619,9 +678,9 @@ void main() {
     expect(await manager.getAccountByAccountId(kAccount0Id), isNotNull);
   });
 
-  test('deleteAccount 删光账户级联删钱包与密钥', () async {
+  test('deleteWallet 删除两个账户0及钱包密钥', () async {
     final created = await manager.importWallet(kDevPhrase);
-    await manager.deleteAccount(kAccount0Id);
+    await manager.deleteWallet(created.wallet.masterId);
     expect(await manager.getWallets(), isEmpty);
     expect(await manager.getAccounts(created.wallet.masterId), isEmpty);
     const storage = FlutterSecureStorage();
@@ -742,7 +801,7 @@ void main() {
     expect(a3.accountId, refId);
 
     final accounts = await manager.getAccounts(created.wallet.masterId);
-    expect(accounts.map((e) => e.accountIndex).toList(), [0, 3]);
+    expect(accounts.map((e) => e.accountIndex).toList(), [0, 0, 3]);
   });
 
   test('addAccount 指定序号:回填低于 max 的空缺([0,3]→加//1→[0,1,3])', () async {
@@ -750,7 +809,7 @@ void main() {
     await manager.addAccount(created.wallet.masterId, index: 3);
     await manager.addAccount(created.wallet.masterId, index: 1);
     final accounts = await manager.getAccounts(created.wallet.masterId);
-    expect(accounts.map((e) => e.accountIndex).toList(), [0, 1, 3]);
+    expect(accounts.map((e) => e.accountIndex).toList(), [0, 0, 1, 3]);
   });
 
   test('addAccount 指定序号:已存在/序号0/越界 均被拒', () async {
@@ -802,6 +861,7 @@ void main() {
     final accounts = await WalletManager().getAccounts(masterId);
     expect(accounts.map((a) => a.accountIndex).toList(), [
       0,
+      0,
       8,
       1989,
       1990,
@@ -834,7 +894,7 @@ void main() {
       );
     }
     expect(hardwareVault.decryptCalls, calls);
-    expect((await manager.getAccounts(created.wallet.masterId)).length, 1);
+    expect((await manager.getAccounts(created.wallet.masterId)).length, 2);
   });
 
   test('并发添加下一个账户在事务内分配不重复序号', () async {

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
+import '../signing/animated_qr.dart';
 
 import '../signing/login_qr_handler.dart';
 import '../wallet/wallet_manager.dart';
@@ -97,7 +97,7 @@ class _LoginSignPageState extends State<LoginSignPage> {
 
     try {
       final walletManager = WalletManager();
-      // 当前 sr25519 的 AccountId32 与 signer public key 字节相同。
+      // 响应使用目标 AccountId，签名算法由该账户的派生来源确定。
       final signMessage = buildSignMessage(request, widget.account.accountId);
       final result = await walletManager.signUtf8ForAccount(
         widget.account.accountId,
@@ -271,11 +271,9 @@ class _LoginSignPageState extends State<LoginSignPage> {
                   color: Colors.white,
                   borderRadius: BorderRadius.all(Radius.circular(12)),
                 ),
-                child: QrImageView(
+                child: AnimatedSigningQr(
                   data: json,
-                  version: QrVersions.auto,
                   size: 280,
-                  errorCorrectionLevel: QrErrorCorrectLevel.M,
                 ),
               ),
             ),

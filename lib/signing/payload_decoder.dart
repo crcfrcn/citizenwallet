@@ -411,8 +411,9 @@ class PayloadDecoder {
           final registrationAction = isPublic
               ? 'register_public_institution_admins'
               : 'register_private_institution_admins';
-          if (expectedAction != null && expectedAction != registrationAction)
+          if (expectedAction != null && expectedAction != registrationAction) {
             return null;
+          }
           return _decodeRegisterInstitutionAdmins(
             bytes,
             action: registrationAction,
@@ -1370,7 +1371,9 @@ class PayloadDecoder {
   /// 只镜像 CID 的固定分段/字符布局；完整校验和仍由链端唯一实现裁决。
   static bool _isStructuredInstitutionCid(String cidNumber) {
     if (!RegExp(r'^[A-Z0-9]{5}-[A-Z0-9]{5}-[0-9]{9}-[0-9]{4,10}$')
-        .hasMatch(cidNumber)) return false;
+        .hasMatch(cidNumber)) {
+      return false;
+    }
     final text = cidNumber.split('-').last;
     final year = int.tryParse(text);
     // 年份为 u32；至少四位补零，保留旧 CID，拒绝越界及新增的歧义前导零。
@@ -4531,8 +4534,9 @@ class PayloadDecoder {
     );
     if (assignmentChanges == null) return null;
     offset = assignmentChanges.$2;
-    if (registration && (offset >= bytes.length || bytes[offset] != 0))
+    if (registration && (offset >= bytes.length || bytes[offset] != 0)) {
       return null;
+    }
     final legal = _skipLegalRepresentativeChange(bytes, offset);
     if (legal == null) return null;
     offset = legal.$2;
@@ -4573,8 +4577,9 @@ class PayloadDecoder {
         final name = _readUtf8Vec(bytes, offset);
         if (name.$1 == null ||
             name.$1!.isEmpty ||
-            utf8.encode(name.$1!).length > 128)
+            utf8.encode(name.$1!).length > 128) {
           return null;
+        }
         offset = name.$2;
         if (offset >= bytes.length || bytes[offset] > 1) return null;
         final termRequired = bytes[offset++] == 1;
@@ -4597,10 +4602,11 @@ class PayloadDecoder {
         );
         if (assignments == null) return null;
         offset = assignments.$2;
-        if (registration)
+        if (registration) {
           details?.add(
             '创建岗位：${name.$1}（${termRequired ? '有任期' : '无任期'}）；${roleDetails.join('；')}',
           );
+        }
         continue;
       }
       if (variant == 1) {
@@ -4614,8 +4620,9 @@ class PayloadDecoder {
         final name = _readUtf8Vec(bytes, offset);
         if (name.$1 == null ||
             name.$1!.isEmpty ||
-            utf8.encode(name.$1!).length > 128)
+            utf8.encode(name.$1!).length > 128) {
           return null;
+        }
         offset = name.$2;
         continue;
       }
@@ -4647,8 +4654,9 @@ class PayloadDecoder {
       final moduleTag = _readUtf8Vec(bytes, offset);
       if (moduleTag.$1 == null ||
           moduleTag.$1!.isEmpty ||
-          utf8.encode(moduleTag.$1!).length > 32)
+          utf8.encode(moduleTag.$1!).length > 32) {
         return null;
+      }
       offset = moduleTag.$2;
       if (offset + 5 > bytes.length) return null;
       final actionCode = _readU32Le(bytes, offset);
@@ -4682,8 +4690,9 @@ class PayloadDecoder {
       if (offset + 32 + 4 + 4 + 1 > bytes.length) return null;
       final account = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
       if (!seenAccounts.add(account)) return null;
-      if (adminAccounts != null && !adminAccounts.contains(account))
+      if (adminAccounts != null && !adminAccounts.contains(account)) {
         return null;
+      }
       final accountBytes = bytes.sublist(offset, offset + 32);
       offset += 32;
       final start = _readU32Le(bytes, offset);
@@ -4692,8 +4701,9 @@ class PayloadDecoder {
       offset += 4;
       if (registration &&
           ((termRequired == true && (start == 0 || end < start)) ||
-              (termRequired == false && (start != 0 || end != 0))))
+              (termRequired == false && (start != 0 || end != 0)))) {
         return null;
+      }
       final source = bytes[offset++];
       if (registration ? source > 5 : source != 5) return null;
       final (refLength, refSize) = _decodeCompactU32(bytes, offset);
@@ -4705,8 +4715,9 @@ class PayloadDecoder {
       // 新建/改任职为Registry空引用；其余仅可透传存量引用，真实性由Runtime与链状态核验。
       if (registration &&
           ((!retainedAllowed && (source != 1 || refLength != 0)) ||
-              (retainedAllowed && refLength == 0 && source != 1)))
+              (retainedAllowed && refLength == 0 && source != 1))) {
         return null;
+      }
       final status = bytes[offset++];
       if (registration ? status != 0 : status > 1) return null;
       if (registration) {
@@ -4747,10 +4758,11 @@ class PayloadDecoder {
       );
       if (assignments == null) return null;
       offset = assignments.$2;
-      if (registration)
+      if (registration) {
         details?.add(
           '岗位${role.$1}的完整任职集合（${assignments.$1}人）：${roleDetails.join('；')}',
         );
+      }
     }
     return (count, offset);
   }

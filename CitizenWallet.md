@@ -16,13 +16,13 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
 
 ### citizenwallet 公民钱包 PQC 抗量子签名升级技术设计
 
-- 状态:设计 / 待实现。**真源 = `CitizenWallet.md`**(取代旧 PQC 迁移方案)。
+- 实现核心：`citizenchain/runtime/transaction/mldsa`；本钱包与 SDK 通过同一 Rust 源码调用。
 - 任务卡:`历史实施记录《抗量子钱包派生签名》（卡已删除，规范以本文为准）`。
 
 #### 设计要点
 
 - `citizenwallet` 完全离线,PQC 后仍须纯离线完成 ML-DSA-65 签名,不依赖在线服务。
-- **同源派生(model B 全 `//index` 无根,sr25519 不套 HKDF)**:每账户 `account_seed_N` = 该账户 child mini-secret(账户 N = 助记词 `//N` 硬派生,账户0=`//0`,无 bare 根);sr25519 地址锚点 = `sr25519.fromSeed(account_seed_N)` **直接派生**(不经 HKDF);ML-DSA-65/ML-KEM-768 才用 `HKDF-SHA512(account_seed_N, "GMB/account/ml-dsa-65" | ".../ml-kem-768")`。冷热共用 `gmb-pqc` crate(原生 C FFI)。
+- **同源派生(model B 全 `//index` 无根,sr25519 不套 HKDF)**:每账户 `account_seed_N` = 该账户 child mini-secret(账户 N = 助记词 `//N` 硬派生,账户0=`//0`,无 bare 根);sr25519 地址锚点 = `sr25519.fromSeed(account_seed_N)` **直接派生**(不经 HKDF);ML-DSA-65 使用该 child mini-secret 经 HKDF-SHA512（salt=`GMB/account/v1`、info=`GMB/account/ml-dsa-65`）派生32字节种子。冷热共用 `runtime/transaction/mldsa/src/lib.rs`（原生 C FFI），本次不增加 ML-KEM。
 - **可选 password**：创建/导入可把用户输入的 Substrate BIP-39 `password` 交给
   `miniSecretFromEntropy`；空值保持原钱包不变。四端校验、NFKD、输入框和非空风险确认
   公民钱包实现位于 `citizenwallet/lib/wallet/wallet_password.dart`。CitizenWallet 只加密保存最终 master seed 与标准
@@ -68,13 +68,12 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
   `.dart_tool/package_config.json` 解析锁定的 `isar_community_flutter_libs` 实际路径，
   不扫描用户全局 Pub 缓存中的其他版本。测试清库先等待仍在打开的 Isar 实例完成，
   再关闭并删除测试库，避免页面异步加载与下一例清理交错。
-- **无感 bootstrap**:未绑定账户首次扫码,**同一确认**同时出 sr25519 bootstrap 签名(证旧地址主人)+ ML-DSA 交易签名;后续只签 ML-DSA。**无单独绑定步骤、无账户状态切换**。
-- **QR 扩展**:`sig_alg(sr25519|ml-dsa-65)` + `auth_mode(normal|pqc|bootstrap-pqc)` + `key_version` + `chunk_index/chunk_total`(ML-DSA ~3.3KB,最坏体积按 bootstrap 实测分片)。
-- **安全**:`account_seed`/私钥不出本机、不进二维码；payload 严格匹配 `genesis_hash`
-  与 `transaction_version`，`spec_version` 只解析展示；bootstrap 强度=sr25519，窗口须在
-  量子破 sr25519 前关闭。
-
-> 本节长期设计以本文为唯一技术事实文档；当前功能须以公民钱包实际代码与测试为准。
+- 创建和助记词导入不选择签名算法；开发期同一助记词同时建立经典账户0和量子账户0，均使用 `//0`。sr AccountId 是32字节 sr 公钥；PQ AccountId 是 `blake2_256("GMB/account/ml-dsa-65/v1" || public_key)`。同一派生规则与助记词在 SDK 和钱包生成相同账户；添加账户底部菜单固定为「添加经典账户、指定经典账户、添加量子账户、指定量子账户」，不增加算法选择弹窗。经典、量子分别递增序号，默认名称为「经典账户N」「量子账户N」。
+- 开发期 sr 账户只用 sr 签名，PQ 账户只用 PQ 签名；运行期链端拒绝 sr 交易。既存 AccountId 不变；没有已验证 PQ 公钥的后续 PQ 交易拒绝，不做跨算法授权或绑定。
+- PQ 首次正常交易携1952字节公钥和3309字节签名，链端验证账户哈希及签名后只写一份公钥；后续交易只携账户与签名。联网端自动判定首次/后续，用户只做原有交易确认。
+- `QR_V1` 请求 `g=0` 表示按目标账户自动选择签名方式，`u` 始终为32字节 AccountId；响应 PQ 公钥为可选 `q`，`s` 为原始签名。大响应由同一核心生成有界传输帧，离线钱包自动播放，联网端自动合并，不增加用户步骤。
+- 原生构建优先复用同级公民链源码；缺少时在本轮临时目录浅克隆公民链 main，直接引用 `runtime/transaction/mldsa` 主清单，不复制模块实现。
+- `signing` 的 `operation` 构建特性将默认派生改为 PQ，关闭 sr 创建/导入与签名入口；页面自动只保留 PQ。链端阶段切换由一次 operation runtime 升级完成，钱包本机不推测链阶段。
 
 #### 当前账户与本地存储模型
 
@@ -92,11 +91,10 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
 
 - `AccountId` 是 CitizenWallet 内的钱包身份、Isar 唯一索引、重复检查和签名目标核验
   真源；Dart 使用 `accountId`，文本固定为小写 `0x` 加 64 位十六进制。
+- 账户详情把32字节值展示为“账户标识”，sr 和 PQ 均按 AccountId 处理，不把 PQ 账户哈希标为公钥。
 - `ss58Address` 只用于页面展示、用户二维码和扫码输入输出，不作为授权、去重或
   持久化身份主键。
-- `signerPublicKey` 只表示真实签名公钥。当前 sr25519 的 `AccountId32` 直接取该公钥
-  32 字节，因此登录和离线签名可做字节等值核验；不得据此把字段重新混称为
-  `pubkeyHex` 或裸 `address`。
+- 协议兼容字段 `signerPublicKey` / `u` 表示目标32字节 AccountId；sr 账户等于 sr 公钥，PQ 账户等于 PQ 公钥的域隔离哈希。完整 PQ 公钥只在响应 `q` 与首次链交易中传递。
 - 本机数据库保持 wallet、account、request 三集合；Dart 实体按官方 UpperCamelCase，
   属性按 lowerCamelCase，物理名称由 Isar 官方 @Name 指定。主键为 row_id。
   wallet 只存 wallet_index、wallet_name、master_id、sort_order；account 只存
@@ -175,17 +173,17 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
 
 ## 第7步原生客户端适配（2026年10月6日，源码回归通过，正式页面验收待完成）
 
-链端Revive为pallet35；本钱包继续只接受已登记的原生sr25519和QR_V1业务动作。Revive的eth_transact、普通call/upload/map_account，以及经过SetOrigin验证的转换入口均不登记冷签；未知调用即使伪装成转账action也必须在调用签名器前拒绝。pallet_registry.dart说明该边界，payload_decoder_test.dart与offline_sign_service_test.dart覆盖各入口拒绝及签名器零调用。
+链端Revive为pallet35；本钱包只接受已登记的原生账户交易与QR_V1业务动作。Revive的eth_transact、普通call/upload/map_account，以及经过SetOrigin验证的转换入口均不登记冷签；未知调用即使伪装成转账action也必须在调用签名器前拒绝。pallet_registry.dart说明该边界，payload_decoder_test.dart与offline_sign_service_test.dart覆盖各入口拒绝及签名器零调用。
 
-SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction版本、genesis/birth hash及metadata None字节。真实metadata的identifier为EthSetOrigin、类型为SetOrigin，原生默认扩展不增加签名字节；spec_version仅用于展示，链身份和transaction_version继续严格核对。现有二维码、sr25519及账户金标保持。
+SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction版本、genesis/birth hash及metadata None字节。真实metadata的identifier为EthSetOrigin、类型为SetOrigin，原生默认扩展不增加签名字节；spec_version仅用于展示，链身份和transaction_version继续严格核对。二维码字段及账户派生金标保持；链交易签名与完整交易金标同步为V5。
 
 本轮保留原任务的self_occupy_cid单参数差异，Rust签名及QR实现已检查无需修改；实际接口已检查，没有新增业务字段或闭集值。完整离线源码回归、静态分析与Release manifest合同通过，准确日志见唯一任务卡。正式移动包及XCTest/XCUITest页面验收尚未执行。
 
 ## 独立派生账户序号范围
 
-公民钱包在自己的WalletManager中独立维护maxAccountIndex=19890604，不引用公民SDK代码或常量。创建保留账户0（//0）；新增只允许1～19890604中尚未添加的序号，可任意跳号，只派生并保存实际选择的账户。指定序号越界在读取种子前拒绝，数据库写事务内继续复核范围和重复；顺序添加在事务内计算已有最大序号加一，超出19890604必须拒绝。
+公民钱包在自己的WalletManager中独立维护maxAccountIndex=19890604，不引用公民SDK代码或常量。开发期创建经典、量子两个账户0（//0）；指定新增只允许1～19890604中该签名方式尚未添加的序号，可任意跳号，只派生并保存实际选择的账户。指定序号越界在读取种子前拒绝，数据库写事务内继续复核范围和重复；顺序添加在事务内计算所选签名方式已有最大序号加一，超出19890604必须拒绝。
 
-详情页到顶后“添加下一个账户”不可点击，显示已达账户序号上限；“指定序号添加”仍可回填合法空缺。八位序号继续使用原有自适应徽章。独立种子存储、派生算法、已有账户地址、二维码与最多六项助记词候选保持现状。SDK中导入的公开冷账户属于另一产品目录，不参与本产品的派生序号校验。
+详情页固定提供经典、量子各两个添加入口；所选签名方式到顶时由写事务拒绝顺序添加，指定序号仍可回填该签名方式的合法空缺。八位序号继续使用原有自适应徽章。独立种子存储、派生算法、已有账户地址、二维码与最多六项助记词候选保持现状。SDK中导入的公开冷账户属于另一产品目录，不参与本产品的派生序号校验。
 
 本产品测试覆盖旧上界后的合法序号、新上界、越界与重复拒绝、顺序到顶、空缺回填、硬件解封前拒绝、高序号读取及派生一致、到顶界面和八位徽章。
 
@@ -195,7 +193,7 @@ SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction�
 
 公民 App 的同一本机 MLS 身份使用动作 `mls_device_bind`（二维码 `a=13`）请求登记授权。冷端只解析完整 SCALE 载荷：`cid_number`、`binding_revision u64LE`、`account_id`、`public_key`、`issued_at u64LE`。账户与 MLS 公钥必须为小写 `0x` 加64位十六进制，公钥为32字节；载荷必须完整消费，登记版本与签发时间为正值，账户必须等于当前签名账户，请求过期秒数必须等于签发毫秒数整除1000加120。
 
-签名域唯一为 `OP_SIGN_MLS_DEVICE_BIND = 0x1C`，签署 `blake2_256(GMB ‖ 0x1C ‖ SCALE)`。二维码码型闭集为1至5，不提供额外应用密钥的派生、加密交付或响应。原生签名库只导出4个既有 sr25519 接口；钱包私钥保存、认证与其他扫码签名能力保持各自既有合同。登记端只接收公开 MLS 公钥，不接收 MLS 私钥或协议状态。
+签名域唯一为 `OP_SIGN_MLS_DEVICE_BIND = 0x1C`，签署 `blake2_256(GMB ‖ 0x1C ‖ SCALE)`。二维码码型闭集为1至5，不提供额外应用密钥的派生、加密交付或响应。原生签名库保留4个既有 sr25519 接口，并复用 mldsa 核心的密码学及传输接口；钱包私钥保存、认证与其他扫码签名能力保持各自既有合同。登记端只接收公开 MLS 公钥，不接收 MLS 私钥或协议状态。
 
 ### 新法地域解码
 
@@ -219,7 +217,7 @@ Android 使用 Google 官方认证 Action 交付短期令牌，将本轮已验�
 
 钱包平台为ios、android；宿主Rust签名库只作为真实Flutter测试输入。编译使用Flutter 3.47.2、Rust 1.97.1、Gradle 9.1.0、AGP 9.0.1、KGP 2.2.20、NDK 28.2.13676358、CocoaPods 1.17.0。Android使用官方Flutter插件加载器和当前原锁插件支持的KGP/DSL设置，不修订Flutter、Gradle或插件缓存；工程和硬件金库单测按官方布局装配到本轮source-view。图标使用macOS sips与既有原件、尺寸声明，不包含自编图片编解码器。
 
-iOS消费现有原工程与Pod锁，使用CocoaPods官方disable_input_output_paths选项代替手写Isar输出清单；相关复制脚本可能每次构建执行。正式IPA通过Flutter官方导出，验收应用标识、版本、团队签名和四个sr25519导出。Android保留最低API24、目标API36及唯一ARM64 ABI；Gradle正式签名后验收APK/AAB身份、签名证书、ZIP/ELF16KB对齐。缺正式材料时自动化失败，不使用调试签名。本机build只编译无签名候选，不安装设备、不冒充正式产物。
+iOS消费现有原工程与Pod锁，使用CocoaPods官方disable_input_output_paths选项代替手写Isar输出清单；相关复制脚本可能每次构建执行。正式IPA通过Flutter官方导出，验收应用标识、版本、团队签名、四个 sr25519 导出及全部 mldsa 共用接口。Android保留最低API24、目标API36及唯一ARM64 ABI；Gradle正式签名后验收APK/AAB身份、签名证书、ZIP/ELF16KB对齐。缺正式材料时自动化失败，不使用调试签名。本机build只编译无签名候选，不安装设备、不冒充正式产物。
 
 签名材料只在获准步骤临时使用，Apple钥匙串搜索列表按原值恢复，本轮profile与临时钥匙串随后删除。test/build.test.mjs覆盖构建规则和失败边界，signing原生测试、现有全部Dart测试及Android硬件金库单测仍由真实官方工具执行。现有XCUITest保留；未执行的真机UI或实际设备安装不得记为通过。
 
@@ -235,9 +233,9 @@ Flutter测试使用官方JSON reporter，Bash pipefail与tee将原始报告同�
 
 Android在官方android DSL中声明testBuildType = "release"，使AGP9仅为选定Release构建类型创建单测组件，沿用testReleaseUnitTest入口；不恢复同时创建Debug与Release单测的旧全局开关，不新增编译任务或修改业务与安全断言。本机调用通过JAVA_HOME和PATH交付现有Android Studio JBR，配置不安装Java。
 
-iOS签名静态库的符号验收使用现有Apple nm -g --no-llvm-bc，只读取已生成机器码的导出，避免Apple LLVM读取较新Rust LLVM的上游bitcode。四个必需sr25519导出断言、工具非零退出失败处理均保留；不安装其他LLVM工具，不调整Rust编译参数，宿主及Android检查不变。通过实际iOS编译入口验收，不以文本匹配测试代替真实符号检查。
+iOS签名静态库的符号验收使用现有Apple nm -g --no-llvm-bc，只读取已生成机器码的导出，避免Apple LLVM读取较新Rust LLVM的上游bitcode。四个必需 sr25519 导出断言和 mldsa 共用接口检查、工具非零退出失败处理均保留；不安装其他LLVM工具，不调整Rust编译参数，宿主及Android检查不变。通过实际iOS编译入口验收，不以文本匹配测试代替真实符号检查。
 
-Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-global"，正式归档保留全局符号并继续裁剪非全局符号，避免默认All Symbols裁剪影响FFI验收；Debug配置、Rust实现、签名及四个导出断言不变。现有装配回归通过官方plutil解析真实物化工程，核对该声明只落在Runner Release配置；正式IPA仍执行原符号验收。
+Runner的Release配置按Flutter静态FFI官方建议声明STRIP_STYLE = "non-global"，正式归档保留全局符号并继续裁剪非全局符号，避免默认All Symbols裁剪影响FFI验收；Debug配置、Rust实现、签名及既有 sr 导出断言保留，并检查 mldsa 共用接口。现有装配回归通过官方plutil解析真实物化工程，核对该声明只落在Runner Release配置；正式IPA仍执行原符号验收。
 
 ## 本机编译与GitHub终态清理
 
@@ -264,14 +262,14 @@ Android本机安装器沿用现有APP_KEY，与公民App按同名APP_KEY共用�
 
 ## 本机编译资源与版本来源
 
-iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机 compile 复用已有的 gh 登录，读取本平台最新成功正式 Release 的产品版本和对应成功 Run 构建号，无正式记录才使用pubspec初始值。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub 和 Cargo 优先使用本机依赖，缺件按产品原锁获取并校验。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
+iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正式Release后将补丁号加1；失败候选不递增，首次无成功正式记录才使用pubspec.yaml初始版号。本机 compile 直接使用当前源码 pubspec.yaml 的产品版本，不查询或核对正式 Release、GitHub Run。Android 本机包构建号按编译时的 Unix 秒生成，用于保留数据覆盖安装；不改变正式发布编号规则。系统构建号不拼入产品版本；设置页通过PackageInfo只显示设备当前安装版本，失败显示版本未知，不联网检查更新、不增加更新按钮。Pub 和 Cargo 优先使用本机依赖，缺件按产品原锁获取并校验。正式自动化仍使用原GITHUB_RUN_NUMBER与原商店上传接口。
 
 ## 通用本机签名交付
 
 产品编译回执TATA_COMPILE通过signing数组交付待签名目标；path为产物内相对路径，主App为“.”，entitlements为产品权限plist路径或null。Apple产品明确列出嵌套代码及主App，Android交付空数组。产品拥有清单与权限，编译及依赖、资源、验收流程不导入控制台实现。控制台按相对路径嵌套深度从内到外签名，不扫描或推定产品结构，不以产品名称选择权限；描述文件授权值及本次身份覆盖对应请求键，产品独有功能权限完整保留。签名结果及错误沿用原任务日志，最终签名与安装仍归通用安装器；独立产品入口保持可执行。
 
 ### 充值信息冷签
-充值动作topup由citizenchain/crates/protocol/registry/actions.yaml唯一登记，字段中文名归fields.yaml；生成登记表由原export_registry产出，不手改。冷钱包严格审阅CitizenServe公开13行原文，固定服务源/公民创世/可信六条EVM币轨配置及两档金额，目标账户必须与扫码指定签名账户相同。完整UTF8原文直接sr25519/substrate签名，不预hash，不借登录/转账动作，不把QR会话120秒当付款期限；签后订单ID及实际payer/付款定位不属于签前原文。充值解码与默认账户切换的格式注释各归所属函数；测试覆盖公民账户热/冷原文一致及签名失败不创建订单。未签真实资金、安装或发布。
+充值动作topup由citizenchain/crates/protocol/registry/actions.yaml唯一登记，字段中文名归fields.yaml；生成登记表由原export_registry产出，不手改。冷钱包严格审阅CitizenServe公开13行原文，固定服务源/公民创世/可信六条EVM币轨配置及两档金额，目标账户必须与扫码指定签名账户相同。完整 UTF8 原文由账户对应的 sr25519 或 ML-DSA-65 算法直接签名，不预hash，不借登录/转账动作，不把QR会话120秒当付款期限；签后订单ID及实际payer/付款定位不属于签前原文。充值解码与默认账户切换的格式注释各归所属函数；测试覆盖公民账户热/冷原文一致及签名失败不创建订单。未签真实资金、安装或发布。
 
 ### 当前EVM充值资产与套餐
 可信付款快照为六条EVM币轨：USDC/USDT各Ethereum、Base、BNB；新增BNB USDC 0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d精度18、Base USDT 0xfde4c96c8593536e31f229ea8f37b2ada2699bb2精度6，其余四轨不变。两档严格限定pkg_10支付10 USDT/USDC充值10,000公民币、pkg_1000支付1000 USDT/USDC充值1,000,000公民币；6位与18位资产按各自精度校验最小单位并显示实际币种。付款配置指纹为固定21行，签名原文13行、confirm16字段、完整H绑定及发币时序保持。
@@ -285,3 +283,9 @@ iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正�
 2026-11-14 五项定点修复：仅更正终结、投票辅助及重试/取消解码处的旧字节数注释；定长u128槽为16字节，包含两字节调用头为18字节，Compact辅助处按实际变长编码说明。本轮不改解码逻辑、签名布局和金标。
 
 本轮最小修复只将offline_sign_service_test.dart的正常内部投票和同请求防重放两处夹具改为0x1400040001，并同步对应注释；proposal_id仍为1，按当前链端Compact<u128>编码为0x04。原验签、防重放、签名次数断言及签名扩展尾完整保留，不改生产解码器、签名服务或金标。原失败两项定向回归通过，完整test/signing目录258项全部通过；该测试文件Dart分析及差异检查通过。本轮仅修改既有测试文件和两份文档，不新增文件、模块或存储表，不修改链上迁移段或提交链上交易。
+
+## 原生交易统一V5
+
+原生交易统一为V5 General、认证管线1，认证扩展为AccountAuth；证明仅有sr25519、ML首次公钥、ML已登记公钥三种分支。sr账户仍是原公钥32字节，ML账户派生及PqPublicKey存储保持；不转换账户、不迁移余额。两种算法共用账户绑定的签名约束：blake2_256(TRANSACTION_DOMAIN || AccountId || SCALE(ImplicationParts))；ImplicationParts覆盖管线版本、call及全部后续扩展的explicit/implicit，审阅端保留完整业务字段。nonce、权限、费用、质押保护、资源检查及上限保持；运行阶段仍拒绝sr。
+
+普通链交易先完整解码和审阅，再由账户签名端调用统一核心派生摘要；sr与ML不再各走一种交易格式。登录、充值、占号、换绑及其他链下业务仍使用其原签名域。Runtime升级既有hash-only请求已携最终32字节摘要，不能重复摘要。transaction_version继续按实际候选严格核对，不与格式号5混同；冻结创世哈希不改。

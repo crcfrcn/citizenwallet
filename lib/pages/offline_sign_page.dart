@@ -1,7 +1,7 @@
+import '../signing/animated_qr.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import 'app_theme.dart';
 import '../protocol/qr_protocols.dart';
@@ -416,9 +416,8 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
             const SizedBox(width: 12),
             Expanded(
               child: FilledButton(
-                onPressed: (_signing || expired || isRejected)
-                    ? null
-                    : _signRequest,
+                onPressed:
+                    (_signing || expired || isRejected) ? null : _signRequest,
                 child: _signing
                     ? const SizedBox(
                         width: 20,
@@ -465,20 +464,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
                 ),
               ],
             ),
-            child: QrImageView(
-              data: responseJson,
-              version: QrVersions.auto,
-              size: 360,
-              errorCorrectionLevel: QrErrorCorrectLevel.M,
-              eyeStyle: const QrEyeStyle(
-                eyeShape: QrEyeShape.square,
-                color: AppTheme.primaryDark,
-              ),
-              dataModuleStyle: const QrDataModuleStyle(
-                dataModuleShape: QrDataModuleShape.square,
-                color: AppTheme.primaryDark,
-              ),
-            ),
+            child: AnimatedSigningQr(data: responseJson, size: 360),
           ),
         ),
         const SizedBox(height: 20),
@@ -489,7 +475,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
           child: Column(
             children: [
               _detailRow('请求 ID', response.id ?? ''),
-              _detailRow('签名公钥', _truncate(signerPublicKey)),
+              _detailRow('签名账户', _truncate(signerPublicKey)),
             ],
           ),
         ),
@@ -512,10 +498,10 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
       body: parseError != null
           ? _buildParseError(parseError)
           : response != null
-          ? _buildResponseView(response)
-          : request != null
-          ? _buildRequestSummary(request)
-          : const Center(child: CircularProgressIndicator()),
+              ? _buildResponseView(response)
+              : request != null
+                  ? _buildRequestSummary(request)
+                  : const Center(child: CircularProgressIndicator()),
     );
   }
 

@@ -42,7 +42,9 @@ class GeneratedQrBodySchema {
       },
       {
         "allowed_ints": [
-          1
+          0,
+          1,
+          2
         ],
         "constraint": "enum_int",
         "empty_for_action_codes": [],
@@ -97,11 +99,21 @@ class GeneratedQrBodySchema {
         "allowed_ints": [],
         "constraint": "b64u_bytes",
         "empty_for_action_codes": [],
-        "exact_bytes": 64,
+        "exact_bytes": null,
         "field_key": "signature",
-        "min_bytes": null,
+        "min_bytes": 64,
         "required": true,
         "wire_key": "s"
+      },
+      {
+        "allowed_ints": [],
+        "constraint": "b64u_bytes",
+        "empty_for_action_codes": [],
+        "exact_bytes": 1952,
+        "field_key": "pq_public_key",
+        "min_bytes": null,
+        "required": false,
+        "wire_key": "q"
       },
       {
         "allowed_ints": [],
@@ -290,6 +302,9 @@ class GeneratedQrBodySchema {
       final key = field['wire_key'] as String;
       if (!body.containsKey(key)) continue;
       _validateField(body[key], field, body);
+    }
+    if (kindCode == 2 && decodeBase64Url(body['s'] as String, 's').length != (body.containsKey('q') ? 3309 : 64)) {
+      throw const FormatException('signature length does not match algorithm');
     }
   }
 

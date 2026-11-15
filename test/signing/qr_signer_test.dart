@@ -567,6 +567,14 @@ void main() {
     });
   });
 
+  test('普通链交易无论长度都保留完整审阅材料，摘要由账户签名端统一处理', () {
+    for (final length in [255, 256, 257, 400]) {
+      final bytes = Uint8List.fromList(List<int>.filled(length, 0x55));
+      final body = SignRequestBody.fromHex(action: 0x0400, signerPublicKeyHex: '0x${'07' * 32}', payloadHex: '0x${_hexBytes(bytes)}');
+      expect(QrSigner.signingBytesFor(body), bytes);
+    }
+  });
+
   group('QrSigner.verifySr25519Signature', () {
     test('有效签名验证通过', () {
       final pair = Keyring.sr25519.fromSeed(Uint8List(32));

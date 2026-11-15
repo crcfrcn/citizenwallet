@@ -46,7 +46,7 @@ class AccountEntity {
   Id id = Isar.autoIncrement;
 
   /// 所属钱包（master）指纹。按此过滤取某钱包下全部账户。
-  @Index(composite: [CompositeIndex('accountIndex')], unique: true)
+  @Index(composite: [CompositeIndex('accountIndex')])
   @Name('master_id')
   late String masterId;
 
@@ -54,12 +54,12 @@ class AccountEntity {
   @Name('account_index')
   late int accountIndex;
 
-  /// Substrate 账户唯一标识，小写 `0x` 加 64 位十六进制（= 派生公钥原字节）。
+  /// 链上账户标识：经典账户为公钥原字节，量子账户为完整公钥的域分离哈希。
   @Index(unique: true)
   @Name('account_id')
   late String accountId;
 
-  /// 账户显示名，默认「账户$accountIndex」。
+  /// 账户显示名，默认「经典账户N」或「量子账户N」。
   @Name('account_name')
   late String accountName;
 }

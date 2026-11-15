@@ -183,8 +183,8 @@ class _CreateWalletPageState extends State<CreateWalletPage>
               _wordCount == 24
                   ? '256 位熵，安全性更高'
                   : _wordCount == 18
-                  ? '192 位熵，词数与安全性平衡'
-                  : '128 位熵，标准安全强度',
+                      ? '192 位熵，词数与安全性平衡'
+                      : '128 位熵，标准安全强度',
               style: const TextStyle(
                 color: AppTheme.textTertiary,
                 fontSize: 12,

@@ -1150,7 +1150,7 @@ const AccountEntitySchema = CollectionSchema(
     r'master_id_account_index': IndexSchema(
       id: 4155264467274436237,
       name: r'master_id_account_index',
-      unique: true,
+      unique: false,
       replace: false,
       properties: [
         IndexPropertySchema(
@@ -1260,97 +1260,6 @@ void _accountEntityAttach(
 }
 
 extension AccountEntityByIndex on IsarCollection<AccountEntity> {
-  Future<AccountEntity?> getByMasterIdAccountIndex(
-      String masterId, int accountIndex) {
-    return getByIndex(r'master_id_account_index', [masterId, accountIndex]);
-  }
-
-  AccountEntity? getByMasterIdAccountIndexSync(
-      String masterId, int accountIndex) {
-    return getByIndexSync(r'master_id_account_index', [masterId, accountIndex]);
-  }
-
-  Future<bool> deleteByMasterIdAccountIndex(String masterId, int accountIndex) {
-    return deleteByIndex(r'master_id_account_index', [masterId, accountIndex]);
-  }
-
-  bool deleteByMasterIdAccountIndexSync(String masterId, int accountIndex) {
-    return deleteByIndexSync(
-        r'master_id_account_index', [masterId, accountIndex]);
-  }
-
-  Future<List<AccountEntity?>> getAllByMasterIdAccountIndex(
-      List<String> masterIdValues, List<int> accountIndexValues) {
-    final len = masterIdValues.length;
-    assert(accountIndexValues.length == len,
-        'All index values must have the same length');
-    final values = <List<dynamic>>[];
-    for (var i = 0; i < len; i++) {
-      values.add([masterIdValues[i], accountIndexValues[i]]);
-    }
-
-    return getAllByIndex(r'master_id_account_index', values);
-  }
-
-  List<AccountEntity?> getAllByMasterIdAccountIndexSync(
-      List<String> masterIdValues, List<int> accountIndexValues) {
-    final len = masterIdValues.length;
-    assert(accountIndexValues.length == len,
-        'All index values must have the same length');
-    final values = <List<dynamic>>[];
-    for (var i = 0; i < len; i++) {
-      values.add([masterIdValues[i], accountIndexValues[i]]);
-    }
-
-    return getAllByIndexSync(r'master_id_account_index', values);
-  }
-
-  Future<int> deleteAllByMasterIdAccountIndex(
-      List<String> masterIdValues, List<int> accountIndexValues) {
-    final len = masterIdValues.length;
-    assert(accountIndexValues.length == len,
-        'All index values must have the same length');
-    final values = <List<dynamic>>[];
-    for (var i = 0; i < len; i++) {
-      values.add([masterIdValues[i], accountIndexValues[i]]);
-    }
-
-    return deleteAllByIndex(r'master_id_account_index', values);
-  }
-
-  int deleteAllByMasterIdAccountIndexSync(
-      List<String> masterIdValues, List<int> accountIndexValues) {
-    final len = masterIdValues.length;
-    assert(accountIndexValues.length == len,
-        'All index values must have the same length');
-    final values = <List<dynamic>>[];
-    for (var i = 0; i < len; i++) {
-      values.add([masterIdValues[i], accountIndexValues[i]]);
-    }
-
-    return deleteAllByIndexSync(r'master_id_account_index', values);
-  }
-
-  Future<Id> putByMasterIdAccountIndex(AccountEntity object) {
-    return putByIndex(r'master_id_account_index', object);
-  }
-
-  Id putByMasterIdAccountIndexSync(AccountEntity object,
-      {bool saveLinks = true}) {
-    return putByIndexSync(r'master_id_account_index', object,
-        saveLinks: saveLinks);
-  }
-
-  Future<List<Id>> putAllByMasterIdAccountIndex(List<AccountEntity> objects) {
-    return putAllByIndex(r'master_id_account_index', objects);
-  }
-
-  List<Id> putAllByMasterIdAccountIndexSync(List<AccountEntity> objects,
-      {bool saveLinks = true}) {
-    return putAllByIndexSync(r'master_id_account_index', objects,
-        saveLinks: saveLinks);
-  }
-
   Future<AccountEntity?> getByAccountId(String accountId) {
     return getByIndex(r'account_id', [accountId]);
   }

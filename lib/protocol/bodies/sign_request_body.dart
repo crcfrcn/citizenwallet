@@ -10,16 +10,16 @@ class SignRequestBody implements QrBody {
     required this.action,
     required this.signerPublicKey,
     required this.payload,
-    this.alg = 1,
+    this.alg = 0,
   });
 
   /// 业务动作码 `a`:扫码流向以 `k` 表达,业务语义统一放这里。
   final int action;
 
-  /// 签名算法 `g`:当前 1=sr25519。
+  /// 算法提示 `g`：0 按账户选择，1 为 sr25519，2 为 ML-DSA-65。
   final int alg;
 
-  /// 期望签名者公钥 `u`:32 字节公钥的 base64url 无填充编码。
+  /// 目标账户 `u`：32 字节 AccountId 的 base64url 无填充编码。
   final String signerPublicKey;
 
   /// 审阅载荷 `d`:原始 review_payload bytes 的 base64url 无填充编码。
