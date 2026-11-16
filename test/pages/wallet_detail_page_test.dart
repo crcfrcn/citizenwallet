@@ -401,6 +401,9 @@ void main() {
     await releasePage(tester);
   });
   testWidgets('经典账户到顶仍保留四种添加入口，八位徽章正常展示', (tester) async {
+    tester.view.physicalSize = const Size(800, 300);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     late Wallet wallet;
     await tester.runAsync(() async {
       final created = await WalletManager().importWallet(kDevPhrase);
@@ -413,11 +416,35 @@ void main() {
     });
     await tester.pump();
     expect(find.text('19890604'), findsOneWidget);
-    await tester.tap(find.widgetWithText(TextButton, '添加账户'));
+    final addAccount = find.widgetWithText(TextButton, '添加账户');
+    await tester.ensureVisible(addAccount);
+    await tester.tap(addAccount);
     await tester.pumpAndSettle();
-    for (final label in ['添加经典账户', '指定经典账户', '添加量子账户', '指定量子账户']) {
-      expect(find.text(label), findsOneWidget);
+    const icons = {
+      '添加经典账户': Icons.person_add_alt_1_outlined,
+      '指定经典账户': Icons.tag_rounded,
+      '添加量子账户': Icons.memory_outlined,
+      '指定量子账户': Icons.radar_rounded,
+    };
+    for (final entry in icons.entries) {
+      final label = find.text(entry.key);
+      expect(label, findsOneWidget);
+      final card = find.ancestor(of: label, matching: find.byType(InkWell));
+      final icon =
+          find.descendant(of: card, matching: find.byIcon(entry.value));
+      expect(icon, findsOneWidget);
+      expect(tester.getCenter(icon).dx, lessThan(tester.getTopLeft(label).dx));
     }
+    expect(tester.takeException(), isNull);
+    final lastOption = find.text('指定量子账户');
+    await tester.ensureVisible(lastOption);
+    await tester.pumpAndSettle();
+    await tester.tap(lastOption);
+    await tester.pumpAndSettle();
+    expect(find.text('指定账户序号'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
     expect(find.text('选择账户签名方式'), findsNothing);
     await releasePage(tester);
   });

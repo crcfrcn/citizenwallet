@@ -557,8 +557,6 @@ void main() {
         action: QrActions.internalVote,
       );
 
-      final payloadBytes = _hexToBytes(payloadHex);
-
       final response = await service.signParsedRequest(
         accountId: signingAccount.accountId,
         request: request,

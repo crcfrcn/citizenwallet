@@ -164,63 +164,66 @@ class _WalletDetailPageState extends State<WalletDetailPage> {
     if (_addingAccount) return;
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppTheme.textTertiary,
-                  borderRadius: BorderRadius.circular(2),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.textTertiary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              if (NativeMldsa.defaultAlgorithm == 1) ...[
+                if (NativeMldsa.defaultAlgorithm == 1) ...[
+                  _sheetItem(
+                    icon: Icons.person_add_alt_1_outlined,
+                    label: '添加经典账户',
+                    subtitle: '派生下一个经典账户',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _doAdd(pq: false);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  _sheetItem(
+                    icon: Icons.tag_rounded,
+                    label: '指定经典账户',
+                    subtitle: '填 1–${WalletManager.maxAccountIndex}（恢复特定账户）',
+                    onTap: () {
+                      Navigator.pop(context);
+                      _promptIndexAndAdd(pq: false);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 _sheetItem(
-                  icon: Icons.add_circle_outline,
-                  label: '添加经典账户',
-                  subtitle: '派生下一个经典账户',
+                  icon: Icons.memory_outlined,
+                  label: '添加量子账户',
+                  subtitle: '派生下一个量子账户',
                   onTap: () {
                     Navigator.pop(context);
-                    _doAdd(pq: false);
+                    _doAdd(pq: true);
                   },
                 ),
                 const SizedBox(height: 8),
                 _sheetItem(
-                  icon: Icons.tag_rounded,
-                  label: '指定经典账户',
+                  icon: Icons.radar_rounded,
+                  label: '指定量子账户',
                   subtitle: '填 1–${WalletManager.maxAccountIndex}（恢复特定账户）',
                   onTap: () {
                     Navigator.pop(context);
-                    _promptIndexAndAdd(pq: false);
+                    _promptIndexAndAdd(pq: true);
                   },
                 ),
-                const SizedBox(height: 8),
               ],
-              _sheetItem(
-                icon: Icons.add_circle_outline,
-                label: '添加量子账户',
-                subtitle: '派生下一个量子账户',
-                onTap: () {
-                  Navigator.pop(context);
-                  _doAdd(pq: true);
-                },
-              ),
-              const SizedBox(height: 8),
-              _sheetItem(
-                icon: Icons.tag_rounded,
-                label: '指定量子账户',
-                subtitle: '填 1–${WalletManager.maxAccountIndex}（恢复特定账户）',
-                onTap: () {
-                  Navigator.pop(context);
-                  _promptIndexAndAdd(pq: true);
-                },
-              ),
-            ],
+            ),
           ),
         ),
       ),
