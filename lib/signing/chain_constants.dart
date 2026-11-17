@@ -18,9 +18,9 @@ class ChainConstants {
 
   /// 当前钱包支持的 Substrate `transaction_version`。
   ///
-  /// 候选交易版本仍为3；V5格式不替代transaction_version，正式切换须按链上基线核对。
-  /// 升级前实链为 spec_version=3、transaction_version=2，发布时须重新核对。
+  /// 已按正式链最终确认区块核对：spec_version=5、transaction_version=4。
+  /// V5格式不替代transaction_version；后续升级须重新核对链上实际值。
   /// 不支持的交易版本继续严格拒签。
   /// 钱包对 spec_version 仍只解析展示；编辑或重复编译不触发版本递增。
-  static const int transactionVersion = 3;
+  static const int transactionVersion = 4;
 }

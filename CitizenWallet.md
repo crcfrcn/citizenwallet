@@ -199,7 +199,7 @@ SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction�
 
 propose_enact_law的原四字节地域槽按两字节原省码加u16小端原省内市号解码，不再按u32数字省码展示。全国明确四零字节；省级为两位大写字母和零市号；市级为原省码及原三位市号数值，展示补齐原前导零。非法层级、字母或地域形状拒签，不回退全国。复用原确认页scope_code字段及行政区代码标签显示CN、原省码或原省码加市号，不新增控件或扫码交互。CID、CN、现有省市规则及宪法修改流程保持。
 
-transaction_version属于框架原生RuntimeVersion，不是新增公民链字段。遵循CitizenChainRuntime.md的统一政策，每次正式Runtime升级，spec_version和transaction_version各自在此前实际部署值上加1；本钱包chain_constants.dart同步支持该次交易版本。编辑、测试或重复编译不递增版本，不按改动种类另作判断，也不把spec_version当成transaction_version。钱包支持值按正式节点最终确认区块 86 同步为 transaction_version=2（spec_version=3）。现有offline_sign_service交易版本严格相等拒签机制不改，测试以支持版本加一构造不支持版本，避免把某个固定合法版本永久当作错误。既有载荷夹具增加原字母、省内市号、不同省同市号及非法值断言；全国改为合法四零字节。均仅为源码维护，未运行测试、类型检查、编译、安装或签名。
+transaction_version属于框架原生RuntimeVersion，不是新增公民链字段。遵循CitizenChainRuntime.md的统一政策，每次正式Runtime升级，spec_version和transaction_version各自在此前实际部署值上加1；本钱包chain_constants.dart同步支持该次交易版本。编辑、测试或重复编译不递增版本，不按改动种类另作判断，也不把spec_version当成transaction_version。钱包当前支持值按正式节点最终确认区块核对为 transaction_version=4（spec_version=5）。现有offline_sign_service交易版本严格相等拒签机制不改；回归明确验证版本4可审阅，旧版0～3及未来版本5、u32最大值拒签，spec_version仍只解析展示。
 
 ## 当前编译与自动化合同
 
@@ -288,4 +288,4 @@ iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正�
 
 原生交易统一为V5 General、认证管线1，认证扩展为AccountAuth；证明仅有sr25519、ML首次公钥、ML已登记公钥三种分支。sr账户仍是原公钥32字节，ML账户派生及PqPublicKey存储保持；不转换账户、不迁移余额。两种算法共用账户绑定的签名约束：blake2_256(TRANSACTION_DOMAIN || AccountId || SCALE(ImplicationParts))；ImplicationParts覆盖管线版本、call及全部后续扩展的explicit/implicit，审阅端保留完整业务字段。nonce、权限、费用、质押保护、资源检查及上限保持；运行阶段仍拒绝sr。
 
-普通链交易先完整解码和审阅，再由账户签名端调用统一核心派生摘要；sr与ML不再各走一种交易格式。登录、充值、占号、换绑及其他链下业务仍使用其原签名域。Runtime升级既有hash-only请求已携最终32字节摘要，不能重复摘要。transaction_version继续按实际候选严格核对，不与格式号5混同；冻结创世哈希不改。
+普通链交易先完整解码和审阅，再由账户签名端调用统一核心派生摘要；sr与ML不再各走一种交易格式。登录、充值、占号、换绑及其他链下业务仍使用其原签名域。Runtime升级既有hash-only请求已携最终32字节摘要，不能重复摘要。transaction_version继续按实际部署版本严格核对，不与格式号5混同；冻结创世哈希不改。

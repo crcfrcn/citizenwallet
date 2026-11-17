@@ -709,29 +709,28 @@ void main() {
       );
     });
 
-    test('正式链 spec 3 的交易版本 2 可审阅，其他交易版本拒签', () {
+    test('正式链 spec 5 的交易版本 4 可审阅，旧版和未来版本拒签', () {
+      expect(ChainConstants.transactionVersion, 4);
       // 与节点transfer_with_remark一致：4/0、20B Ethereum地址加12B EE、u128金额、备注Vec。
       const destination =
           '6d66a0cb155051055f3fb3cc73d9230d3fb4d5b5eeeeeeeeeeeeeeeeeeeeeeee';
       const callData = '0x0400${destination}0100000000000000000000000000000000';
-      for (final transactionVersion in [0, 1, 2, 3]) {
+      for (final transactionVersion in [0, 1, 2, 3, 4, 5, 0xffffffff]) {
         final request = _buildTestRequest(
           requestId: 'offline-formal-chain-version-$transactionVersion',
           signerPublicKey: signingAccount.accountId,
           payloadHex: _withSigningTailHex(
             callData,
-            specVersion: 3,
+            specVersion: 5,
             transactionVersion: transactionVersion,
           ),
           action: QrActions.transferWithRemark,
         );
         final verification = service.verifyPayload(request);
-        expect(verification.canSign,
-            transactionVersion == ChainConstants.transactionVersion);
-        if (transactionVersion == ChainConstants.transactionVersion) {
-          expect(verification.decoded?.fields['spec_version'], '3');
-          expect(verification.decoded?.fields['transaction_version'],
-              ChainConstants.transactionVersion.toString());
+        expect(verification.canSign, transactionVersion == 4);
+        if (transactionVersion == 4) {
+          expect(verification.decoded?.fields['spec_version'], '5');
+          expect(verification.decoded?.fields['transaction_version'], '4');
           expect(verification.decoded?.action, 'transfer');
         } else {
           expect(verification.rejectReason, '交易格式版本不受当前钱包支持，请升级公民钱包');
