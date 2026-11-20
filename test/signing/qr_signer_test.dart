@@ -65,17 +65,15 @@ void main() {
   });
   test('自助换绑完整授权只做一次GMB+0x11摘要，与App和Runtime原金标相同', () {
     final payload = cidRebindPayload(
-        expiresAt: 0x11121314,
-        genesisHash: '0x${'22' * 32}',
-        revision: BigInt.from(0x01020304));
+        genesisHash: '0x${'22' * 32}', revision: BigInt.from(0x01020304));
     final body = SignRequestBody.fromHex(
         action: QrActions.cidRebind,
         signerPublicKeyHex: '0x${'33' * 32}',
         payloadHex: '0x${_hexBytes(payload)}');
     final digest = QrSigner.signingBytesFor(body);
-    expect(payload.length, 139);
+    expect(payload.length, 131);
     expect(_hexBytes(digest),
-        '15c430a70f07e25fee7b6023f6a24759994360cf07138da8f87a5aa5365cbf32');
+        '648df90f231b32d1e0665fd54a9dca94381a739689a665a69d83857941520d4d');
     final registrar = SignRequestBody.fromHex(
         action: QrActions.citizenRebind,
         signerPublicKeyHex: '',

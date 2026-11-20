@@ -218,9 +218,7 @@ void main() {
       final targetSeed = Uint8List.fromList(List.filled(32, 3));
       final targetId = '0x${_toHex(NativeSr25519.publicKeyOf(targetSeed))}';
       final authorization = cidRebindPayload(
-          expiresAt: now + 300,
-          currentAccountId: signingAccount.accountId,
-          newAccountId: targetId);
+          currentAccountId: signingAccount.accountId, newAccountId: targetId);
       SignRequestEnvelope request(List<int> bytes,
               {int? action, String? signer, int? end}) =>
           _buildTestRequest(
@@ -228,7 +226,7 @@ void main() {
             signerPublicKey: signer ?? signingAccount.accountId,
             payloadHex: '0x${_toHex(bytes)}',
             action: action ?? QrActions.cidRebind,
-            expiresAt: end ?? now + 120,
+            expiresAt: end ?? now + 300,
           );
       final first = request(authorization);
       expect(service.verifyPayload(first).canSign, true);
@@ -239,16 +237,11 @@ void main() {
         request([...authorization, 0]),
         request(authorization, signer: targetId),
         request(authorization, end: now - 1),
+        request([...authorization, ..._u64Le(now - 1)]),
         request(cidRebindPayload(
-            expiresAt: now - 1,
-            currentAccountId: signingAccount.accountId,
-            newAccountId: targetId)),
-        request(cidRebindPayload(
-            expiresAt: now + 300,
             currentAccountId: signingAccount.accountId,
             newAccountId: signingAccount.accountId)),
         request(cidRebindPayload(
-            expiresAt: now + 300,
             genesisHash: '0x${'22' * 32}',
             currentAccountId: signingAccount.accountId,
             newAccountId: targetId)),
@@ -284,7 +277,6 @@ void main() {
           accountName: '目标账户');
       final secondService = OfflineSignService(walletManager: targetManager);
       final call = selfRebindCall(
-          expiresAt: now + 300,
           signature: _hexToBytes(firstResponse.body.signatureHex));
       final second = request(
           _hexToBytes(_withSigningTailHex('0x${_toHex(call)}')),

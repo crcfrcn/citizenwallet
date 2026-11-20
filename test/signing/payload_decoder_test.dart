@@ -36,7 +36,6 @@ List<int> _rebindAccount(String value) => [
         int.parse(value.substring(i, i + 2), radix: 16)
     ];
 Uint8List cidRebindPayload({
-  required int expiresAt,
   String genesisHash = ChainConstants.genesisHash,
   String currentAccountId =
       '0x3333333333333333333333333333333333333333333333333333333333333333',
@@ -52,12 +51,10 @@ Uint8List cidRebindPayload({
     ..._rebindAccount(currentAccountId),
     ..._rebindAccount(newAccountId),
     ..._rebindU64(revision ?? BigInt.from(7)),
-    ..._rebindU64(BigInt.from(expiresAt)),
   ]);
 }
 
-Uint8List selfRebindCall(
-    {required int expiresAt, BigInt? revision, List<int>? signature}) {
+Uint8List selfRebindCall({BigInt? revision, List<int>? signature}) {
   const cid = 'CN951-CTZN1-539598435-2026';
   return Uint8List.fromList([
     10,
@@ -65,7 +62,6 @@ Uint8List selfRebindCall(
     cid.length << 2,
     ...cid.codeUnits,
     ..._rebindU64(revision ?? BigInt.from(7)),
-    ..._rebindU64(BigInt.from(expiresAt)),
     1,
     1,
     ...signature ?? List<int>.filled(64, 0xab),
@@ -297,21 +293,21 @@ void main() {
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
 
   test('自助换绑授权完整解码，摘要/截断/尾随/同账户/非规范CID及非法revision拒绝', () {
-    final payload = cidRebindPayload(expiresAt: 1800000000);
+    final payload = cidRebindPayload();
     final decoded =
         PayloadDecoder.decode(hexOf(payload), expectedAction: 'cid_rebind')!;
     expect(decoded.fields['current_account_id'], '0x${'33' * 32}');
     expect(decoded.fields['new_account_id'], '0x${'11' * 32}');
     expect(decoded.fields['expected_binding_revision'], '7');
-    expect(decoded.fields['expires_at'], '1800000000');
+    expect(decoded.fields.containsKey('expires_at'), false);
     for (final bytes in <List<int>>[
       List.filled(32, 0),
       payload.sublist(0, payload.length - 1),
       [...payload, 0],
-      cidRebindPayload(expiresAt: 1800000000, newAccountId: '0x${'33' * 32}'),
-      cidRebindPayload(expiresAt: 1800000000, revision: BigInt.zero),
-      cidRebindPayload(
-          expiresAt: 1800000000, revision: (BigInt.one << 64) - BigInt.one),
+      [...payload, ...u64Le(1800000000)],
+      cidRebindPayload(newAccountId: '0x${'33' * 32}'),
+      cidRebindPayload(revision: BigInt.zero),
+      cidRebindPayload(revision: (BigInt.one << 64) - BigInt.one),
       [...payload.sublist(0, 32), 0x69, 0, ...payload.sublist(33)],
     ]) {
       expect(PayloadDecoder.decode(hexOf(bytes), expectedAction: 'cid_rebind'),
@@ -320,15 +316,14 @@ void main() {
     // revision跨过有符号int边界仍完整展示，不溢出或误判为负值。
     final large = (BigInt.one << 63) + BigInt.one;
     expect(
-        PayloadDecoder.decode(
-                hexOf(cidRebindPayload(expiresAt: 1800000000, revision: large)),
+        PayloadDecoder.decode(hexOf(cidRebindPayload(revision: large)),
                 expectedAction: 'cid_rebind')!
             .fields['expected_binding_revision'],
         large.toString());
   });
 
   test('自助换绑call9必须完整消费原账户64字节签名及SigningPayload尾', () {
-    final call = selfRebindCall(expiresAt: 1800000000);
+    final call = selfRebindCall();
     final payload = withSigningTail(call);
     final decoded = PayloadDecoder.decode(hexOf(payload))!;
     expect(decoded.action, 'self_rebind_cid_account_id');
@@ -338,10 +333,8 @@ void main() {
       call,
       payload.sublist(0, payload.length - 1),
       [...payload, 0],
-      withSigningTail(selfRebindCall(
-          expiresAt: 1800000000, signature: List.filled(63, 0xab))),
-      withSigningTail(
-          selfRebindCall(expiresAt: 1800000000, revision: BigInt.zero)),
+      withSigningTail(selfRebindCall(signature: List.filled(63, 0xab))),
+      withSigningTail(selfRebindCall(revision: BigInt.zero)),
       withSigningTail([...call, 0]),
     ]) {
       expect(PayloadDecoder.decode(hexOf(bad)), isNull);

@@ -66,10 +66,8 @@ void main() {
   testWidgets('两阶段自助换绑展示中文授权和新账户交易，均为绿色可签', (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final authorization = cidRebindPayload(
-        expiresAt: now + 300,
-        currentAccountId: signerPk,
-        newAccountId: '0x${'11' * 32}');
-    final call = selfRebindCall(expiresAt: now + 300);
+        currentAccountId: signerPk, newAccountId: '0x${'11' * 32}');
+    final call = selfRebindCall();
     final genesis = [
       for (var i = 2; i < ChainConstants.genesisHash.length; i += 2)
         int.parse(ChainConstants.genesisHash.substring(i, i + 2), radix: 16)

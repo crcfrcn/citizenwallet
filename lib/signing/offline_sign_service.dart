@@ -187,31 +187,26 @@ class OfflineSignService {
       );
     }
 
-    if (body.action == QrActions.cidRebind ||
-        body.action == QrActions.selfRebindCidAccountId) {
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final authorizationExpiry =
-          BigInt.tryParse(decoded.fields['expires_at'] ?? '');
-      // 二维码会话120秒与链上授权300秒各自有效，不能把二者强行视为同一期限。
-      if ((request.expiresAt ?? 0) <= now ||
-          authorizationExpiry == null ||
-          authorizationExpiry <= BigInt.from(now)) {
-        return OfflineSignVerification(
+    if ((body.action == QrActions.cidRebind ||
+            body.action == QrActions.selfRebindCidAccountId) &&
+        (request.expiresAt ?? 0) <=
+            DateTime.now().millisecondsSinceEpoch ~/ 1000) {
+      return OfflineSignVerification(
           decoded: decoded,
           status: SignDecisionStatus.reject,
           actionLabel: qrActionLabel,
-          rejectReason: '换绑授权或二维码已过期，已拒绝签名',
-        );
-      }
-      if (body.action == QrActions.cidRebind &&
-          decoded.fields['current_account_id'] != body.signerPublicKeyHex) {
-        return OfflineSignVerification(
-          decoded: decoded,
-          status: SignDecisionStatus.reject,
-          actionLabel: qrActionLabel,
-          rejectReason: '换绑授权的当前账户与签名账户不一致，已拒绝签名',
-        );
-      }
+          rejectReason: '二维码已过期，已拒绝签名');
+    }
+
+    // 自助换绑不携带链上期限；二维码会话仍由parseRequest与签名前复核到期时间。
+    if (body.action == QrActions.cidRebind &&
+        decoded.fields['current_account_id'] != body.signerPublicKeyHex) {
+      return OfflineSignVerification(
+        decoded: decoded,
+        status: SignDecisionStatus.reject,
+        actionLabel: qrActionLabel,
+        rejectReason: '换绑授权的当前账户与签名账户不一致，已拒绝签名',
+      );
     }
 
     if (QrActions.isChainAction(body.action)) {

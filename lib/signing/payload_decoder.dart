@@ -3113,22 +3113,19 @@ class PayloadDecoder {
 
   /// 自助换绑授权必须携带原账户、目标账户和防重放字段，不能接受摘要或零槽模板。
   static DecodedPayload? _decodeCidRebind(Uint8List bytes) {
-    if (bytes.length < 32 + 1 + 1 + 64 + 16 || (bytes[32] & 3) != 0) {
+    if (bytes.length < 32 + 1 + 1 + 64 + 8 || (bytes[32] & 3) != 0) {
       return null;
     }
     final cid = _readCidNumber(bytes, 32);
     if (cid == null || !_isAnonymousCid(cid.$1)) return null;
     var offset = cid.$2;
-    if (offset + 80 != bytes.length) return null;
+    if (offset + 72 != bytes.length) return null;
     final current = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
     offset += 32;
     final target = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
     offset += 32;
     final revision = _readUnsignedU64(bytes, offset);
-    final expiresAt = _readUnsignedU64(bytes, offset + 8);
-    if (current == target ||
-        !_validRebindRevision(revision) ||
-        expiresAt == BigInt.zero) {
+    if (current == target || !_validRebindRevision(revision)) {
       return null;
     }
     return DecodedPayload(
@@ -3140,24 +3137,22 @@ class PayloadDecoder {
         'current_account_id': current,
         'new_account_id': target,
         'expected_binding_revision': revision.toString(),
-        'expires_at': expiresAt.toString(),
       },
     );
   }
 
-  /// call9 = CID + revision:u64 + expires:u64 + Vec<原账户签名>，后接完整交易签名尾。
+  /// call9 = CID + revision:u64 + Vec<原账户签名>，后接完整交易签名尾。
   static DecodedPayload? _decodeSelfRebindCidAccountId(Uint8List bytes) {
     if (bytes.length < 3 || (bytes[2] & 3) != 0) return null;
     final cid = _readCidNumber(bytes, 2);
     if (cid == null || !_isAnonymousCid(cid.$1)) return null;
     var offset = cid.$2;
-    if (offset + 16 >= bytes.length) return null;
+    if (offset + 8 >= bytes.length) return null;
     final revision = _readUnsignedU64(bytes, offset);
-    final expiresAt = _readUnsignedU64(bytes, offset + 8);
-    if (!_validRebindRevision(revision) || expiresAt == BigInt.zero) {
+    if (!_validRebindRevision(revision)) {
       return null;
     }
-    offset += 16;
+    offset += 8;
     final (signatureLength, lengthSize) = _decodeCompactU32(bytes, offset);
     if (signatureLength != 64 || lengthSize != 2) return null;
     offset += lengthSize + signatureLength;
@@ -3168,7 +3163,6 @@ class PayloadDecoder {
       fields: {
         'cid_number': cid.$1,
         'expected_binding_revision': revision.toString(),
-        'expires_at': expiresAt.toString(),
       },
     );
   }
