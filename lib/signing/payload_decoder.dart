@@ -200,6 +200,9 @@ class PayloadDecoder {
       // 该本机授权没有 pallet/call 前缀，必须由 QR_V1 已登记动作限定后再解码，
       // 防止长度恰好相同的链交易被误识别为默认账户切换。
       if (expectedAction == 'topup') return _decodeTopup(raw);
+      if (expectedAction == 'cid_rebind') {
+        return _decodeCidRebind(raw);
+      }
       if (expectedAction == 'switch_default_account') {
         final defaultAccountSwitch = _decodeSwitchDefaultAccount(raw);
         if (defaultAccountSwitch != null) {
@@ -312,6 +315,9 @@ class PayloadDecoder {
       if (palletIndex == PalletRegistry.citizenIdentityPallet) {
         if (callIndex == PalletRegistry.selfOccupyCidCall) {
           return _decodeSelfOccupyCid(bytes);
+        }
+        if (callIndex == PalletRegistry.selfRebindCidAccountIdCall) {
+          return _decodeSelfRebindCidAccountId(bytes);
         }
         if (callIndex == PalletRegistry.registerVotingIdentityCall) {
           return _decodeRegisterVotingIdentity(bytes);
@@ -715,13 +721,13 @@ class PayloadDecoder {
       'CitizenServe Topup Config',
       'service_origin=${values['service_origin']}',
       'chain_genesis_hash=${ChainConstants.genesisHash}',
+      'min_coin_fen=100000',
+      'step_coin_fen=100000',
+      'coin_per_usd=1000',
     ];
     List<String>? selected;
     for (final rail in rails) {
       catalog.add('rail=${rail.join('|')}');
-      final unit = BigInt.from(10).pow(int.parse(rail[3]));
-      catalog.add('package=pkg_10|${BigInt.from(10) * unit}|1000000');
-      catalog.add('package=pkg_1000|${BigInt.from(1000) * unit}|100000000');
       if (rail[0] == values['token'] && rail[1] == values['network']) {
         selected = rail;
       }
@@ -733,23 +739,20 @@ class PayloadDecoder {
             sha256.convert(utf8.encode('${catalog.join('\n')}\n')).toString()) {
       return null;
     }
-    final amount = switch (values['package_id']) {
-      'pkg_10' => 10,
-      'pkg_1000' => 1000,
-      _ => 0,
-    };
-    final coin = amount == 10 ? '1000000' : '100000000';
-    if (amount == 0 ||
+    final id = values['package_id']!;
+    if (!RegExp(r'^pkg_[1-9][0-9]{0,14}$').hasMatch(id)) return null;
+    final amount = BigInt.parse(id.substring(4));
+    final coin = amount * BigInt.from(100000);
+    if (coin > BigInt.parse('18446744073709551615') ||
         values['pay_amount'] !=
-            (BigInt.from(amount) * BigInt.from(10).pow(int.parse(selected[3])))
-                .toString() ||
-        values['coin_fen'] != coin) {
+            (amount * BigInt.from(10).pow(int.parse(selected[3]))).toString() ||
+        values['coin_fen'] != coin.toString()) {
       return null;
     }
     final review = {
       ...values,
       'pay_amount': '$amount ${values['token']}',
-      'coin_fen': '${BigInt.parse(coin) ~/ BigInt.from(100)}.00 公民币',
+      'coin_fen': '${coin ~/ BigInt.from(100)}.00 公民币',
     };
     return DecodedPayload(
       action: 'topup',
@@ -3107,6 +3110,83 @@ class PayloadDecoder {
       fields: {'cid_number': cid.$1},
     );
   }
+
+  /// 自助换绑授权必须携带原账户、目标账户和防重放字段，不能接受摘要或零槽模板。
+  static DecodedPayload? _decodeCidRebind(Uint8List bytes) {
+    if (bytes.length < 32 + 1 + 1 + 64 + 16 || (bytes[32] & 3) != 0) {
+      return null;
+    }
+    final cid = _readCidNumber(bytes, 32);
+    if (cid == null || !_isAnonymousCid(cid.$1)) return null;
+    var offset = cid.$2;
+    if (offset + 80 != bytes.length) return null;
+    final current = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
+    offset += 32;
+    final target = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
+    offset += 32;
+    final revision = _readUnsignedU64(bytes, offset);
+    final expiresAt = _readUnsignedU64(bytes, offset + 8);
+    if (current == target ||
+        !_validRebindRevision(revision) ||
+        expiresAt == BigInt.zero) {
+      return null;
+    }
+    return DecodedPayload(
+      action: 'cid_rebind',
+      summary: '授权公民号自助换绑：${cid.$1}',
+      fields: {
+        'genesis_hash': _bytesToLowerHex(bytes.sublist(0, 32)),
+        'cid_number': cid.$1,
+        'current_account_id': current,
+        'new_account_id': target,
+        'expected_binding_revision': revision.toString(),
+        'expires_at': expiresAt.toString(),
+      },
+    );
+  }
+
+  /// call9 = CID + revision:u64 + expires:u64 + Vec<原账户签名>，后接完整交易签名尾。
+  static DecodedPayload? _decodeSelfRebindCidAccountId(Uint8List bytes) {
+    if (bytes.length < 3 || (bytes[2] & 3) != 0) return null;
+    final cid = _readCidNumber(bytes, 2);
+    if (cid == null || !_isAnonymousCid(cid.$1)) return null;
+    var offset = cid.$2;
+    if (offset + 16 >= bytes.length) return null;
+    final revision = _readUnsignedU64(bytes, offset);
+    final expiresAt = _readUnsignedU64(bytes, offset + 8);
+    if (!_validRebindRevision(revision) || expiresAt == BigInt.zero) {
+      return null;
+    }
+    offset += 16;
+    final (signatureLength, lengthSize) = _decodeCompactU32(bytes, offset);
+    if (signatureLength != 64 || lengthSize != 2) return null;
+    offset += lengthSize + signatureLength;
+    if (!_hasValidSigningTail(bytes, offset)) return null;
+    return DecodedPayload(
+      action: 'self_rebind_cid_account_id',
+      summary: '提交公民号自助换绑：${cid.$1}',
+      fields: {
+        'cid_number': cid.$1,
+        'expected_binding_revision': revision.toString(),
+        'expires_at': expiresAt.toString(),
+      },
+    );
+  }
+
+  static bool _isAnonymousCid(String value) =>
+      _isStructuredInstitutionCid(value) &&
+      RegExp(r'^CN[0-9]{3}-(CTZN|NATP)[0-9]-').hasMatch(value);
+
+  static BigInt _readUnsignedU64(Uint8List bytes, int offset) {
+    var value = BigInt.zero;
+    for (var index = offset + 7; index >= offset; index--) {
+      value = (value << 8) | BigInt.from(bytes[index]);
+    }
+    return value;
+  }
+
+  static bool _validRebindRevision(BigInt value) =>
+      value > BigInt.zero && value < (BigInt.one << 64) - BigInt.one;
 
   // CitizenIdentity(10) / occupy_cid(6) · 注册局代办占号。
   // 内层 citizen_signature 由用户选择的新账户签名，外层 extrinsic 才由注册局管理员签名。

@@ -42,6 +42,7 @@ class QrSigner {
   static const List<int> _gmbPrefix = [0x47, 0x4D, 0x42];
   static const int _opSignCitizenIdentity = 0x10;
   static const int _opSignCidOccupy = 0x12;
+  static const int _opSignCidRebind = 0x11;
   static const int _opSignCidAdminRebind = 0x1F;
 
   /// 链上中国平台管理员治理动作;与 primitives::sign::OP_SIGN_ONCHINA_ADMIN 同值。
@@ -173,6 +174,10 @@ class QrSigner {
     if (body.action == QrActions.topup) return payload;
     if (body.action == QrActions.citizenIdentity) {
       return _gmbSigningMessage(_opSignCitizenIdentity, payload);
+    }
+    if (body.action == QrActions.cidRebind) {
+      // 原账户自助换绑只签完整授权的0x11摘要，不填零槽、不使用注册局0x1f域。
+      return _gmbSigningMessage(_opSignCidRebind, payload);
     }
     if (QrActions.isSelfAccountDomainAction(body.action)) {
       if (selfAccountId == null || selfAccountId.length != 32) {

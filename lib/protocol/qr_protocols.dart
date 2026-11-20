@@ -53,6 +53,8 @@ class QrActions {
   static int get citizenIdentity => _code('citizen_identity');
   static int get citizenOccupy => _code('citizen_occupy');
   static int get citizenRebind => _code('citizen_rebind');
+  static int get cidRebind => _code('cid_rebind');
+  static int get selfRebindCidAccountId => _code('self_rebind_cid_account_id');
   static int get switchDefaultAccount => _code('switch_default_account');
   static int get mlsDeviceBind => _code('mls_device_bind');
   static int get publish => _code('publish');

@@ -3,6 +3,10 @@
 // 旧代码在明细里错误地走了“拒绝签名”分支。
 import 'dart:convert';
 
+import '../signing/payload_decoder_test.dart'
+    show cidRebindPayload, selfRebindCall;
+import 'package:citizenwallet/signing/chain_constants.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -58,6 +62,63 @@ void main() {
     accountId: signerPk,
     accountName: '账户1',
   );
+
+  testWidgets('两阶段自助换绑展示中文授权和新账户交易，均为绿色可签', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final authorization = cidRebindPayload(
+        expiresAt: now + 300,
+        currentAccountId: signerPk,
+        newAccountId: '0x${'11' * 32}');
+    final call = selfRebindCall(expiresAt: now + 300);
+    final genesis = [
+      for (var i = 2; i < ChainConstants.genesisHash.length; i += 2)
+        int.parse(ChainConstants.genesisHash.substring(i, i + 2), radix: 16)
+    ];
+    final transaction = [
+      ...call,
+      0,
+      4,
+      0,
+      0,
+      5,
+      0,
+      0,
+      0,
+      4,
+      0,
+      0,
+      0,
+      ...genesis,
+      ...genesis,
+      0
+    ];
+    for (final pair in [
+      (QrActions.cidRebind, authorization),
+      (QrActions.selfRebindCidAccountId, transaction)
+    ]) {
+      final request = QrEnvelope<SignRequestBody>(
+          kind: QrKind.signRequest,
+          id: QrSigner.generateRequestId(),
+          expiresAt: now + 120,
+          body: SignRequestBody.fromHex(
+              action: pair.$1,
+              signerPublicKeyHex: signerPk,
+              payloadHex:
+                  '0x${pair.$2.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}'));
+      await tester.pumpWidget(MaterialApp(
+          home: OfflineSignPage(
+              account: account,
+              walletName: '钱包1',
+              raw: QrSigner().encodeRequest(request))));
+      await ScreenshotGuard.waitForIdleForTest();
+      await tester.pump();
+      expect(find.textContaining('可以签名'), findsWidgets);
+      expect(find.text('拒绝签名'), findsNothing);
+      expect(find.text('新绑定账户'), findsOneWidget);
+      expect(find.textContaining('Cloudflare'), findsNothing);
+      await releasePage(tester);
+    }
+  });
 
   testWidgets('runtime 升级哈希签:绿 banner 且无“拒绝签名”矛盾行', (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;

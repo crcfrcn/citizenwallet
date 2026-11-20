@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'payload_decoder_test.dart' show topupText;
+import 'payload_decoder_test.dart' show topupText, cidRebindPayload;
 
 import 'dart:typed_data';
 
@@ -63,6 +63,30 @@ void main() {
     final signature = pair.sign(raw);
     expect(pair.verify(QrSigner.signingBytesFor(body), signature), true);
   });
+  test('自助换绑完整授权只做一次GMB+0x11摘要，与App和Runtime原金标相同', () {
+    final payload = cidRebindPayload(
+        expiresAt: 0x11121314,
+        genesisHash: '0x${'22' * 32}',
+        revision: BigInt.from(0x01020304));
+    final body = SignRequestBody.fromHex(
+        action: QrActions.cidRebind,
+        signerPublicKeyHex: '0x${'33' * 32}',
+        payloadHex: '0x${_hexBytes(payload)}');
+    final digest = QrSigner.signingBytesFor(body);
+    expect(payload.length, 139);
+    expect(_hexBytes(digest),
+        '15c430a70f07e25fee7b6023f6a24759994360cf07138da8f87a5aa5365cbf32');
+    final registrar = SignRequestBody.fromHex(
+        action: QrActions.citizenRebind,
+        signerPublicKeyHex: '',
+        payloadHex:
+            '0x${_hexBytes(_rebindAuthorizationTemplate('CN951-CTZN1-539598435-2026', 0x11121314))}');
+    expect(
+        QrSigner.signingBytesFor(registrar,
+            selfAccountId: Uint8List.fromList(List.filled(32, 0x11))),
+        isNot(digest));
+  });
+
   group('QrSigner.generateRequestId', () {
     test('生成 base64url 短 ID', () {
       final id = QrSigner.generateRequestId();

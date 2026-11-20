@@ -5,27 +5,72 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 import 'package:citizenwallet/signing/institution_code.dart';
+import 'package:citizenwallet/signing/chain_constants.dart';
 import 'package:citizenwallet/signing/payload_decoder.dart';
 import 'package:citizenwallet/signing/role_permission_codec.dart';
 import 'package:citizenwallet/protocol/qr_protocols.dart';
 
 /// 公布合同的合成充值原文，供冷签审阅/字节一致性回归共用。
 String topupText() => [
-  'CitizenServe Topup',
-  'service_origin=https://www.crcfrcn.com',
-  'chain_genesis_hash=0x18847a5dfd263272f2e7727836fe6582f8c4463ff48609df7b96d5e4d9dd24dd',
-  'account_id=0x${'04' * 32}',
-  'package_id=pkg_10',
-  'token=USDC',
-  'network=base',
-  'asset=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-  'recv_address=0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
-  'pay_amount=10000000',
-  'coin_fen=1000000',
-  'config_hash=c3f1987275a32a13d09d5e8afbc105ff1615facecad77d7bcb26ee3a2f579cbc',
-  'recovery_hash=${'01' * 32}',
-  '',
-].join('\n');
+      'CitizenServe Topup',
+      'service_origin=https://www.crcfrcn.com',
+      'chain_genesis_hash=0x18847a5dfd263272f2e7727836fe6582f8c4463ff48609df7b96d5e4d9dd24dd',
+      'account_id=0x${'04' * 32}',
+      'package_id=pkg_10',
+      'token=USDC',
+      'network=base',
+      'asset=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      'recv_address=0x5ce9b56b9d1812a7cf29841e21756f09ca7d223b',
+      'pay_amount=10000000',
+      'coin_fen=1000000',
+      'config_hash=3dc64d7a33063a11ce385bb1a4f844c9d93fbc80e6734ff895de3032f407560d',
+      'recovery_hash=${'01' * 32}',
+      '',
+    ].join('\n');
+
+// 自助换绑公开合成样本：原账户授权与新账户call9复用同一组CID/revision/期限。
+List<int> _rebindU64(BigInt value) => List<int>.generate(
+    8, (i) => ((value >> (8 * i)) & BigInt.from(255)).toInt());
+List<int> _rebindAccount(String value) => [
+      for (var i = 2; i < value.length; i += 2)
+        int.parse(value.substring(i, i + 2), radix: 16)
+    ];
+Uint8List cidRebindPayload({
+  required int expiresAt,
+  String genesisHash = ChainConstants.genesisHash,
+  String currentAccountId =
+      '0x3333333333333333333333333333333333333333333333333333333333333333',
+  String newAccountId =
+      '0x1111111111111111111111111111111111111111111111111111111111111111',
+  BigInt? revision,
+}) {
+  const cid = 'CN951-CTZN1-539598435-2026';
+  return Uint8List.fromList([
+    ..._rebindAccount(genesisHash),
+    cid.length << 2,
+    ...cid.codeUnits,
+    ..._rebindAccount(currentAccountId),
+    ..._rebindAccount(newAccountId),
+    ..._rebindU64(revision ?? BigInt.from(7)),
+    ..._rebindU64(BigInt.from(expiresAt)),
+  ]);
+}
+
+Uint8List selfRebindCall(
+    {required int expiresAt, BigInt? revision, List<int>? signature}) {
+  const cid = 'CN951-CTZN1-539598435-2026';
+  return Uint8List.fromList([
+    10,
+    9,
+    cid.length << 2,
+    ...cid.codeUnits,
+    ..._rebindU64(revision ?? BigInt.from(7)),
+    ..._rebindU64(BigInt.from(expiresAt)),
+    1,
+    1,
+    ...signature ?? List<int>.filled(64, 0xab),
+  ]);
+}
 
 void main() {
   test('充值原文完整审阅并逐项核对可信配置', () {
@@ -38,7 +83,7 @@ void main() {
     expect(decoded.reviewFields['coin_fen'], '10000.00 公民币');
     expect(decoded.fields['account_id'], '0x${'04' * 32}');
   });
-  test('六条准确资产和两档套餐均可冷签审阅，新增18位与6位资产金额不混用', () {
+  test('六条准确资产和多档整数金额均可冷签审阅，新增18位与6位资产金额不混用', () {
     const rails = [
       ['USDC', 'ethereum', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 6],
       ['USDC', 'base', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', 6],
@@ -48,7 +93,7 @@ void main() {
       ['USDT', 'bnb', '0x55d398326f99059ff775485246999027b3197955', 18],
     ];
     for (final rail in rails) {
-      for (final amount in [10, 1000]) {
+      for (final amount in [1, 2, 10, 1000]) {
         final atomic =
             BigInt.from(amount) * BigInt.from(10).pow(rail[3] as int);
         final raw = topupText()
@@ -62,7 +107,7 @@ void main() {
             .replaceFirst('pay_amount=10000000', 'pay_amount=$atomic')
             .replaceFirst(
               'coin_fen=1000000',
-              'coin_fen=${amount == 10 ? 1000000 : 100000000}',
+              'coin_fen=${amount * 100000}',
             );
         final decoded = PayloadDecoder.decode(
           '0x${utf8.encode(raw).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}',
@@ -79,6 +124,8 @@ void main() {
     for (final bad in [
       raw.replaceAll('\n', '\r\n'),
       raw.trimRight(),
+      raw.replaceFirst('package_id=pkg_10', 'package_id=pkg_0'),
+      raw.replaceFirst('package_id=pkg_10', 'package_id=pkg_184467440737096'),
       '${raw}extra\n',
       raw.replaceFirst('pay_amount=10000000', 'pay_amount=10000001'),
       raw.replaceFirst('coin_fen=1000000', 'coin_fen=1'),
@@ -248,6 +295,58 @@ void main() {
 
   Uint8List withSigningTail(List<int> callData, {int nonce = 1, int tip = 0}) =>
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
+
+  test('自助换绑授权完整解码，摘要/截断/尾随/同账户/非规范CID及非法revision拒绝', () {
+    final payload = cidRebindPayload(expiresAt: 1800000000);
+    final decoded =
+        PayloadDecoder.decode(hexOf(payload), expectedAction: 'cid_rebind')!;
+    expect(decoded.fields['current_account_id'], '0x${'33' * 32}');
+    expect(decoded.fields['new_account_id'], '0x${'11' * 32}');
+    expect(decoded.fields['expected_binding_revision'], '7');
+    expect(decoded.fields['expires_at'], '1800000000');
+    for (final bytes in <List<int>>[
+      List.filled(32, 0),
+      payload.sublist(0, payload.length - 1),
+      [...payload, 0],
+      cidRebindPayload(expiresAt: 1800000000, newAccountId: '0x${'33' * 32}'),
+      cidRebindPayload(expiresAt: 1800000000, revision: BigInt.zero),
+      cidRebindPayload(
+          expiresAt: 1800000000, revision: (BigInt.one << 64) - BigInt.one),
+      [...payload.sublist(0, 32), 0x69, 0, ...payload.sublist(33)],
+    ]) {
+      expect(PayloadDecoder.decode(hexOf(bytes), expectedAction: 'cid_rebind'),
+          isNull);
+    }
+    // revision跨过有符号int边界仍完整展示，不溢出或误判为负值。
+    final large = (BigInt.one << 63) + BigInt.one;
+    expect(
+        PayloadDecoder.decode(
+                hexOf(cidRebindPayload(expiresAt: 1800000000, revision: large)),
+                expectedAction: 'cid_rebind')!
+            .fields['expected_binding_revision'],
+        large.toString());
+  });
+
+  test('自助换绑call9必须完整消费原账户64字节签名及SigningPayload尾', () {
+    final call = selfRebindCall(expiresAt: 1800000000);
+    final payload = withSigningTail(call);
+    final decoded = PayloadDecoder.decode(hexOf(payload))!;
+    expect(decoded.action, 'self_rebind_cid_account_id');
+    expect(decoded.fields['cid_number'], 'CN951-CTZN1-539598435-2026');
+    expect(decoded.fields['expected_binding_revision'], '7');
+    for (final bad in <List<int>>[
+      call,
+      payload.sublist(0, payload.length - 1),
+      [...payload, 0],
+      withSigningTail(selfRebindCall(
+          expiresAt: 1800000000, signature: List.filled(63, 0xab))),
+      withSigningTail(
+          selfRebindCall(expiresAt: 1800000000, revision: BigInt.zero)),
+      withSigningTail([...call, 0]),
+    ]) {
+      expect(PayloadDecoder.decode(hexOf(bad)), isNull);
+    }
+  });
 
   test('u128 提案ID完整显示，旧8字节调用继续拒签', () {
     final id = (BigInt.one << 127) + BigInt.from(19);

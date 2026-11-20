@@ -187,6 +187,33 @@ class OfflineSignService {
       );
     }
 
+    if (body.action == QrActions.cidRebind ||
+        body.action == QrActions.selfRebindCidAccountId) {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final authorizationExpiry =
+          BigInt.tryParse(decoded.fields['expires_at'] ?? '');
+      // 二维码会话120秒与链上授权300秒各自有效，不能把二者强行视为同一期限。
+      if ((request.expiresAt ?? 0) <= now ||
+          authorizationExpiry == null ||
+          authorizationExpiry <= BigInt.from(now)) {
+        return OfflineSignVerification(
+          decoded: decoded,
+          status: SignDecisionStatus.reject,
+          actionLabel: qrActionLabel,
+          rejectReason: '换绑授权或二维码已过期，已拒绝签名',
+        );
+      }
+      if (body.action == QrActions.cidRebind &&
+          decoded.fields['current_account_id'] != body.signerPublicKeyHex) {
+        return OfflineSignVerification(
+          decoded: decoded,
+          status: SignDecisionStatus.reject,
+          actionLabel: qrActionLabel,
+          rejectReason: '换绑授权的当前账户与签名账户不一致，已拒绝签名',
+        );
+      }
+    }
+
     if (QrActions.isChainAction(body.action)) {
       final signingContext = PayloadDecoder.readSigningPayloadContext(
         body.payloadBytes,
@@ -221,6 +248,9 @@ class OfflineSignService {
         // signParsedRequest 仍须逐字比较用户所选账户，展示不能代替该校验。
         if (decoded.action == 'self_occupy_cid')
           'account_id': body.signerPublicKeyHex,
+        // call9的新账户来自交易origin，不能伪造为call参数或展示旧账户。
+        if (decoded.action == 'self_rebind_cid_account_id')
+          'new_account_id': body.signerPublicKeyHex,
         'genesis_hash': signingContext.genesisHash,
         'spec_version': signingContext.specVersion.toString(),
         'transaction_version': signingContext.transactionVersion.toString(),

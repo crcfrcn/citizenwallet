@@ -1,7 +1,8 @@
 import 'dart:typed_data';
 import 'dart:convert';
 
-import 'payload_decoder_test.dart' show topupText;
+import 'payload_decoder_test.dart'
+    show topupText, cidRebindPayload, selfRebindCall;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/wallet/wallet_mini_secret.dart';
@@ -211,6 +212,116 @@ void main() {
     });
 
     tearDown(() => WalletIsar.instance.resetForTest());
+
+    test('两阶段冷签完整审阅并真实验签，旧动作/错账户/过期/尾随与重放均拒绝', () async {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final targetSeed = Uint8List.fromList(List.filled(32, 3));
+      final targetId = '0x${_toHex(NativeSr25519.publicKeyOf(targetSeed))}';
+      final authorization = cidRebindPayload(
+          expiresAt: now + 300,
+          currentAccountId: signingAccount.accountId,
+          newAccountId: targetId);
+      SignRequestEnvelope request(List<int> bytes,
+              {int? action, String? signer, int? end}) =>
+          _buildTestRequest(
+            requestId: QrSigner.generateRequestId(),
+            signerPublicKey: signer ?? signingAccount.accountId,
+            payloadHex: '0x${_toHex(bytes)}',
+            action: action ?? QrActions.cidRebind,
+            expiresAt: end ?? now + 120,
+          );
+      final first = request(authorization);
+      expect(service.verifyPayload(first).canSign, true);
+      final originalDigest = QrSigner.signingBytesFor(first.body);
+      for (final bad in [
+        request(List.filled(32, 0xab), action: 17),
+        request(originalDigest),
+        request([...authorization, 0]),
+        request(authorization, signer: targetId),
+        request(authorization, end: now - 1),
+        request(cidRebindPayload(
+            expiresAt: now - 1,
+            currentAccountId: signingAccount.accountId,
+            newAccountId: targetId)),
+        request(cidRebindPayload(
+            expiresAt: now + 300,
+            currentAccountId: signingAccount.accountId,
+            newAccountId: signingAccount.accountId)),
+        request(cidRebindPayload(
+            expiresAt: now + 300,
+            genesisHash: '0x${'22' * 32}',
+            currentAccountId: signingAccount.accountId,
+            newAccountId: targetId)),
+      ]) {
+        expect(service.verifyPayload(bad).canSign, false);
+        await expectLater(
+            service.signParsedRequest(
+                accountId: signingAccount.accountId, request: bad),
+            throwsA(isA<OfflineSignException>()));
+      }
+      expect(walletManager.signCallCount, 0);
+      final firstResponse = await service.signParsedRequest(
+          accountId: signingAccount.accountId, request: first);
+      expect(
+          _verifySr25519(
+              signerPublicKeyHex: signingAccount.accountId,
+              message: originalDigest,
+              signatureHex: firstResponse.body.signatureHex),
+          true);
+      expect(first.body.payloadBytes, authorization);
+      await expectLater(
+          service.signParsedRequest(
+              accountId: signingAccount.accountId, request: first),
+          throwsA(isA<OfflineSignException>()));
+      expect(walletManager.signCallCount, 1);
+
+      final targetManager = _FakeWalletManager();
+      targetManager._miniSecretHex = _toHex(targetSeed);
+      targetManager._account = Account(
+          masterId: targetId,
+          accountIndex: 0,
+          accountId: targetId,
+          accountName: '目标账户');
+      final secondService = OfflineSignService(walletManager: targetManager);
+      final call = selfRebindCall(
+          expiresAt: now + 300,
+          signature: _hexToBytes(firstResponse.body.signatureHex));
+      final second = request(
+          _hexToBytes(_withSigningTailHex('0x${_toHex(call)}')),
+          action: QrActions.selfRebindCidAccountId,
+          signer: targetId);
+      final decision = secondService.verifyPayload(second);
+      expect(decision.canSign, true);
+      expect(decision.decoded!.reviewFields['new_account_id'], targetId);
+      expect(decision.decoded!.reviewFields['cid_number'],
+          'CN951-CTZN1-539598435-2026');
+      await expectLater(
+          secondService.signParsedRequest(
+              accountId: signingAccount.accountId, request: second),
+          throwsA(isA<OfflineSignException>()));
+      expect(targetManager.signCallCount, 0);
+      final secondResponse = await secondService.signParsedRequest(
+          accountId: targetId, request: second);
+      expect(
+          _verifySr25519(
+              signerPublicKeyHex: targetId,
+              message: _messageForRequest(second),
+              signatureHex: secondResponse.body.signatureHex),
+          true);
+      expect(targetManager.signCallCount, 1);
+      for (final bad in [
+        request(call,
+            action: QrActions.selfRebindCidAccountId, signer: targetId),
+        request([...second.body.payloadBytes, 0],
+            action: QrActions.selfRebindCidAccountId, signer: targetId)
+      ]) {
+        expect(secondService.verifyPayload(bad).canSign, false);
+        await expectLater(
+            secondService.signParsedRequest(accountId: targetId, request: bad),
+            throwsA(isA<OfflineSignException>()));
+      }
+      expect(targetManager.signCallCount, 1);
+    });
 
     test('充值冷签真实签完整13行原文，并拒绝重复签同一请求', () async {
       final text = topupText().replaceFirst(

@@ -72,6 +72,9 @@ class PalletRegistry {
   /// — 注册局吊销 CID 号(墓碑,永不复用；外层 extrinsic 由注册局管理员签名)。
   static const int revokeCidCall = 8;
 
+  /// 匿名公民号自助换绑；新账户签交易，原账户授权由Runtime独立验签。
+  static const int selfRebindCidAccountIdCall = 9;
+
   // ---- InternalVote sub-pallet (20) · 内部投票管理员一人一票 ----
   static const int internalVotePallet = 20;
 
