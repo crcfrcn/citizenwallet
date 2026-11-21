@@ -176,6 +176,38 @@ List<int> _nodeDeployPayload(int expiresAt) => <int>[
     ];
 
 void main() {
+  test('联系人整批删除完整审阅，签名字节与App一致', () {
+    final account = '0x${'04' * 32}';
+    final intent = <String, dynamic>{
+      'scope': 'citizenapp.contacts.delete.v1',
+      'cid_number': 'CN-owner',
+      'account_id': account,
+      'bind_rev': 1,
+      'batch_id': 'aa' * 16,
+      'contacts': [
+        {'cid_number': 'CN-a', 'change_version': 1},
+        {'cid_number': 'CN-b', 'change_version': 2}
+      ]
+    };
+    final bytes = utf8.encode(jsonEncode(intent));
+    final hex =
+        '0x${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+    final request = _buildTestRequest(
+        requestId: QrSigner.generateRequestId(),
+        signerPublicKey: account,
+        payloadHex: hex,
+        action: QrActions.contactsDelete);
+    expect(OfflineSignService().verifyPayload(request).canSign, isTrue);
+    expect(QrSigner.signingBytesFor(request.body), bytes);
+    final wrong = _buildTestRequest(
+        requestId: QrSigner.generateRequestId(),
+        signerPublicKey: '0x${'05' * 32}',
+        payloadHex: hex,
+        action: QrActions.contactsDelete);
+    expect(OfflineSignService().verifyPayload(wrong).canSign, isFalse);
+  });
+
+
   test('充值签名指定账户须与原文目标相同，未知动作不能冒用', () {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final service = OfflineSignService();

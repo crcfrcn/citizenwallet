@@ -273,6 +273,14 @@ class OfflineSignService {
       }
     }
 
+    if (body.action == QrActions.contactsDelete &&
+        decoded.fields['account_id'] != body.signerPublicKeyHex) {
+      return OfflineSignVerification(
+          decoded: decoded,
+          status: SignDecisionStatus.reject,
+          actionLabel: qrActionLabel,
+          rejectReason: '联系人删除账户与签名请求不一致，已拒绝签名');
+    }
     if (body.action == QrActions.switchDefaultAccount) {
       final payloadSigner = decoded.fields['current_default_account_id'];
       final payloadExpiresAt = int.tryParse(decoded.fields['expires_at'] ?? '');

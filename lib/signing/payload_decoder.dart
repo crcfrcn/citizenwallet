@@ -189,6 +189,56 @@ class PayloadDecoder {
   // 2026-08-06 之前这段 JSON 是裸文本直签,域分离只靠本字符串字段 —— 已收敛。
   static const String _onchinaAdminActionDomain = 'onchina_admin_governance';
 
+  static DecodedPayload? _decodeContactsDelete(Uint8List raw) {
+    try {
+      final text = utf8.decode(raw);
+      final data = jsonDecode(text);
+      if (data is! Map<String, dynamic> ||
+          data.length != 6 ||
+          data['scope'] != 'citizenapp.contacts.delete.v1' ||
+          data['cid_number'] is! String ||
+          data['account_id'] is! String ||
+          data['bind_rev'] is! int ||
+          (data['bind_rev'] as int) <= 0 ||
+          data['batch_id'] is! String ||
+          !RegExp(r'^[0-9a-f]{32}$').hasMatch(data['batch_id'] as String) ||
+          data['contacts'] is! List ||
+          jsonEncode(data) != text) return null;
+      final contacts = data['contacts'] as List;
+      if (contacts.isEmpty || contacts.length > 128) return null;
+      var previous = '';
+      final review = <String>[];
+      for (final item in contacts) {
+        if (item is! Map ||
+            item.length != 2 ||
+            item['cid_number'] is! String ||
+            item['change_version'] is! int) return null;
+        final cid = item['cid_number'] as String,
+            version = item['change_version'] as int;
+        if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9-]{0,31}$').hasMatch(cid) ||
+            cid.compareTo(previous) <= 0 ||
+            cid == data['cid_number'] ||
+            version < 0 ||
+            version >= 9007199254740991) return null;
+        previous = cid;
+        review.add('$cid（版本 $version）');
+      }
+      final fields = <String, String>{
+        'cid_number': data['cid_number'] as String,
+        'account_id': data['account_id'] as String,
+        'binding_revision': '${data['bind_rev']}',
+        'batch_id': data['batch_id'] as String,
+        'contact_list': review.join('\n')
+      };
+      return DecodedPayload(
+          action: 'contacts_delete',
+          summary: '删除 ${contacts.length} 位联系人',
+          fields: fields);
+    } on Object {
+      return null;
+    }
+  }
+
   static DecodedPayload? decode(String payloadHex, {String? expectedAction}) {
     // 先尝试解码非链上交易：管理员激活 / 清算行管理员解密 challenge。
     try {
@@ -199,6 +249,7 @@ class PayloadDecoder {
       }
       // 该本机授权没有 pallet/call 前缀，必须由 QR_V1 已登记动作限定后再解码，
       // 防止长度恰好相同的链交易被误识别为默认账户切换。
+      if (expectedAction == 'contacts_delete') return _decodeContactsDelete(raw);
       if (expectedAction == 'topup') return _decodeTopup(raw);
       if (expectedAction == 'cid_rebind') {
         return _decodeCidRebind(raw);

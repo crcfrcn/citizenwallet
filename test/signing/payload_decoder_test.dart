@@ -69,6 +69,38 @@ Uint8List selfRebindCall({BigInt? revision, List<int>? signature}) {
 }
 
 void main() {
+  test('联系人整批删除完整审阅，签名字节与App一致', () {
+    final account = '0x${'04' * 32}';
+    final intent = <String, dynamic>{
+      'scope': 'citizenapp.contacts.delete.v1',
+      'cid_number': 'CN-owner',
+      'account_id': account,
+      'bind_rev': 1,
+      'batch_id': 'aa' * 16,
+      'contacts': [
+        {'cid_number': 'CN-a', 'change_version': 1},
+        {'cid_number': 'CN-b', 'change_version': 2}
+      ]
+    };
+    final bytes = utf8.encode(jsonEncode(intent));
+    final hex =
+        '0x${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+    final decoded =
+        PayloadDecoder.decode(hex, expectedAction: 'contacts_delete');
+    expect(decoded, isNotNull);
+    expect(decoded!.fields['contact_list'], contains('CN-a（版本 1）'));
+    expect(decoded.fields['contact_list'], contains('CN-b（版本 2）'));
+    intent['contacts'] = [
+      {'cid_number': 'CN-b', 'change_version': 2},
+      {'cid_number': 'CN-a', 'change_version': 1}
+    ];
+    final invalid =
+        '0x${utf8.encode(jsonEncode(intent)).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+    expect(PayloadDecoder.decode(invalid, expectedAction: 'contacts_delete'),
+        isNull);
+  });
+
+
   test('充值原文完整审阅并逐项核对可信配置', () {
     final raw = topupText(),
         hex =
