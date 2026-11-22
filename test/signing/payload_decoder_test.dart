@@ -315,7 +315,10 @@ void main() {
     ...compactU32(tip),
     0x00,
     1, 0, 0, 0, // spec_version u32 LE
-    1, 0, 0, 0, // tx_version u32 LE
+    ...(ByteData(4)
+          ..setUint32(0, ChainConstants.transactionVersion, Endian.little))
+        .buffer
+        .asUint8List(), // 唯一交易版本声明
     ...tailGenesis,
     ...tailGenesis,
     0x00,

@@ -5,7 +5,7 @@ import 'dart:convert';
 
 import '../signing/payload_decoder_test.dart'
     show cidRebindPayload, selfRebindCall;
-import 'package:citizenwallet/signing/chain_constants.dart';
+import '../signing/offline_sign_service_test.dart' show signingPayloadHex;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,32 +67,15 @@ void main() {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final authorization = cidRebindPayload(
         currentAccountId: signerPk, newAccountId: '0x${'11' * 32}');
-    final call = selfRebindCall();
-    final genesis = [
-      for (var i = 2; i < ChainConstants.genesisHash.length; i += 2)
-        int.parse(ChainConstants.genesisHash.substring(i, i + 2), radix: 16)
-    ];
-    final transaction = [
-      ...call,
-      0,
-      4,
-      0,
-      0,
-      5,
-      0,
-      0,
-      0,
-      4,
-      0,
-      0,
-      0,
-      ...genesis,
-      ...genesis,
-      0
-    ];
+    final transactionHex = signingPayloadHex(
+      '0x${selfRebindCall().map((b) => b.toRadixString(16).padLeft(2, '0')).join()}',
+    );
     for (final pair in [
-      (QrActions.cidRebind, authorization),
-      (QrActions.selfRebindCidAccountId, transaction)
+      (
+        QrActions.cidRebind,
+        '0x${authorization.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}'
+      ),
+      (QrActions.selfRebindCidAccountId, transactionHex)
     ]) {
       final request = QrEnvelope<SignRequestBody>(
           kind: QrKind.signRequest,
@@ -101,8 +84,7 @@ void main() {
           body: SignRequestBody.fromHex(
               action: pair.$1,
               signerPublicKeyHex: signerPk,
-              payloadHex:
-                  '0x${pair.$2.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}'));
+              payloadHex: pair.$2));
       await tester.pumpWidget(MaterialApp(
           home: OfflineSignPage(
               account: account,

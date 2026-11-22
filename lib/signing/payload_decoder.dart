@@ -203,7 +203,9 @@ class PayloadDecoder {
           data['batch_id'] is! String ||
           !RegExp(r'^[0-9a-f]{32}$').hasMatch(data['batch_id'] as String) ||
           data['contacts'] is! List ||
-          jsonEncode(data) != text) return null;
+          jsonEncode(data) != text) {
+        return null;
+      }
       final contacts = data['contacts'] as List;
       if (contacts.isEmpty || contacts.length > 128) return null;
       var previous = '';
@@ -212,14 +214,18 @@ class PayloadDecoder {
         if (item is! Map ||
             item.length != 2 ||
             item['cid_number'] is! String ||
-            item['change_version'] is! int) return null;
+            item['change_version'] is! int) {
+          return null;
+        }
         final cid = item['cid_number'] as String,
             version = item['change_version'] as int;
         if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9-]{0,31}$').hasMatch(cid) ||
             cid.compareTo(previous) <= 0 ||
             cid == data['cid_number'] ||
             version < 0 ||
-            version >= 9007199254740991) return null;
+            version >= 9007199254740991) {
+          return null;
+        }
         previous = cid;
         review.add('$cid（版本 $version）');
       }

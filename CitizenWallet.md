@@ -38,9 +38,10 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
   Flutter 平台通道返回的 TypedData 按引擎所有的只读借用缓冲区处理，共享包必须立即复制
   为应用自有可修改数组；添加账户、签名、查看助记词和导出私钥仅使用该副本并在
   `finally` 清零。不得直接覆写平台结果，也不得吞掉自有缓冲区的清零异常。
-- **签名链身份**：完整 `SigningPayload` 必须严格匹配正式 `genesis_hash`
-  和 `transaction_version`；`spec_version` 只解析展示。裸 call data、错链、错交易版本
-  和 birth hash 不等于 genesis hash 均拒绝签名。
+- **签名链身份**：完整 `SigningPayload` 必须严格匹配正式 `genesis_hash`；
+  `spec_version` 仅从载荷读取展示；钱包的交易版本声明与有效性判断只归
+  `chain_constants.dart`，服务调用该唯一入口。裸 call data、错交易版本、错链和 birth hash
+  不等于 genesis hash 均拒绝签名。
 - 创建页内容从顶部开始排布，主标题固定为“选择助记词数量”；导入页顶部唯一标题固定为
   “输入助记词”，输入框上方不得保留重复标题。共享 password 弹窗标题居中，取消与确认
   按钮左右等宽，四端不得复制第二套布局或风险文案。
@@ -177,7 +178,7 @@ iOS 原生签名库由钱包脚本编译到本轮外部目录，Podspec 原文�
 
 链端Revive为pallet35；本钱包只接受已登记的原生账户交易与QR_V1业务动作。Revive的eth_transact、普通call/upload/map_account，以及经过SetOrigin验证的转换入口均不登记冷签；未知调用即使伪装成转账action也必须在调用签名器前拒绝。pallet_registry.dart说明该边界，payload_decoder_test.dart与offline_sign_service_test.dart覆盖各入口拒绝及签名器零调用。
 
-SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction版本、genesis/birth hash及metadata None字节。真实metadata的identifier为EthSetOrigin、类型为SetOrigin，原生默认扩展不增加签名字节；spec_version仅用于展示，链身份和transaction_version继续严格核对。二维码字段及账户派生金标保持；链交易签名与完整交易金标同步为V5。
+SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction版本、genesis/birth hash及metadata None字节。真实metadata的identifier为EthSetOrigin、类型为SetOrigin，原生默认扩展不增加签名字节；链身份继续严格核对；spec_version仅展示，transaction_version调用chain_constants.dart唯一入口核对。二维码字段及账户派生金标保持；链交易签名与完整交易金标同步为V5。
 
 本轮保留原任务的self_occupy_cid单参数差异，Rust签名及QR实现已检查无需修改；实际接口已检查，没有新增业务字段或闭集值。完整离线源码回归、静态分析与Release manifest合同通过，准确日志见唯一任务卡。正式移动包及XCTest/XCUITest页面验收尚未执行。
 
@@ -201,7 +202,7 @@ SigningPayload保持era、Compact nonce/tip、metadata mode、spec/transaction�
 
 propose_enact_law的原四字节地域槽按两字节原省码加u16小端原省内市号解码，不再按u32数字省码展示。全国明确四零字节；省级为两位大写字母和零市号；市级为原省码及原三位市号数值，展示补齐原前导零。非法层级、字母或地域形状拒签，不回退全国。复用原确认页scope_code字段及行政区代码标签显示CN、原省码或原省码加市号，不新增控件或扫码交互。CID、CN、现有省市规则及宪法修改流程保持。
 
-transaction_version属于框架原生RuntimeVersion，不是新增公民链字段。遵循CitizenChainRuntime.md的统一政策，每次正式Runtime升级，spec_version和transaction_version各自在此前实际部署值上加1；本钱包chain_constants.dart同步支持该次交易版本。编辑、测试或重复编译不递增版本，不按改动种类另作判断，也不把spec_version当成transaction_version。钱包当前支持值按正式节点最终确认区块核对为 transaction_version=4（spec_version=5）。现有offline_sign_service交易版本严格相等拒签机制不改；回归明确验证版本4可审阅，旧版0～3及未来版本5、u32最大值拒签，spec_version仍只解析展示。
+transaction_version属于框架原生RuntimeVersion。公民钱包内部仅由lib/signing/chain_constants.dart声明支持版本并实现supportsTransactionVersion相等校验；offline_sign_service.dart只调用该入口，不再另写版本比较规则。页面及测试样本统一引用同一声明，不手填部署版本或维护版本白名单。交易准备端仍从节点RuntimeVersion读取版本，由SDK既有交易准备实现编码；钱包不构造生产交易载荷。spec_version只解码展示，V5交易格式号不作为交易版本。
 
 ## 当前编译与自动化合同
 
@@ -277,7 +278,7 @@ iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正�
 可信付款快照为六条EVM币轨：USDC/USDT各Ethereum、Base、BNB；新增BNB USDC 0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d精度18、Base USDT 0xfde4c96c8593536e31f229ea8f37b2ada2699bb2精度6，其余四轨不变。购买数量最低1000且为1000整数倍，pkg_N由整数美元份数派生；6位与18位资产按各自精度校验最小单位并显示实际币种。付款配置指纹为固定12行，签名原文13行、confirm16字段、完整H绑定及发币时序保持。
 
 
-2026-11-14 提案编号类型调整：提案ID统一为u128，现有投票、终结、重试及取消解码器读取16字节并校验新的完整偏移，拒绝旧宽度和尾随字节。配套候选transaction_version为3；升级前实链在确认区块107为spec_version=3、transaction_version=2，候选发布须重新核对并按现有政策递增。升级交易按旧链版本授权，激活后使用新版本重建待签材料；本文不表示已提交链上升级。
+2026-11-14 提案编号类型调整：提案ID统一为u128，现有投票、终结、重试及取消解码器读取16字节并校验新的完整偏移，拒绝旧宽度和尾随字节。升级交易按旧链版本授权，激活后使用新版本重建待签材料；本文不表示已提交链上升级。
 
 
 2026-11-14 CID年份u32：CID年份接受规范u32十进制：0000～9999保留原四位文本，10000开始自然增位，最大4294967295。机构激活/解密、公民管理员名册及匿名自助占号同步校验年份范围与补零规范；原校验和规则继续保留。最大CID恰好32字节，激活97字节、解密92字节布局和后续字段偏移不变，旧签名金标不重算。未增加签名域、调用或交易格式。
@@ -290,7 +291,7 @@ iOS与Android各自独立发行，塔塔自动化读取本平台最新成功正�
 
 原生交易统一为V5 General、认证管线1，认证扩展为AccountAuth；证明仅有sr25519、ML首次公钥、ML已登记公钥三种分支。sr账户仍是原公钥32字节，ML账户派生及PqPublicKey存储保持；不转换账户、不迁移余额。两种算法共用账户绑定的签名约束：blake2_256(TRANSACTION_DOMAIN || AccountId || SCALE(ImplicationParts))；ImplicationParts覆盖管线版本、call及全部后续扩展的explicit/implicit，审阅端保留完整业务字段。nonce、权限、费用、质押保护、资源检查及上限保持；运行阶段仍拒绝sr。
 
-普通链交易先完整解码和审阅，再由账户签名端调用统一核心派生摘要；sr与ML不再各走一种交易格式。登录、充值、占号、换绑及其他链下业务仍使用其原签名域。Runtime升级既有hash-only请求已携最终32字节摘要，不能重复摘要。transaction_version继续按实际部署版本严格核对，不与格式号5混同；冻结创世哈希不改。
+普通链交易先完整解码和审阅，再由账户签名端调用统一核心派生摘要；sr与ML不再各走一种交易格式。登录、充值、占号、换绑及其他链下业务仍使用其原签名域。Runtime升级既有hash-only请求已携最终32字节摘要，不能重复摘要。钱包transaction_version统一调用chain_constants.dart校验，不与格式号5混同；链上仍执行原生CheckTxVersion，冻结创世哈希不改。
 
 
 ### 充值固定汇率整数金额

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 
+import 'package:citizenwallet/signing/chain_constants.dart';
 import 'package:citizenwallet/signing/payload_decoder.dart';
 
 // SCALE **解码**金标锁(citizenwallet ⇔ citizenchain)。
@@ -70,7 +71,10 @@ void main() {
         ..._compactU32(0), // tip
         0x00,
         1, 0, 0, 0, // spec_version u32 LE
-        1, 0, 0, 0, // tx_version u32 LE
+        ...(ByteData(4)
+          ..setUint32(0, ChainConstants.transactionVersion, Endian.little))
+        .buffer
+        .asUint8List(), // 唯一交易版本声明
         ...tailGenesis,
         ...tailGenesis,
         0x00,

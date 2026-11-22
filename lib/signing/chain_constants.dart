@@ -16,11 +16,11 @@ class ChainConstants {
   static const String genesisHash =
       '0x18847a5dfd263272f2e7727836fe6582f8c4463ff48609df7b96d5e4d9dd24dd';
 
-  /// 当前钱包支持的 Substrate `transaction_version`。
-  ///
-  /// 已按正式链最终确认区块核对：spec_version=5、transaction_version=4。
-  /// V5格式不替代transaction_version；后续升级须重新核对链上实际值。
-  /// 不支持的交易版本继续严格拒签。
-  /// 钱包对 spec_version 仍只解析展示；编辑或重复编译不触发版本递增。
-  static const int transactionVersion = 4;
+  /// 本钱包唯一支持的交易版本；按正式节点已部署 RuntimeVersion 核对。
+  /// V5 交易格式号不等于 transaction_version。其他模块和测试仅引用此值。
+  static const int transactionVersion = 5;
+
+  /// 钱包交易版本有效性的唯一判断入口。
+  static bool supportsTransactionVersion(int version) =>
+      version == transactionVersion;
 }

@@ -19,9 +19,9 @@ import 'package:citizenwallet/signing/qr_signer.dart';
 import 'package:citizenwallet/storage/wallet_isar.dart';
 import 'package:citizenwallet/wallet/wallet_manager.dart';
 
-/// 给纯 call_data 拼上真实 SigningPayload 扩展尾(与节点端 build_signing_payload
-/// 布局一致)。decoder 的两色识别要求链上 payload 必带合法尾,裸 call_data 拒签。
-String _withSigningTailHex(
+/// 构造解码测试样本；正常版本统一引用钱包的唯一声明。
+/// 链上载荷必须携带完整签名上下文，裸 call_data 拒签。
+String signingPayloadHex(
   String callDataHex, {
   String genesisHash = ChainConstants.genesisHash,
   int specVersion = 1,
@@ -311,7 +311,7 @@ void main() {
       final call = selfRebindCall(
           signature: _hexToBytes(firstResponse.body.signatureHex));
       final second = request(
-          _hexToBytes(_withSigningTailHex('0x${_toHex(call)}')),
+          _hexToBytes(signingPayloadHex('0x${_toHex(call)}')),
           action: QrActions.selfRebindCidAccountId,
           signer: targetId);
       final decision = secondService.verifyPayload(second);
@@ -684,7 +684,7 @@ void main() {
       // 所有管理员投票走 InternalVote(20).cast(0)
       // payload = [0x14][0x00][u128_le proposal_id=1][Personal=0][approve=1] + 扩展尾
       final payloadHex =
-          _withSigningTailHex('0x1400010000000000000000000000000000000001');
+          signingPayloadHex('0x1400010000000000000000000000000000000001');
       final request = _buildTestRequest(
         requestId: 'offline-req-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -740,7 +740,7 @@ void main() {
           final request = _buildTestRequest(
             requestId: 'invalid-vote-bool-$index-$value',
             signerPublicKey: signingAccount.accountId,
-            payloadHex: _withSigningTailHex('0x${_toHex([...prefix, value])}'),
+            payloadHex: signingPayloadHex('0x${_toHex([...prefix, value])}'),
             action: action,
           );
           expect(
@@ -757,7 +757,7 @@ void main() {
 
     test('同一请求 id 到期前只能签名一次', () async {
       final payloadHex =
-          _withSigningTailHex('0x1400010000000000000000000000000000000001');
+          signingPayloadHex('0x1400010000000000000000000000000000000001');
       final request = _buildTestRequest(
         requestId: 'offline-replay-test-0001',
         signerPublicKey: signingAccount.accountId,
@@ -789,7 +789,7 @@ void main() {
     test('signParsedRequest 拒绝 action 与 payload 不一致', () async {
       // decode 成功但 QR action 和 decoded.action 不一致 → 红色拒签。
       final payloadHex =
-          _withSigningTailHex('0x1400070000000000000000000000000000000001');
+          signingPayloadHex('0x1400070000000000000000000000000000000001');
       expect(PayloadDecoder.decode(payloadHex)?.action, 'internal_vote');
       final request = _buildTestRequest(
         requestId: 'offline-req-test-action-mismatch',
@@ -821,7 +821,7 @@ void main() {
         requestId: 'offline-req-test-known',
         signerPublicKey: signingAccount.accountId,
         // call_data: [04][00][dest 32B][u128_le(1)][Vec(0)] → 0.01 GMB
-        payloadHex: _withSigningTailHex(
+        payloadHex: signingPayloadHex(
           '0x0400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0100000000000000000000000000000000',
         ),
         action: QrActions.transferWithRemark,
@@ -844,37 +844,7 @@ void main() {
       );
     });
 
-    test('正式链 spec 5 的交易版本 4 可审阅，旧版和未来版本拒签', () {
-      expect(ChainConstants.transactionVersion, 4);
-      // 与节点transfer_with_remark一致：4/0、20B Ethereum地址加12B EE、u128金额、备注Vec。
-      const destination =
-          '6d66a0cb155051055f3fb3cc73d9230d3fb4d5b5eeeeeeeeeeeeeeeeeeeeeeee';
-      const callData = '0x0400${destination}0100000000000000000000000000000000';
-      for (final transactionVersion in [0, 1, 2, 3, 4, 5, 0xffffffff]) {
-        final request = _buildTestRequest(
-          requestId: 'offline-formal-chain-version-$transactionVersion',
-          signerPublicKey: signingAccount.accountId,
-          payloadHex: _withSigningTailHex(
-            callData,
-            specVersion: 5,
-            transactionVersion: transactionVersion,
-          ),
-          action: QrActions.transferWithRemark,
-        );
-        final verification = service.verifyPayload(request);
-        expect(verification.canSign, transactionVersion == 4);
-        if (transactionVersion == 4) {
-          expect(verification.decoded?.fields['spec_version'], '5');
-          expect(verification.decoded?.fields['transaction_version'], '4');
-          expect(verification.decoded?.action, 'transfer');
-        } else {
-          expect(verification.rejectReason, '交易格式版本不受当前钱包支持，请升级公民钱包');
-        }
-      }
-      expect(walletManager.signCallCount, 0);
-    });
-
-    test('链交易严格拒绝错创世、错交易版本和裸 call data，但不锁 spec_version', () {
+    test('链交易拒绝错创世、错交易版本和裸 call data，但不锁 spec_version', () {
       const callData =
           '0x0400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0100000000000000000000000000000000';
 
@@ -890,30 +860,39 @@ void main() {
           .status;
 
       expect(
-        verify(_withSigningTailHex(callData, genesisHash: '0x${'99' * 32}')),
+        verify(signingPayloadHex(callData, genesisHash: '0x${'99' * 32}')),
         SignDecisionStatus.reject,
       );
-      expect(
-        verify(
-          _withSigningTailHex(
-            callData,
-            transactionVersion: ChainConstants.transactionVersion + 1,
-          ),
-        ),
-        SignDecisionStatus.reject,
-      );
+      // 错版本从唯一声明派生，不维护另一张版本白名单。
+      for (final version in [
+        ChainConstants.transactionVersion - 1,
+        ChainConstants.transactionVersion + 1,
+      ]) {
+        expect(
+          verify(signingPayloadHex(callData, transactionVersion: version)),
+          SignDecisionStatus.reject,
+        );
+      }
       expect(verify(callData), SignDecisionStatus.reject);
 
       final highSpec = service.verifyPayload(
         _buildTestRequest(
           requestId: 'offline-chain-high-spec',
           signerPublicKey: signingAccount.accountId,
-          payloadHex: _withSigningTailHex(callData, specVersion: 9876),
+          payloadHex: signingPayloadHex(
+            callData,
+            specVersion: 9876,
+          ),
           action: QrActions.transferWithRemark,
         ),
       );
       expect(highSpec.status, SignDecisionStatus.normal);
       expect(highSpec.decoded?.reviewFields['spec_version'], '9876');
+      expect(
+        highSpec.decoded?.reviewFields['transaction_version'],
+        ChainConstants.transactionVersion.toString(),
+      );
+      expect(walletManager.signCallCount, 0);
     });
 
     test('verifyPayload accepts exact SquarePost platform price action', () {
@@ -922,7 +901,7 @@ void main() {
       const role = 'GENESIS_PRODUCT_MANAGER';
       final roleBytes = role.codeUnits;
       final price = List<int>.filled(16, 0)..[0] = 100;
-      final payloadHex = _withSigningTailHex(
+      final payloadHex = signingPayloadHex(
         '0x${_toHex([
               34,
               5,
@@ -955,7 +934,7 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'offline-square-subscribe',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: _withSigningTailHex(
+        payloadHex: signingPayloadHex(
           '0x${_toHex([34, 1, 0, 0, 1, ...price])}',
         ),
         action: QrActions.subscribe,
@@ -979,7 +958,7 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'offline-platform-price-mismatch',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: _withSigningTailHex(
+        payloadHex: signingPayloadHex(
           '0x${_toHex([
                 34,
                 5,
@@ -1024,7 +1003,7 @@ void main() {
         final request = _buildTestRequest(
           requestId: 'self-occupy-$kind',
           signerPublicKey: signingAccount.accountId,
-          payloadHex: _withSigningTailHex('0x${_toHex(call)}'),
+          payloadHex: signingPayloadHex('0x${_toHex(call)}'),
           action: 0x0a05,
         );
         final verified = service.verifyPayload(request);
@@ -1065,7 +1044,7 @@ void main() {
         if (variant == 'noncanonical') {
           call = [10, 5, (cid.length << 2) | 1, 0, ...cid.codeUnits];
         }
-        var payload = _withSigningTailHex(
+        var payload = signingPayloadHex(
           '0x${_toHex(call)}',
           genesisHash: variant == 'wrong_chain'
               ? '0x${'11' * 32}'
@@ -1096,7 +1075,7 @@ void main() {
           signerPublicKey: invalid == 'wrong_account'
               ? '0x${'aa' * 32}'
               : signingAccount.accountId,
-          payloadHex: _withSigningTailHex(
+          payloadHex: signingPayloadHex(
             '0x${_toHex([
                   10,
                   5,
@@ -1130,7 +1109,7 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'self-occupy-signed-once',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: _withSigningTailHex(
+        payloadHex: signingPayloadHex(
           '0x${_toHex([10, 5, ..._scaleString('CN202-CTZN6-123456789-1234')])}',
         ),
         action: 0x0a05,
@@ -1169,7 +1148,7 @@ void main() {
         final request = _buildTestRequest(
           requestId: 'offline-revive-$call',
           signerPublicKey: signingAccount.accountId,
-          payloadHex: _withSigningTailHex(
+          payloadHex: signingPayloadHex(
             '0x23${call.toRadixString(16).padLeft(2, '0')}00',
           ),
           action: 0x0400,
@@ -1193,7 +1172,7 @@ void main() {
       final request = _buildTestRequest(
         requestId: 'offline-req-test-unknown-action',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: _withSigningTailHex('0x1400010000000000000001'),
+        payloadHex: signingPayloadHex('0x1400010000000000000001'),
         action: 0x7fff,
       );
 
@@ -1273,7 +1252,7 @@ void main() {
         requestId: 'offline-req-test-unknown-account',
         signerPublicKey: signingAccount.accountId,
         payloadHex:
-            _withSigningTailHex('0x1400010000000000000000000000000000000001'),
+            signingPayloadHex('0x1400010000000000000000000000000000000001'),
         action: QrActions.internalVote,
       );
 

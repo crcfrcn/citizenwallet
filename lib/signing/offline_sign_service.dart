@@ -229,8 +229,9 @@ class OfflineSignService {
           rejectReason: '交易不属于正式创世链，已拒绝签名',
         );
       }
-      if (signingContext.transactionVersion !=
-          ChainConstants.transactionVersion) {
+      if (!ChainConstants.supportsTransactionVersion(
+        signingContext.transactionVersion,
+      )) {
         return OfflineSignVerification(
           decoded: decoded,
           status: SignDecisionStatus.reject,
