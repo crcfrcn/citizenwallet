@@ -1,3 +1,5 @@
+// 验证钱包密码字符和长度边界、规范化及风险确认行为。
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/wallet/wallet_password.dart';

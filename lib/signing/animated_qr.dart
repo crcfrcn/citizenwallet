@@ -1,3 +1,5 @@
+// 播放签名响应的二维码传输帧，分帧编解码交由原生核心。
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';

@@ -1,3 +1,5 @@
+// 编解码岗位业务权限、授权主体及投票方案的SCALE数据。
+
 import 'dart:convert';
 import 'dart:typed_data';
 

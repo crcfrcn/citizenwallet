@@ -1,3 +1,5 @@
+// 管理钱包及账户的创建、导入、派生、签名和硬件机密清理。
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -441,7 +443,7 @@ class WalletManager {
   }
 
   // ── 更新 ──
-  static const int maxWalletNameLength = 5;
+  static const int maxWalletNameLength = 10;
 
   // 寻址单源用 masterId(稳定主键;walletIndex 是可复用槽位,删钱包后会被
   // 新钱包重占,拿它定位有指向另一只钱包的窗口)。删除/查账户/签名已按 masterId,
@@ -466,7 +468,7 @@ class WalletManager {
     });
   }
 
-  static const int maxAccountNameLength = 5;
+  static const int maxAccountNameLength = 10;
 
   /// 重命名账户(仅改显示名,不动任何密钥)。按 accountId 定位。
   Future<void> renameAccount(String accountId, String accountName) async {

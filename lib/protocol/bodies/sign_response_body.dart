@@ -1,3 +1,5 @@
+// 定义签名响应的签名账户和原始签名字节载荷。
+
 import 'dart:convert';
 import 'dart:typed_data';
 

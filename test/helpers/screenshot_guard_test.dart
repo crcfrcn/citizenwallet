@@ -1,5 +1,5 @@
-// ScreenshotGuard 引用计数单测:修 HIGH「全局单例子页 dispose 误关父页保护」。
-// 多页 enable 时平台开关只在计数 0↔1 边界触发;子页 disable 不关闭父页仍需的保护。
+// 验证屏幕保护引用计数、异步平台调用及录屏失败处理。
+
 import 'dart:async';
 import 'dart:io';
 

@@ -1,3 +1,5 @@
+// 将mobile_scanner设备识别、预览和图片扫描接入统一扫码接口。
+
 import 'package:flutter/widgets.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 

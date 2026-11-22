@@ -1,3 +1,5 @@
+// 展示摄像头预览，并向调用方交付一次二维码原始字符串。
+
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';

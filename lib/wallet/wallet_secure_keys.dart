@@ -1,3 +1,5 @@
+// 构造钱包硬件机密的存储键和AAD，隔离各钱包的主种子及助记词。
+
 import 'dart:convert';
 import 'dart:typed_data';
 

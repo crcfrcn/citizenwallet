@@ -1,3 +1,5 @@
+// 管理扫码设备生命周期、图片识别和单次结果领取。
+
 import 'package:flutter/widgets.dart';
 
 import 'mobile_scanner_backend.dart';

@@ -1,9 +1,5 @@
-// 扫码确认页 reviewFields 字段名中文翻译单源。
-//
-// decoder(payload_decoder.dart)的 `reviewFields` 保留英文机器 key 用于
-// 跨端验真,到 UI 层统一经本文件翻译。payload_decoder 新增 reviewFields key
-// 时必须先登记 `citizenchain/crates/qr-protocol/registry/fields.yaml`,
-// 再同步本表并补测试。未登记字段必须红色拒绝,不得 fallback 展示英文 key。
+// 将交易审阅字段转换为注册表中的中文标签和规范展示值。
+
 import 'dart:typed_data';
 
 import 'package:polkadart_keyring/polkadart_keyring.dart' show Keyring;

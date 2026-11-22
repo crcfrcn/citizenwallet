@@ -1,3 +1,5 @@
+// 展示钱包手册，以密钥关系图解释派生过程和公开与保密边界。
+
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';

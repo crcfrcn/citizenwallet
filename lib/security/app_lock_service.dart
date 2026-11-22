@@ -1,3 +1,5 @@
+// 管理PIN派生验证、应用锁状态和防共匪密码触发的持久擦除。
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';

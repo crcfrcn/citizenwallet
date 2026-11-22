@@ -1,3 +1,5 @@
+// 验证钱包构建的工具与缓存复用、工程装配及失败回执。
+
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSync,readdirSync,symlinkSync,chmodSync} from 'node:fs';

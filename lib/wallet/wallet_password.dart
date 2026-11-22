@@ -1,3 +1,5 @@
+// 校验并NFKD规范化钱包派生密码，提供密码输入与风险确认组件。
+
 import 'package:flutter/material.dart';
 import 'package:unorm_dart/unorm_dart.dart' as unorm;
 

@@ -1,4 +1,5 @@
-# 产品自己的唯一自动化工作流；配置文件不执行编译或GitHub操作。
+# 执行公民钱包iOS回归与构建，交付正式产物并维护本平台记录。
+
 name: 公民钱包·iOS
 run-name: 公民钱包·iOS·${{ github.run_number }}
 'on':

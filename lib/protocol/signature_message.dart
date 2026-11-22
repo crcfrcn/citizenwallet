@@ -1,3 +1,5 @@
+// 按QR_V1公开合同拼接二维码请求和响应的签名原文。
+
 import 'package:citizenwallet/protocol/qr_protocols.dart';
 
 /// 本仓唯一的签名原文拼接函数，遵循公开 QR_V1 签名合同。

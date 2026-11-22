@@ -1,3 +1,5 @@
+// 构造各业务签名原文、请求标识和二维码响应，并调用账户签名。
+
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -172,6 +174,9 @@ class QrSigner {
     final payload = body.payloadBytes;
     // 充值使用完整业务原文，热/冷两端均不预hash，不套用链交易>256B转换。
     if (body.action == QrActions.topup) return payload;
+    if (body.action == QrActions.institutionWalletAccept) {
+      return _gmbSigningMessage(0x25, payload);
+    }
     if (body.action == QrActions.citizenIdentity) {
       return _gmbSigningMessage(_opSignCitizenIdentity, payload);
     }

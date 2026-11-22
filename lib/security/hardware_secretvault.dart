@@ -1,3 +1,5 @@
+// 封装硬件金库字节通道，以产品、钱包、账户和机密类型绑定加解密上下文。
+
 import 'dart:convert';
 
 import 'package:flutter/services.dart';

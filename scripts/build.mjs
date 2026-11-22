@@ -1,5 +1,5 @@
-// 按官方要求或推荐实现；必需的工具依赖有就复用，没有就下载；使用最简单的实现方式；本脚本只允许放编译构建代码和注释，禁止增加无关内容，禁止增加复杂的校验阻断。
-// config.mjs：只负责配置声明；build.mjs：只负责编译构建实现和必要注释；*.yml：负责全部GitHub流程，包括版本、作业编排、发布及历史清理。
+// 准备钱包平台工程及原生签名库，执行移动端构建并装配交付产物。
+
 import childProcess,{spawn} from 'node:child_process';
 import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,copyFileSync,cpSync,rmSync,readdirSync,lstatSync,realpathSync,chmodSync,existsSync,rmdirSync,openSync,closeSync,writeSync,renameSync,accessSync,constants,statSync} from 'node:fs';
 import {join,dirname,resolve,relative,sep,basename,isAbsolute,delimiter} from 'node:path';
@@ -446,6 +446,7 @@ async function prepare(work,platform,env){
  }
  const project=sourceView(work,['lib','test','icons','signing','ios','android','pubspec.yaml','pubspec.lock','Podfile.lock']);
  materializeInputs(root,project);
+ await generatedHeaders(project);
  // 直接引用唯一核心；缺少本机源码时仅为本轮构建浅克隆公民链，不复制或生成模块实现。
  const localChain=resolve(root,'../citizenchain'),chain=existsSync(join(localChain,'runtime/transaction/mldsa/Cargo.toml'))?localChain:join(work,'citizenchain');
  if(chain!==localChain)await run('git',['clone','--depth=1','--branch','main','https://github.com/'+chainRepository+'.git',chain],{env});
@@ -624,4 +625,22 @@ async function main(){
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&!process.env.NODE_TEST_CONTEXT){
  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>controller.abort());
  try{const result=await main();process.stdout.write(typeof result==='string'?result+'\n':JSON.stringify(result)+'\n');}catch(error){console.error(error.message);process.exitCode=1;}
+}
+
+// 为明确的第一方生成输出写入职责简介；保留工具指令、许可和全部生成代码。
+export async function generatedHeaders(source) {
+ const {readFile,writeFile}=await import('node:fs/promises');
+ const files={
+  "lib/storage/wallet_isar.g.dart": "定义钱包、账户和已签请求的Isar结构、序列化及查询扩展。"
+};
+ for(const [name,intro] of Object.entries(files)){
+  const path=join(source,name);let text;
+  try{text=await readFile(path,'utf8');}catch(error){if(error.code==='ENOENT')continue;throw error;}
+  const header=(name.endsWith('.rs')?'//! ':'// ')+intro;
+  if(text.startsWith(header+'\n'))continue;
+  const first=text.slice(0,text.indexOf('\n'));
+  if(/^(?:\/\/!?|#) [\u3400-\u9fff]/u.test(first)&&!/(?:版权|版权所有)/u.test(first))text=text.slice(first.length).replace(/^\n+/u,'');
+  text=header+'\n\n'+text;
+  await writeFile(path,text);
+ }
 }

@@ -1,3 +1,5 @@
+// 启动钱包iOS应用，注册插件并转发屏幕安全和生命周期事件。
+
 import Flutter
 import UIKit
 

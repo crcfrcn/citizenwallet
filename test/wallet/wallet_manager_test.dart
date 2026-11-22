@@ -1,8 +1,5 @@
-// WalletManager 单测（硬件严档存 master MiniSecretKey+助记词 + model B //index 派生）。
-//
-// 覆盖：建钱包(master)+账户0(//0)、加账户(读存储种子, //N)、按账户签名一致性、
-// 导入对齐金标、删钱包/账户连带清硬件机密、重复导入拒绝、硬件信封密文落库、
-// getMasterMnemonic 取回、getAccountPrivateKey 单账户隔离。
+// 验证钱包生命周期、账户派生、硬件信封存储及机密清理。
+
 import 'dart:io';
 
 import 'package:flutter/services.dart';

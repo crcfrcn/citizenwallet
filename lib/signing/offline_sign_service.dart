@@ -1,3 +1,5 @@
+// 核验离线请求与解码动作，决定是否允许签名并组织确认结果。
+
 import 'dart:typed_data';
 
 import 'chain_constants.dart';
@@ -274,6 +276,30 @@ class OfflineSignService {
       }
     }
 
+    if (body.action == QrActions.institutionWalletAccept) {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final expiry = int.tryParse(decoded.fields['expires_at'] ?? '') ?? 0;
+      if (decoded.fields['new_wallet_account_id'] != body.signerPublicKeyHex ||
+          expiry <= now ||
+          expiry > now + 30 * 24 * 60 * 60 ||
+          (request.expiresAt ?? 0) > expiry) {
+        return OfflineSignVerification(
+            decoded: decoded,
+            status: SignDecisionStatus.reject,
+            actionLabel: qrActionLabel,
+            rejectReason: '机构新钱包或接收证明期限不匹配，已拒绝签名');
+      }
+    }
+    if (decoded.action == 'rotate_public_institution_admin_wallet' ||
+        decoded.action == 'rotate_private_institution_admin_wallet') {
+      if (decoded.fields['old_wallet_account_id'] != body.signerPublicKeyHex) {
+        return OfflineSignVerification(
+            decoded: decoded,
+            status: SignDecisionStatus.reject,
+            actionLabel: qrActionLabel,
+            rejectReason: '本人更换的原钱包与签名账户不符，已拒绝签名');
+      }
+    }
     if (body.action == QrActions.contactsDelete &&
         decoded.fields['account_id'] != body.signerPublicKeyHex) {
       return OfflineSignVerification(
@@ -476,9 +502,10 @@ class OfflineSignService {
       signature = await _walletManager.signForAccount(
         account.accountId,
         payloadBytes,
-        transactionReview:
-            QrActions.isChainAction(body.action) && !QrActions.isRuntimeHashOnly(body.action)
-                ? body.payloadBytes : null,
+        transactionReview: QrActions.isChainAction(body.action) &&
+                !QrActions.isRuntimeHashOnly(body.action)
+            ? body.payloadBytes
+            : null,
       );
     } catch (_) {
       await SignedQrRequestStore.release(requestId);

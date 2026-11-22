@@ -1,3 +1,5 @@
+// 声明钱包构建配置、工具和共享认证源码需求及控制台动作。
+
 import {fileURLToPath} from 'node:url';
 // 本产品配置需求的公开入口；只登记名称、类型和规则，不保存配置值。
 export const manifest=Object.freeze({

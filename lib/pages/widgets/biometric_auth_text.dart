@@ -1,3 +1,5 @@
+// 按系统语言提供生物识别弹窗文案，并禁用密码回退入口。
+
 import 'dart:ui' show Locale, PlatformDispatcher;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;

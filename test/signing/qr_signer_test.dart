@@ -1,3 +1,5 @@
+// 验证二维码签名原文、业务签名域及跨端固定向量。
+
 import 'dart:convert';
 
 import 'payload_decoder_test.dart' show topupText, cidRebindPayload;

@@ -1,3 +1,5 @@
+// 为敏感页面管理屏幕保护，遇到截屏或录屏时遮蔽内容。
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';

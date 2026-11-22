@@ -1,3 +1,5 @@
+// 编解码并校验QR_V1信封，限制码型及临时请求有效期。
+
 import 'dart:convert';
 
 import 'package:citizenwallet/protocol/qr_protocols.dart';

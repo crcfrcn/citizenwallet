@@ -1,3 +1,5 @@
+// 验证钱包启动、首页与创建导入界面及助记词规格交互。
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';

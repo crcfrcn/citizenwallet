@@ -1,3 +1,5 @@
+// 配置钱包Android应用的Flutter构建、签名和Release单元测试。
+
 import java.util.Properties
 
 plugins {

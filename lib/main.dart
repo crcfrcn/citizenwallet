@@ -1,3 +1,5 @@
+// 启动钱包应用，处理主题、应用锁和未完成的数据擦除恢复。
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';

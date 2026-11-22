@@ -1,3 +1,5 @@
+// 从生成注册表取得签名动作中文名，拒绝未登记动作。
+
 import 'package:citizenwallet/protocol/generated/qr_action_registry.g.dart';
 
 /// 交易 action 英文标识 → 中文显示名映射。

@@ -1,3 +1,5 @@
+// 展示钱包账户列表，管理账户并受保护地查看助记词备份。
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';

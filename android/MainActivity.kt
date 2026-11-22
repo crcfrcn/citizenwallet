@@ -1,3 +1,5 @@
+// 承载钱包Flutter界面，并实现Android硬件金库和擦除生命周期通道。
+
 package com.crcfrcn.citizenwallet
 
 import android.content.Context

@@ -1,3 +1,5 @@
+// 验证钱包主机密存储键的格式、隔离和非法标识拒绝。
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/wallet/wallet_secure_keys.dart';
 

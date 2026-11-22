@@ -1,5 +1,5 @@
-// Lv3 账户详情 widget 测试:公开信息 + 账户名可改 + 私钥区默认隐藏 + 查看确认流。
-// model B 后 C-1 反转:每账户私钥独立隔离,展示单账户私钥安全(默认隐藏,验证后显示)。
+// 验证账户公开资料、默认隐藏的私钥、查看确认和固定账户码。
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';

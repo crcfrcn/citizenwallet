@@ -1,3 +1,5 @@
+// 定义签名请求的动作、目标账户、算法提示和待签数据载荷。
+
 import 'dart:convert';
 import 'dart:typed_data';
 

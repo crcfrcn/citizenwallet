@@ -1,3 +1,5 @@
+// 定义钱包、账户和已签请求的Isar结构、序列化及查询扩展。
+
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
 part of 'wallet_isar.dart';

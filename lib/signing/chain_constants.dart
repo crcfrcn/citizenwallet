@@ -1,7 +1,10 @@
+// 集中定义离线签名使用的公民链固定参数。
+
 /// CitizenChain 链级常量。
 ///
 /// 所有与链相关的固定参数统一在此维护，
 /// 避免散落在多个文件中导致升级遗漏。
+
 class ChainConstants {
   const ChainConstants._();
 

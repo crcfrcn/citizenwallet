@@ -1,3 +1,5 @@
+// 用链端黄金向量验证SCALE解码及截断、超长和尾随数据拒绝。
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';

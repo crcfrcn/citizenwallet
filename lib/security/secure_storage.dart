@@ -1,3 +1,5 @@
+// 配置统一安全存储实例，保存硬件信封密文、PIN派生材料和锁设置。
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// 全 App 单源的加固 SecureStorage 实例。

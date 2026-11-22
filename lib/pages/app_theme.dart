@@ -1,3 +1,5 @@
+// 定义冷钱包统一的深色主题、色板和控件样式。
+
 import 'package:flutter/material.dart';
 
 /// 冷钱包统一深色主题。

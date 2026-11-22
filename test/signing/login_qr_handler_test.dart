@@ -1,4 +1,5 @@
-// 登录 QR 解析单测:重点覆盖新增的请求 id 校验(M1:防 `|` 注入污染待签消息)。
+// 验证登录请求标识、响应关联及有效期边界。
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/protocol/qr_protocols.dart';
 import 'package:citizenwallet/protocol/envelope.dart';

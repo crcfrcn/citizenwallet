@@ -1,3 +1,5 @@
+// 引用共享注册表生成的QR_V1码型和签名动作常量。
+
 import 'package:citizenwallet/protocol/generated/qr_action_registry.g.dart';
 export 'package:citizenwallet/protocol/generated/qr_bodies.g.dart' show QrKind;
 
@@ -50,6 +52,7 @@ class QrActions {
 
   static int get login => _code('login');
   static int get topup => _code('topup');
+  static int get institutionWalletAccept => _code('institution_wallet_accept');
   static int get citizenIdentity => _code('citizen_identity');
   static int get citizenOccupy => _code('citizen_occupy');
   static int get citizenRebind => _code('citizen_rebind');

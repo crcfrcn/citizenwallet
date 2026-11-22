@@ -1,3 +1,5 @@
+// 验证助记词密码派生的稳定性、空密码向量及非法密码拒绝。
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/wallet/wallet_mini_secret.dart';
 import 'package:citizenwallet/wallet/wallet_password.dart';

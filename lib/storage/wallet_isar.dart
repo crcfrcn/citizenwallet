@@ -1,3 +1,5 @@
+// 定义钱包、账户和已签请求集合，管理本地数据库与签名重放记录。
+
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';

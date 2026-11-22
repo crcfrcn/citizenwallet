@@ -1,3 +1,5 @@
+// 验证普通PIN与防共匪密码隔离，以及持久擦除和恢复终态。
+
 import 'dart:io';
 
 import 'package:citizenwallet/security/app_lock_service.dart';

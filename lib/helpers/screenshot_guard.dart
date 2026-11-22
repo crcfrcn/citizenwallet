@@ -1,3 +1,5 @@
+// 按引用计数启停屏幕保护，并统一订阅截屏和录屏事件。
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;

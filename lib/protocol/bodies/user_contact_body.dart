@@ -1,3 +1,5 @@
+// 定义用于通讯录的固定用户码及其CID资料载荷。
+
 import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/generated/qr_bodies.g.dart';
 

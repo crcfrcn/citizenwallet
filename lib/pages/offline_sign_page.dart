@@ -1,3 +1,6 @@
+// 审阅扫码传入的离线签名请求，在本机签名并展示响应二维码。
+
+import '../helpers/identity_cid_display.dart';
 import '../signing/animated_qr.dart';
 import 'dart:async';
 
@@ -181,7 +184,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
-        content: Text(message),
+        content: Text(identityCidUiText(message)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -232,22 +235,22 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
     final List<Widget> detailRows;
     if (rejected) {
       detailRows = [
-        _detailRow('交易类型', actionLabel),
+        _detailRow('交易类型', identityCidUiText(actionLabel)),
         _detailRow('状态', '拒绝签名'),
-        _detailRow('原因', verification.rejectReason ?? '签名请求已拒绝'),
+        _detailRow('原因', identityCidUiText(verification.rejectReason ?? '签名请求已拒绝')),
       ];
     } else if (decoded != null) {
       detailRows = [
-        _detailRow('交易类型', actionLabel),
+        _detailRow('交易类型', identityCidUiText(actionLabel)),
         ...decoded.reviewFields.entries.map((e) {
           final label = fieldLabelTextOrNull(e.key);
-          return _detailRow(label ?? '未翻译字段', fieldValueText(e.key, e.value));
+          return _detailRow(identityCidUiText(label ?? '未翻译字段'), identityCidFieldText(e.key, fieldValueText(e.key, e.value)));
         }),
       ];
     } else {
       // hash-only:runtime 升级仅对 32B 摘要签名,原始 WASM 留在发起端 session。
       detailRows = [
-        _detailRow('交易类型', actionLabel),
+        _detailRow('交易类型', identityCidUiText(actionLabel)),
         _detailRow('签名内容', '32 字节升级摘要（哈希）'),
         _detailRow('说明', 'Runtime 升级仅对 32 字节摘要签名，原始升级内容留在发起端'),
       ];
@@ -284,7 +287,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              text,
+              identityCidUiText(text),
               style: TextStyle(
                 color: color,
                 fontWeight: FontWeight.w600,
@@ -395,7 +398,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
             padding: const EdgeInsets.all(14),
             decoration: AppTheme.bannerDecoration(AppTheme.danger),
             child: Text(
-              verification?.rejectReason ?? '签名请求已拒绝',
+              identityCidUiText(verification?.rejectReason ?? '签名请求已拒绝'),
               style: const TextStyle(
                 color: AppTheme.danger,
                 fontWeight: FontWeight.w600,
@@ -515,7 +518,7 @@ class _OfflineSignPageState extends State<OfflineSignPage> {
             const Icon(Icons.error_outline, size: 56, color: AppTheme.danger),
             const SizedBox(height: 16),
             Text(
-              message,
+              identityCidUiText(message),
               textAlign: TextAlign.center,
               style: const TextStyle(color: AppTheme.danger, fontSize: 15),
             ),

@@ -1,3 +1,5 @@
+// 验证生物识别弹窗的语言回退及禁用系统密码回退规则。
+
 import 'dart:ui' show Locale;
 
 import 'package:flutter_test/flutter_test.dart';

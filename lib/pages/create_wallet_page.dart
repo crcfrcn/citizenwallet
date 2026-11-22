@@ -1,3 +1,5 @@
+// 选择助记词规格并创建钱包，在受保护页面完成助记词备份。
+
 import 'package:flutter/material.dart';
 import 'package:citizenwallet/wallet/wallet_password.dart';
 

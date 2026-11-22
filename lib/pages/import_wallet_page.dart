@@ -1,3 +1,5 @@
+// 通过助记词和可选密码导入钱包，校验输入并提示导入结果。
+
 import 'package:flutter/material.dart';
 import 'package:citizenwallet/wallet/wallet_password.dart';
 

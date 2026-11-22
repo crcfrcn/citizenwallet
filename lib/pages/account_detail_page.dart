@@ -1,3 +1,5 @@
+// 展示单个账户的公开信息、账户码和受生物识别保护的私钥。
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';

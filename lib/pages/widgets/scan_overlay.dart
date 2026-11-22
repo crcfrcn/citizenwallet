@@ -1,3 +1,5 @@
+// 统一扫描框布局，绘制遮罩挖空区域和边角标记。
+
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';

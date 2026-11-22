@@ -1,3 +1,5 @@
+// 管理钱包应用锁、安全设置、产品手册及当前安装包信息。
+
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:package_info_plus/package_info_plus.dart';

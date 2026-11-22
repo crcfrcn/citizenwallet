@@ -1,3 +1,5 @@
+// 验证离线请求完整审阅、真实验签、账户绑定及过期和重放拒绝。
+
 import 'dart:typed_data';
 import 'dart:convert';
 

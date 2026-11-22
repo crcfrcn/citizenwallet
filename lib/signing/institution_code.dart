@@ -1,3 +1,5 @@
+// 表示并分类公民链机构码，供离线治理权限审阅使用。
+
 import 'dart:convert';
 import 'dart:typed_data';
 

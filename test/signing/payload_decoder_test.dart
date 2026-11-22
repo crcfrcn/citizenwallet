@@ -1,6 +1,12 @@
+// 验证交易载荷解码、充值原文和岗位权限审阅及篡改拒绝。
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:citizenwallet/signing/offline_sign_service.dart';
+import 'package:citizenwallet/signing/qr_signer.dart';
+import 'package:citizenwallet/protocol/envelope.dart';
+import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
@@ -99,7 +105,6 @@ void main() {
     expect(PayloadDecoder.decode(invalid, expectedAction: 'contacts_delete'),
         isNull);
   });
-
 
   test('充值原文完整审阅并逐项核对可信配置', () {
     final raw = topupText(),
@@ -208,12 +213,13 @@ void main() {
     String familyName,
     String givenName, {
     String citizenCidNumber = '',
-  }) => [
-    ...adminAccount,
-    ...compactVec(citizenCidNumber),
-    ...compactVec(familyName),
-    ...compactVec(givenName),
-  ];
+  }) =>
+      [
+        ...adminAccount,
+        ...compactVec(citizenCidNumber),
+        ...compactVec(familyName),
+        ...compactVec(givenName),
+      ];
 
   List<int> u128LeForTest(BigInt value) {
     final out = List<int>.filled(16, 0);
@@ -228,11 +234,11 @@ void main() {
   List<int> u16Le(int value) => [value & 0xff, (value >> 8) & 0xff];
 
   List<int> u32Le(int value) => [
-    value & 0xff,
-    (value >> 8) & 0xff,
-    (value >> 16) & 0xff,
-    (value >> 24) & 0xff,
-  ];
+        value & 0xff,
+        (value >> 8) & 0xff,
+        (value >> 16) & 0xff,
+        (value >> 24) & 0xff,
+      ];
 
   List<int> u64Le(int value) {
     final out = List<int>.filled(8, 0);
@@ -253,8 +259,8 @@ void main() {
   Uint8List roleFixtureBytes(Map<String, dynamic> fixture, String name) {
     final cases = fixture['cases']! as List<dynamic>;
     final entry = cases.cast<Map<String, dynamic>>().singleWhere(
-      (item) => item['name'] == name,
-    );
+          (item) => item['name'] == name,
+        );
     final hex = entry['encoded_hex']! as String;
     return Uint8List.fromList([
       for (var index = 0; index < hex.length; index += 2)
@@ -310,22 +316,115 @@ void main() {
   // 裸 call_data 会被 decoder 的尾部校验拒绝(Reject → 红色)。
   final tailGenesis = List<int>.generate(32, (i) => 0x49 ^ i);
   List<int> signingTail({int nonce = 1, int tip = 0}) => [
-    0x00,
-    ...compactU32(nonce),
-    ...compactU32(tip),
-    0x00,
-    1, 0, 0, 0, // spec_version u32 LE
-    ...(ByteData(4)
-          ..setUint32(0, ChainConstants.transactionVersion, Endian.little))
-        .buffer
-        .asUint8List(), // 唯一交易版本声明
-    ...tailGenesis,
-    ...tailGenesis,
-    0x00,
-  ];
+        0x00,
+        ...compactU32(nonce),
+        ...compactU32(tip),
+        0x00,
+        1, 0, 0, 0, // spec_version u32 LE
+        ...(ByteData(4)
+              ..setUint32(0, ChainConstants.transactionVersion, Endian.little))
+            .buffer
+            .asUint8List(), // 唯一交易版本声明
+        ...tailGenesis,
+        ...tailGenesis,
+        0x00,
+      ];
 
   Uint8List withSigningTail(List<int> callData, {int nonce = 1, int tip = 0}) =>
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
+
+  group('机构钱包更换与个人CID独立', () {
+    final fixture = (jsonDecode(
+            File('test/signing/fixtures/role_permission.json')
+                .readAsStringSync())
+        as Map<String, dynamic>)['institution_wallet'] as Map<String, dynamic>;
+    test('新钱包证明严格匹配Runtime SCALE金标，拒绝未知方式和尾字节', () {
+      final raw = _institutionBytes(fixture['acceptance_hex'] as String);
+      final decoded = PayloadDecoder.decode(_institutionHex(raw),
+          expectedAction: 'institution_wallet_accept');
+      expect(decoded?.fields['admin_account_id'], fixture['admin_account_id']);
+      expect(decoded?.fields['old_wallet_account_id'],
+          fixture['old_wallet_account_id']);
+      expect(decoded?.fields['new_wallet_account_id'],
+          fixture['new_wallet_account_id']);
+      expect(decoded?.fields['wallet_revision'], '7');
+      expect(
+          PayloadDecoder.decode(_institutionHex([...raw, 0]),
+              expectedAction: 'institution_wallet_accept'),
+          isNull);
+      raw[raw.length - 9] = 2;
+      expect(
+          PayloadDecoder.decode(_institutionHex(raw),
+              expectedAction: 'institution_wallet_accept'),
+          isNull);
+    });
+    test('公私权call10完整消费新钱包证明，治理variant3独立审阅', () {
+      final call = _institutionBytes(fixture['self_call_hex'] as String);
+      for (final pallet in [30, 31]) {
+        call[0] = pallet;
+        final decoded =
+            PayloadDecoder.decode(_institutionHex(withSigningTail(call)));
+        expect(decoded?.fields['new_wallet_account_id'],
+            fixture['new_wallet_account_id']);
+        expect(decoded?.fields['wallet_revision'], '7');
+        expect(PayloadDecoder.decode(_institutionHex(call)), isNull);
+        final truncated = call.sublist(0, call.length - 1);
+        expect(
+            PayloadDecoder.decode(_institutionHex(withSigningTail(truncated))),
+            isNull);
+      }
+      final cid = (fixture['cid_number'] as String).codeUnits;
+      final governance = [
+        30,
+        8,
+        cid.length << 2,
+        ...cid,
+        ..._institutionBytes(fixture['governance_action_hex'] as String),
+        cid.length << 2,
+        ...cid,
+        4 << 2,
+        ...'TEST'.codeUnits
+      ];
+      final decoded =
+          PayloadDecoder.decode(_institutionHex(withSigningTail(governance)));
+      expect(decoded?.fields['governance_detail'],
+          contains(fixture['new_wallet_account_id']));
+      expect(decoded?.fields['governance_action'], contains('更换管理员钱包'));
+    });
+    test('接收证明只能由指定新钱包签署，使用独立0x25域并验证期限', () {
+      final raw = _institutionBytes(fixture['acceptance_hex'] as String);
+      raw.setRange(0, 32, _institutionBytes(ChainConstants.genesisHash));
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      raw.setRange(
+          raw.length - 8, raw.length, _rebindU64(BigInt.from(now + 180)));
+      SignRequestEnvelope request(List<int> signer) =>
+          QrEnvelope<SignRequestBody>(
+              kind: QrKind.signRequest,
+              id: 'institution-wallet-proof-test',
+              expiresAt: now + 120,
+              body: SignRequestBody(
+                  action: QrActions.institutionWalletAccept,
+                  signerPublicKey: base64Url.encode(signer).replaceAll('=', ''),
+                  payload: base64Url.encode(raw).replaceAll('=', '')));
+      final valid = request(List.filled(32, 4));
+      final service = OfflineSignService();
+      final parsed = QrSigner().parseRequest(jsonEncode(valid.toJson()));
+      expect(service.verifyPayload(parsed).canSign, isTrue);
+      expect(
+          service.verifyPayload(request(List.filled(32, 5))).canSign, isFalse);
+      final message = QrSigner.signingBytesFor(valid.body);
+      expect(message, hasLength(32));
+      final oldDomain = QrSigner.signingBytesFor(SignRequestBody(
+          action: QrActions.onchinaAdmin,
+          signerPublicKey: valid.body.signerPublicKey,
+          payload: valid.body.payload));
+      expect(message, isNot(orderedEquals(oldDomain)));
+      raw.setRange(
+          raw.length - 8, raw.length, _rebindU64(BigInt.from(now - 1)));
+      expect(
+          service.verifyPayload(request(List.filled(32, 4))).canSign, isFalse);
+    });
+  });
 
   test('自助换绑授权完整解码，摘要/截断/尾随/同账户/非规范CID及非法revision拒绝', () {
     final payload = cidRebindPayload();
@@ -382,16 +481,31 @@ void main() {
     final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)));
     expect(decoded!.fields['proposal_id'], id.toString());
     expect(decoded.fields['approve'], 'true');
-    expect(PayloadDecoder.decode(hexOf(withSigningTail([20, 0, ...List.filled(8, 0), 0, 1]))), isNull);
+    expect(
+        PayloadDecoder.decode(
+            hexOf(withSigningTail([20, 0, ...List.filled(8, 0), 0, 1]))),
+        isNull);
   });
 
   test('表决 SCALE bool 仅接受0/1，六个解码分支拒绝2/255', () {
     final id = u128LeForTest((BigInt.one << 127) + BigInt.from(19));
     final cases = <(String, List<int>)>[
       ('internal_vote', [20, 0, ...id, 0]),
-      ('joint_vote', [21, 0, ...id, ...compactVec(nrcActorCid), ...compactVec('COMMITTEE_MEMBER')]),
+      (
+        'joint_vote',
+        [
+          21,
+          0,
+          ...id,
+          ...compactVec(nrcActorCid),
+          ...compactVec('COMMITTEE_MEMBER')
+        ]
+      ),
       ('cast_referendum', [21, 1, ...id]),
-      ('cast_representative_vote', [26, 1, ...id, ...compactVec('HOUSE_MEMBER')]),
+      (
+        'cast_representative_vote',
+        [26, 1, ...id, ...compactVec('HOUSE_MEMBER')]
+      ),
       ('cast_referendum_vote', [26, 2, ...id]),
       ('executive_sign', [26, 3, ...id]),
       ('override_sign', [26, 4, ...id]),
@@ -405,11 +519,13 @@ void main() {
         );
         expect(decoded, isNotNull, reason: '$action bool=$value');
         expect(decoded!.fields['approve'], (value == 1).toString());
-        expect(decoded.fields['proposal_id'], ((BigInt.one << 127) + BigInt.from(19)).toString());
+        expect(decoded.fields['proposal_id'],
+            ((BigInt.one << 127) + BigInt.from(19)).toString());
       }
       for (final value in [2, 255]) {
         expect(
-          PayloadDecoder.decode(hexOf(withSigningTail([...prefix, value])), expectedAction: action),
+          PayloadDecoder.decode(hexOf(withSigningTail([...prefix, value])),
+              expectedAction: action),
           isNull,
           reason: '$action bool=$value',
         );
@@ -418,22 +534,23 @@ void main() {
   });
 
   List<int> citizenIdentityPayloadForTest(List<int> walletBytes) => [
-    ...compactVec('CTZN-430100-0001'),
-    ...walletBytes,
-    ...u32Le(20260630),
-    ...u32Le(20360630),
-    0,
-    ...compactVec('43'),
-    ...compactVec('0100'),
-    ...compactVec('001'),
-  ];
+        ...compactVec('CTZN-430100-0001'),
+        ...walletBytes,
+        ...u32Le(20260630),
+        ...u32Le(20360630),
+        0,
+        ...compactVec('43'),
+        ...compactVec('0100'),
+        ...compactVec('001'),
+      ];
 
   /// 身份写入防重放两标量：expected_identity_version(8) + expires_at(8)。
   /// 链端 extrinsic 里紧跟 payload，授权载荷里位于末尾，两处顺序一致。
   List<int> identityAuthorizationTailForTest({
     int identityVersion = 3,
     int expiresAt = 1800000000,
-  }) => [...u64Le(identityVersion), ...u64Le(expiresAt)];
+  }) =>
+      [...u64Le(identityVersion), ...u64Le(expiresAt)];
 
   /// 公民实际签名覆盖的完整授权字节：
   /// genesis_hash(32) ++ payload ++ version(8) ++ expires_at(8)。
@@ -441,26 +558,27 @@ void main() {
     List<int> payloadBytes, {
     int identityVersion = 3,
     int expiresAt = 1800000000,
-  }) => [
-    ...List<int>.filled(32, 0x11), // genesis_hash
-    ...payloadBytes,
-    ...identityAuthorizationTailForTest(
-      identityVersion: identityVersion,
-      expiresAt: expiresAt,
-    ),
-  ];
+  }) =>
+      [
+        ...List<int>.filled(32, 0x11), // genesis_hash
+        ...payloadBytes,
+        ...identityAuthorizationTailForTest(
+          identityVersion: identityVersion,
+          expiresAt: expiresAt,
+        ),
+      ];
 
   List<int> candidateIdentityPayloadForTest(List<int> walletBytes) => [
-    ...citizenIdentityPayloadForTest(walletBytes),
-    ...compactVec('43'),
-    ...compactVec('0100'),
-    ...compactVec('002'),
-    ...compactVec('测'),
-    ...compactVec('试公民'),
-    1, // CitizenSex::Female
-    // CandidateIdentityPayload 的末字段为 u32 LE YYYYMMDD。
-    ...u32Le(20260630),
-  ];
+        ...citizenIdentityPayloadForTest(walletBytes),
+        ...compactVec('43'),
+        ...compactVec('0100'),
+        ...compactVec('002'),
+        ...compactVec('测'),
+        ...compactVec('试公民'),
+        1, // CitizenSex::Female
+        // CandidateIdentityPayload 的末字段为 u32 LE YYYYMMDD。
+        ...u32Le(20260630),
+      ];
 
   List<int> bytesFromHex(String hex) {
     final clean = hex.startsWith('0x') ? hex.substring(2) : hex;
@@ -473,7 +591,6 @@ void main() {
 
   String ss58FromBytes(List<int> bytes) => Keyring().encodeAddress(bytes, 2027);
 
-
   // 年份边界夹具内嵌于现有测试；按原校验和规则构造，避免无效校验位掩盖年份漏洞。
   String cidForYear(String year, {bool citizen = false}) {
     final r5 = citizen ? 'CN000' : 'GD001';
@@ -484,26 +601,51 @@ void main() {
     for (var i = 0; i < payload.length; i++) {
       total += (i + 1) * alphabet.indexOf(payload[i]);
     }
-    final check = citizen ? (total % 10).toString() : String.fromCharCode(65 + total % 26);
+    final check = citizen
+        ? (total % 10).toString()
+        : String.fromCharCode(65 + total % 26);
     return '$r5-$code$check-000000001-$year';
   }
 
   test('CID u32年份沿用32字节激活和解密槽并拒绝越界写法', () {
-    for (final year in ['0000', '0001', '2026', '9999', '10000', '100000', '4294967295', '4294967296', '02026', '010000']) {
+    for (final year in [
+      '0000',
+      '0001',
+      '2026',
+      '9999',
+      '10000',
+      '100000',
+      '4294967295',
+      '4294967296',
+      '02026',
+      '010000'
+    ]) {
       final accepted = !['4294967296', '02026', '010000'].contains(year);
       final cid = cidForYear(year);
       final bytes = utf8.encode(cid);
       final slot = [...bytes, ...List.filled(32 - bytes.length, 0)];
       final signer = List<int>.filled(32, 0x22);
       final tail = [...u64Le(123), ...List.filled(16, 0x33)];
-      final activate = [0x47, 0x4d, 0x42, 0x18, ...slot, ...InstitutionCode.codeBytes('CGOV'), 0, ...signer, ...tail];
+      final activate = [
+        0x47,
+        0x4d,
+        0x42,
+        0x18,
+        ...slot,
+        ...InstitutionCode.codeBytes('CGOV'),
+        0,
+        ...signer,
+        ...tail
+      ];
       final decrypt = [0x47, 0x4d, 0x42, 0x19, ...slot, ...signer, ...tail];
       expect(activate, hasLength(97));
       expect(decrypt, hasLength(92));
       final activated = PayloadDecoder.decode(hexOf(activate));
       final decrypted = PayloadDecoder.decode(hexOf(decrypt));
-      expect(activated?.fields['cid_number'], accepted ? cid : null, reason: year);
-      expect(decrypted?.fields['cid_number'], accepted ? cid : null, reason: year);
+      expect(activated?.fields['cid_number'], accepted ? cid : null,
+          reason: year);
+      expect(decrypted?.fields['cid_number'], accepted ? cid : null,
+          reason: year);
       if (year == '4294967295') {
         expect(cid, 'GD001-CGOVU-000000001-4294967295');
         expect(bytes, hasLength(32));
@@ -514,12 +656,26 @@ void main() {
   });
 
   test('匿名自助占号的CID年份接受完整u32并拒绝歧义文本', () {
-    for (final year in ['0000', '0001', '9999', '10000', '4294967295', '4294967296', '02026', '-1', '20A6']) {
+    for (final year in [
+      '0000',
+      '0001',
+      '9999',
+      '10000',
+      '4294967295',
+      '4294967296',
+      '02026',
+      '-1',
+      '20A6'
+    ]) {
       final cid = cidForYear(year, citizen: true);
-      final decoded = PayloadDecoder.decode(hexOf(withSigningTail([10, 5, ...compactVec(cid)])));
-      final accepted = ['0000', '0001', '9999', '10000', '4294967295'].contains(year);
-      expect(decoded?.action, accepted ? 'self_occupy_cid' : null, reason: year);
-      expect(decoded?.fields['cid_number'], accepted ? cid : null, reason: year);
+      final decoded = PayloadDecoder.decode(
+          hexOf(withSigningTail([10, 5, ...compactVec(cid)])));
+      final accepted =
+          ['0000', '0001', '9999', '10000', '4294967295'].contains(year);
+      expect(decoded?.action, accepted ? 'self_occupy_cid' : null,
+          reason: year);
+      expect(decoded?.fields['cid_number'], accepted ? cid : null,
+          reason: year);
     }
   });
 
@@ -528,13 +684,24 @@ void main() {
       final citizen = cidForYear(year, citizen: true);
       final target = cidForYear('4294967295');
       final call = [
-        30, 8, ...compactVec(target), 0, ...compactU32(2),
-        ...adminPerson(List.filled(32, 0x31), '张', '三', citizenCidNumber: citizen),
+        30,
+        8,
+        ...compactVec(target),
+        0,
+        ...compactU32(2),
+        ...adminPerson(List.filled(32, 0x31), '张', '三',
+            citizenCidNumber: citizen),
         ...adminPerson(List.filled(32, 0x32), '李', '四'),
-        ...compactVec(target), ...compactVec('RCHAIR'),
+        ...compactVec(target),
+        ...compactVec('RCHAIR'),
       ];
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)));
-      expect(decoded?.action, ['4294967296', '02026'].contains(year) ? null : 'propose_public_institution_governance', reason: year);
+      expect(
+          decoded?.action,
+          ['4294967296', '02026'].contains(year)
+              ? null
+              : 'propose_public_institution_governance',
+          reason: year);
     }
   });
 
@@ -847,12 +1014,12 @@ void main() {
       final accountId = '0x${'11' * 32}';
       final publicKey = '0x${'ab' * 32}';
       List<int> payloadFor(String key, {int revision = 3}) => <int>[
-        ...compactVec(cid),
-        ...u64Le(revision),
-        ...compactVec(accountId),
-        ...compactVec(key),
-        ...u64Le(1700000000123),
-      ];
+            ...compactVec(cid),
+            ...u64Le(revision),
+            ...compactVec(accountId),
+            ...compactVec(key),
+            ...u64Le(1700000000123),
+          ];
       final payload = payloadFor(publicKey);
       final decoded = PayloadDecoder.decode(
         hexOf(payload),
@@ -932,7 +1099,7 @@ void main() {
       final payload = Uint8List.fromList([
         0x14, 0x00,
         ...u128LeForTest(BigInt.parse("42")),
-0, // InternalVoteTicketClaim::Personal
+        0, // InternalVoteTicketClaim::Personal
         1, // approve = true
       ]);
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
@@ -949,7 +1116,7 @@ void main() {
         0x14,
         0x00,
         ...u128LeForTest(BigInt.parse("7")),
-0,
+        0,
         0, // approve = false
       ]);
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
@@ -964,7 +1131,7 @@ void main() {
         0x15,
         0x00,
         ...u128LeForTest(BigInt.parse("7")),
-...compactVec(nrcActorCid),
+        ...compactVec(nrcActorCid),
         ...compactVec('COMMITTEE_MEMBER'),
         0,
       ]);
@@ -1077,12 +1244,12 @@ void main() {
       final reasonHash = List<int>.generate(32, (i) => 0xa0 + i);
 
       List<int> assetHeader(int callIndex, int assetId) => [
-        0x17,
-        callIndex,
-        ...compactVec(registryActorCid),
-        ...compactVec('ASSET_OPERATOR'),
-        ...u32Le(assetId),
-      ];
+            0x17,
+            callIndex,
+            ...compactVec(registryActorCid),
+            ...compactVec('ASSET_OPERATOR'),
+            ...u32Le(assetId),
+          ];
 
       test('QR action codes are the unique pallet 23 call codes', () {
         expect(QrActions.proposeAssetIssue, 0x1700);
@@ -1134,66 +1301,63 @@ void main() {
       });
 
       test('calls 1..4 decode every business field', () {
-        final cases =
-            <
-              ({
-                List<int> callData,
-                String action,
-                int qrAction,
-                Map<String, String> expected,
-              })
-            >[
-              (
-                callData: [
-                  ...assetHeader(1, 7),
-                  ...toAccount,
-                  ...u128LeForTest(BigInt.from(101)),
-                ],
-                action: 'propose_asset_mint',
-                qrAction: QrActions.proposeAssetMint,
-                expected: {
-                  'asset_id': '7',
-                  'recipient_account_id': '0x${hexLower(toAccount)}',
-                  'amount_raw': '101',
-                },
-              ),
-              (
-                callData: [
-                  ...assetHeader(2, 8),
-                  ...fromAccount,
-                  ...u128LeForTest(BigInt.from(202)),
-                ],
-                action: 'propose_asset_burn',
-                qrAction: QrActions.proposeAssetBurn,
-                expected: {
-                  'asset_id': '8',
-                  'sender_account_id': '0x${hexLower(fromAccount)}',
-                  'amount_raw': '202',
-                },
-              ),
-              (
-                callData: [...assetHeader(3, 9)],
-                action: 'propose_asset_close',
-                qrAction: QrActions.proposeAssetClose,
-                expected: {'asset_id': '9'},
-              ),
-              (
-                callData: [
-                  ...assetHeader(4, 10),
-                  ...fromAccount,
-                  ...toAccount,
-                  ...u128LeForTest(BigInt.from(303)),
-                ],
-                action: 'propose_asset_transfer',
-                qrAction: QrActions.proposeAssetTransfer,
-                expected: {
-                  'asset_id': '10',
-                  'sender_account_id': '0x${hexLower(fromAccount)}',
-                  'recipient_account_id': '0x${hexLower(toAccount)}',
-                  'amount_raw': '303',
-                },
-              ),
-            ];
+        final cases = <({
+          List<int> callData,
+          String action,
+          int qrAction,
+          Map<String, String> expected,
+        })>[
+          (
+            callData: [
+              ...assetHeader(1, 7),
+              ...toAccount,
+              ...u128LeForTest(BigInt.from(101)),
+            ],
+            action: 'propose_asset_mint',
+            qrAction: QrActions.proposeAssetMint,
+            expected: {
+              'asset_id': '7',
+              'recipient_account_id': '0x${hexLower(toAccount)}',
+              'amount_raw': '101',
+            },
+          ),
+          (
+            callData: [
+              ...assetHeader(2, 8),
+              ...fromAccount,
+              ...u128LeForTest(BigInt.from(202)),
+            ],
+            action: 'propose_asset_burn',
+            qrAction: QrActions.proposeAssetBurn,
+            expected: {
+              'asset_id': '8',
+              'sender_account_id': '0x${hexLower(fromAccount)}',
+              'amount_raw': '202',
+            },
+          ),
+          (
+            callData: [...assetHeader(3, 9)],
+            action: 'propose_asset_close',
+            qrAction: QrActions.proposeAssetClose,
+            expected: {'asset_id': '9'},
+          ),
+          (
+            callData: [
+              ...assetHeader(4, 10),
+              ...fromAccount,
+              ...toAccount,
+              ...u128LeForTest(BigInt.from(303)),
+            ],
+            action: 'propose_asset_transfer',
+            qrAction: QrActions.proposeAssetTransfer,
+            expected: {
+              'asset_id': '10',
+              'sender_account_id': '0x${hexLower(fromAccount)}',
+              'recipient_account_id': '0x${hexLower(toAccount)}',
+              'amount_raw': '303',
+            },
+          ),
+        ];
 
         for (final item in cases) {
           final decoded = PayloadDecoder.decode(
@@ -1211,72 +1375,69 @@ void main() {
       });
 
       test('calls 10..14 decode every monitor field', () {
-        final cases =
-            <
-              ({
-                List<int> callData,
-                String action,
-                int qrAction,
-                Map<String, String> expected,
-              })
-            >[
-              (
-                callData: [...assetHeader(10, 11), ...toAccount, ...reasonHash],
-                action: 'propose_monitor_freeze',
-                qrAction: QrActions.proposeMonitorFreeze,
-                expected: {
-                  'asset_id': '11',
-                  'account_id': '0x${hexLower(toAccount)}',
-                },
-              ),
-              (
-                callData: [...assetHeader(11, 12), ...toAccount, ...reasonHash],
-                action: 'propose_monitor_unfreeze',
-                qrAction: QrActions.proposeMonitorUnfreeze,
-                expected: {
-                  'asset_id': '12',
-                  'account_id': '0x${hexLower(toAccount)}',
-                },
-              ),
-              (
-                callData: [
-                  ...assetHeader(12, 13),
-                  ...toAccount,
-                  ...u128LeForTest(BigInt.from(404)),
-                  ...reasonHash,
-                ],
-                action: 'propose_monitor_confiscate',
-                qrAction: QrActions.proposeMonitorConfiscate,
-                expected: {
-                  'asset_id': '13',
-                  'account_id': '0x${hexLower(toAccount)}',
-                  'amount_raw': '404',
-                },
-              ),
-              (
-                callData: [
-                  ...assetHeader(13, 14),
-                  ...fromAccount,
-                  ...toAccount,
-                  ...u128LeForTest(BigInt.from(505)),
-                  ...reasonHash,
-                ],
-                action: 'propose_monitor_force_transfer',
-                qrAction: QrActions.proposeMonitorForceTransfer,
-                expected: {
-                  'asset_id': '14',
-                  'sender_account_id': '0x${hexLower(fromAccount)}',
-                  'recipient_account_id': '0x${hexLower(toAccount)}',
-                  'amount_raw': '505',
-                },
-              ),
-              (
-                callData: [...assetHeader(14, 15), ...reasonHash],
-                action: 'propose_monitor_force_close',
-                qrAction: QrActions.proposeMonitorForceClose,
-                expected: {'asset_id': '15'},
-              ),
-            ];
+        final cases = <({
+          List<int> callData,
+          String action,
+          int qrAction,
+          Map<String, String> expected,
+        })>[
+          (
+            callData: [...assetHeader(10, 11), ...toAccount, ...reasonHash],
+            action: 'propose_monitor_freeze',
+            qrAction: QrActions.proposeMonitorFreeze,
+            expected: {
+              'asset_id': '11',
+              'account_id': '0x${hexLower(toAccount)}',
+            },
+          ),
+          (
+            callData: [...assetHeader(11, 12), ...toAccount, ...reasonHash],
+            action: 'propose_monitor_unfreeze',
+            qrAction: QrActions.proposeMonitorUnfreeze,
+            expected: {
+              'asset_id': '12',
+              'account_id': '0x${hexLower(toAccount)}',
+            },
+          ),
+          (
+            callData: [
+              ...assetHeader(12, 13),
+              ...toAccount,
+              ...u128LeForTest(BigInt.from(404)),
+              ...reasonHash,
+            ],
+            action: 'propose_monitor_confiscate',
+            qrAction: QrActions.proposeMonitorConfiscate,
+            expected: {
+              'asset_id': '13',
+              'account_id': '0x${hexLower(toAccount)}',
+              'amount_raw': '404',
+            },
+          ),
+          (
+            callData: [
+              ...assetHeader(13, 14),
+              ...fromAccount,
+              ...toAccount,
+              ...u128LeForTest(BigInt.from(505)),
+              ...reasonHash,
+            ],
+            action: 'propose_monitor_force_transfer',
+            qrAction: QrActions.proposeMonitorForceTransfer,
+            expected: {
+              'asset_id': '14',
+              'sender_account_id': '0x${hexLower(fromAccount)}',
+              'recipient_account_id': '0x${hexLower(toAccount)}',
+              'amount_raw': '505',
+            },
+          ),
+          (
+            callData: [...assetHeader(14, 15), ...reasonHash],
+            action: 'propose_monitor_force_close',
+            qrAction: QrActions.proposeMonitorForceClose,
+            expected: {'asset_id': '15'},
+          ),
+        ];
 
         for (final item in cases) {
           final decoded = PayloadDecoder.decode(
@@ -1312,12 +1473,10 @@ void main() {
           ];
           final truncated = validIssue.sublist(0, validIssue.length - 1);
           final trailing = [...validIssue, 0xff];
-          final invalidClass = [...validIssue]
-            ..[2 +
-                    compactVec(registryActorCid).length +
-                    compactVec('ASSET_OPERATOR').length +
-                    32] =
-                2;
+          final invalidClass = [...validIssue]..[2 +
+              compactVec(registryActorCid).length +
+              compactVec('ASSET_OPERATOR').length +
+              32] = 2;
           final accountIdOnly = <int>[
             0x17,
             0,
@@ -1730,7 +1889,7 @@ void main() {
       final payload = Uint8List.fromList([
         0x15, 0x01,
         ...u128LeForTest(BigInt.parse("99")),
-...List.filled(32, 0),
+        ...List.filled(32, 0),
         0,
         0,
         1, // 只到 approve,长度 = 45。
@@ -1740,7 +1899,8 @@ void main() {
     });
 
     test('decodes finalize_proposal (pallet=9 call=3)', () {
-      final payload = Uint8List.fromList([0x09, 0x03, ...u128LeForTest(BigInt.from(15))]);
+      final payload =
+          Uint8List.fromList([0x09, 0x03, ...u128LeForTest(BigInt.from(15))]);
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
       expect(decoded!.action, 'finalize_proposal');
       expect(decoded.fields['proposal_id'], '15');
@@ -2198,7 +2358,8 @@ void main() {
     //   { proposal_id: <decimal string> }
     // 保证节点 Tauri UI / citizenapp 发出的手动兜底 QR 在冷钱包走 🟢 绿色。
     Uint8List buildProposalIdPayload(int palletIdx, int callIdx, int id) {
-      return Uint8List.fromList([palletIdx, callIdx, ...u128LeForTest(BigInt.from(id))]);
+      return Uint8List.fromList(
+          [palletIdx, callIdx, ...u128LeForTest(BigInt.from(id))]);
     }
 
     String encodeHex(Uint8List bytes) =>
@@ -2893,13 +3054,13 @@ void main() {
     test('rejects invalid SquarePost platform price proposal payloads', () {
       const actorCid = 'GD001-SFGQ0-000000001-2026';
       List<int> call(int level, BigInt price) => <int>[
-        34,
-        5,
-        ...compactVec(actorCid),
-        ...compactVec('GENESIS_PRODUCT_MANAGER'),
-        level,
-        ...u128LeForTest(price),
-      ];
+            34,
+            5,
+            ...compactVec(actorCid),
+            ...compactVec('GENESIS_PRODUCT_MANAGER'),
+            level,
+            ...u128LeForTest(price),
+          ];
       expect(PayloadDecoder.decode(hexOf(call(3, BigInt.one))), isNull);
       expect(PayloadDecoder.decode(hexOf(call(0, BigInt.zero))), isNull);
       expect(
@@ -3228,8 +3389,7 @@ void main() {
     });
 
     test('统一登记带空岗位变更的组合变体仍按名册登记解码', () {
-      final call =
-          appendGovernanceCallTail([
+      final call = appendGovernanceCallTail([
             0x1e,
             9,
             ...compactVec('NX013-CREGN-937676656-2026'),
@@ -3557,16 +3717,16 @@ void main() {
     // 国家储委会转账提案等 9 类提案扫码必红。本组用例锁死两端约定:
     // 带合法尾 → 解码成功;裸 call_data / 篡改尾 → null(红色拒签)。
     List<int> buildNrcTransferCallData() => [
-      0x11, 0x00,
-      0x01, // institution Some
-      ...compactVec(nrcActorCid),
-      0x01, // proposer_role_code Some
-      ...compactVec('COMMITTEE_MEMBER'),
-      ...List<int>.filled(32, 0x66), // funding_account_id
-      ...List<int>.filled(32, 0x44), // beneficiary
-      ...u128LeForTest(BigInt.from(12345)),
-      0x00, // remark 空 Vec
-    ];
+          0x11, 0x00,
+          0x01, // institution Some
+          ...compactVec(nrcActorCid),
+          0x01, // proposer_role_code Some
+          ...compactVec('COMMITTEE_MEMBER'),
+          ...List<int>.filled(32, 0x66), // funding_account_id
+          ...List<int>.filled(32, 0x44), // beneficiary
+          ...u128LeForTest(BigInt.from(12345)),
+          0x00, // remark 空 Vec
+        ];
 
     test('decodes 国家储委会 propose_transfer 带真实签名扩展尾', () {
       final decoded = PayloadDecoder.decode(
@@ -3644,22 +3804,22 @@ void main() {
 
     // 一章一节一条无款的最小章节树。
     List<int> minimalChapters() => [
-      ...compactU32(1), // 1 章
-      ...u32Le(1), // Chapter.number
-      ...compactVec('总则'), // Chapter.title
-      0x00, // Chapter.title_en None
-      ...compactU32(1), // 1 节
-      ...u32Le(1), // Section.number
-      ...compactVec('第一节'), // Section.title
-      0x00, // Section.title_en None
-      ...compactU32(1), // 1 条
-      ...u32Le(1), // Article.number
-      ...compactVec('第一条'), // Article.title
-      0x00, // Article.title_en None
-      ...compactVec('正文内容'), // Article.body
-      0x00, // Article.body_en None
-      ...compactU32(0), // 0 款
-    ];
+          ...compactU32(1), // 1 章
+          ...u32Le(1), // Chapter.number
+          ...compactVec('总则'), // Chapter.title
+          0x00, // Chapter.title_en None
+          ...compactU32(1), // 1 节
+          ...u32Le(1), // Section.number
+          ...compactVec('第一节'), // Section.title
+          0x00, // Section.title_en None
+          ...compactU32(1), // 1 条
+          ...u32Le(1), // Article.number
+          ...compactVec('第一条'), // Article.title
+          0x00, // Article.title_en None
+          ...compactVec('正文内容'), // Article.body
+          0x00, // Article.body_en None
+          ...compactU32(0), // 0 款
+        ];
 
     test('decodes propose_enact_law (25.0)', () {
       final callData = [
@@ -3821,7 +3981,13 @@ void main() {
     });
 
     test('decodes cast_representative_vote (26.1)', () {
-      final callData = [26, 1, ...u128LeForTest(BigInt.from(99)), ...compactVec('SENATOR'), 0x01];
+      final callData = [
+        26,
+        1,
+        ...u128LeForTest(BigInt.from(99)),
+        ...compactVec('SENATOR'),
+        0x01
+      ];
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(callData)));
       expect(decoded, isNotNull);
       expect(decoded!.action, 'cast_representative_vote');
@@ -3843,7 +4009,9 @@ void main() {
       expect(decoded.fields['approve'], 'false');
     });
 
-    test('decodes executive_sign (26.3) / override_sign (26.4) / guard_vote (26.5)', () {
+    test(
+        'decodes executive_sign (26.3) / override_sign (26.4) / guard_vote (26.5)',
+        () {
       final exec = PayloadDecoder.decode(
         hexOf(withSigningTail([26, 3, ...u128LeForTest(BigInt.from(1)), 0x01])),
       );
@@ -3859,7 +4027,10 @@ void main() {
     });
 
     test('rejects 裸 call_data 无签名尾(立法投票)', () {
-      expect(PayloadDecoder.decode(hexOf([26, 1, ...u128LeForTest(BigInt.from(1)), 0x01])), isNull);
+      expect(
+          PayloadDecoder.decode(
+              hexOf([26, 1, ...u128LeForTest(BigInt.from(1)), 0x01])),
+          isNull);
     });
   });
 
@@ -3904,4 +4075,12 @@ void main() {
       expect(decoded.fields['cid_number'], inputs['cid_number']);
     });
   });
+}
+
+String _institutionHex(List<int> bytes) =>
+    '0x${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+Uint8List _institutionBytes(String value) {
+  final raw = value.replaceFirst('0x', '');
+  return Uint8List.fromList(List.generate(raw.length ~/ 2,
+      (i) => int.parse(raw.substring(i * 2, i * 2 + 2), radix: 16)));
 }

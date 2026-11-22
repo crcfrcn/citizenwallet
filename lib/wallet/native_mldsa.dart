@@ -1,3 +1,5 @@
+// 通过FFI调用共享ML-DSA签名与二维码传输核心，并管理字节缓冲区。
+
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:typed_data';

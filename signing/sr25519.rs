@@ -1,25 +1,5 @@
-//! citizenwallet 内部 sr25519 原生签名 FFI（schnorrkel）。
-//!
-//! 从原仓库共享实现迁入本产品，源码与构建依赖由本产品独立维护。
-//! 保留既有派生、签名和验签语义，不介入钱包存储决策。
-//!
-//! ## 口径必须逐字节对齐（错一处钱包就变成另一个账户）
-//! - 扩展模式恒 `ExpansionMode::Ed25519`（对齐 Dart 侧 `MiniSecretKey.expandEd25519()`
-//!   与 Substrate `Pair::from_seed`）；
-//! - 签名上下文恒 `b"substrate"`（对齐 Dart 侧 `Sr25519.sign` 的 `newSigningContext`）；
-//! - 硬派生的 junction chaincode **由 Dart 侧算好后传入**（`SecretUri` 解析属编码而非
-//!   密码学、不慢，且已有金标测试守着），本模块只做慢的那部分，缩小口径漂移面。
-//!
-//! ## 安全
-//! - 所有私钥材料（seed / child mini-secret / 展开后的 SecretKey）用 `Zeroizing`
-//!   包裹，作用域结束即擦除，绝不驻留；
-//! - 全部入口 `catch_unwind`：任何内部 panic 只回错误码，绝不跨 FFI 边界展开、
-//!   更不会像原生 panic 那样 abort 掉整个 App；
-//! - 入参长度逐一校验，空指针即拒；出参只在成功时写入。
+//! 实现钱包sr25519派生、签名和验签的原生FFI接口。
 
-// 本 crate 是纯 FFI 原语库，`unsafe` 是其存在形态（裸指针出入参）。workspace 级
-// `unsafe_code = "warn"` 对它属于噪声，在此源码级豁免；每个入口的安全契约见各自
-// 的 `# Safety` 文档与实现内的判空校验。
 #![allow(unsafe_code)]
 
 use schnorrkel::{

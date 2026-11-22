@@ -1,4 +1,5 @@
-# 产品自己的唯一自动化工作流；配置文件不执行编译或GitHub操作。
+# 组织公民钱包Android测试、构建及正式产物交付和历史清理。
+
 name: 公民钱包·Android
 run-name: 公民钱包·Android·${{ github.run_number }}
 'on':

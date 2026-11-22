@@ -1,3 +1,5 @@
+// 提供六位PIN输入和设置界面，并处理防共匪密码的擦除入口。
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';

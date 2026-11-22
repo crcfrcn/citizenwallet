@@ -1,3 +1,5 @@
+// 由BIP39助记词和规范化密码派生Substrate主MiniSecretKey。
+
 import 'dart:typed_data';
 
 import 'package:substrate_bip39/substrate_bip39.dart';

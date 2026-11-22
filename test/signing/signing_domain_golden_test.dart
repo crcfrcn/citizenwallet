@@ -1,3 +1,5 @@
+// 用链端黄金向量核对公民各业务操作的签名域摘要。
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -191,7 +193,7 @@ void main() {
       );
     });
 
-    test('冷钱包七个哈希域的 op_tag 均在真源登记', () {
+    test('冷钱包哈希域的 op_tag 均在真源登记', () {
       // 冷钱包私有常量 _opSignCitizenIdentity/_opSignCidOccupy/_opSignCidAdminRebind
       // 测试访问不到,改为断言真源侧登记值,任一端重排域编号都会在此暴露。
       expect(vectorNamed('OP_SIGN_CITIZEN_IDENTITY')?['op_tag'], '0x10');
@@ -201,6 +203,7 @@ void main() {
       expect(vectorNamed('OP_SIGN_SQUARE_ACTION')?['op_tag'], '0x1d');
       expect(vectorNamed('OP_SIGN_MLS_DEVICE_BIND')?['op_tag'], '0x1c');
       expect(vectorNamed('OP_SIGN_PUBLISH')?['op_tag'], '0x24');
+      expect(vectorNamed('OP_SIGN_INSTITUTION_WALLET')?['op_tag'], '0x25');
     });
   });
 }

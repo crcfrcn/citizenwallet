@@ -1,14 +1,5 @@
-// HD 派生金标（model B，本端按公开 sr25519 规则独立验真）。
-//
-// 契约：一套助记词 → 一个 mini-secret 种子 → 全部 `//index` 硬派生（含账户0 = `//0`，
-//   无 bare 根）→ 每账户一对公私钥、一个 ss58(2027)、一把自己的 child mini-secret（32B）。
-//
-// 不变量（本测试钉死）：
-//   1) junction 硬派生标准正确 —— //Alice 对齐 substrate 权威 Alice AccountId；
-//   2) model B 核心 —— fromSeed(childMiniSecret) 逐字节 == <助记词>//index；
-//   3) //0 //1 //2 的 accountId / ss58 / childMiniSecret 逐字节钉死。
-//
-// 向量基于固定 dev 助记词（2026-07-27 model B 落定）。
+// 用公开黄金向量验证助记词密码和各账户硬派生结果。
+
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';

@@ -1,3 +1,5 @@
+// 展示登录请求，确认后为指定账户签名并显示响应二维码。
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';

@@ -1,3 +1,5 @@
+// 定义固定账户码的账户标识载荷及解析。
+
 import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/generated/qr_bodies.g.dart';
 

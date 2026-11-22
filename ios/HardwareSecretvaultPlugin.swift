@@ -1,3 +1,5 @@
+// 以Secure Enclave和生物识别实现绑定AAD的钱包机密加解密。
+
 import CryptoKit
 import Flutter
 import LocalAuthentication

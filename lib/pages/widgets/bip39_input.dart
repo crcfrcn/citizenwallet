@@ -1,3 +1,5 @@
+// 提供带BIP39单词补全和候选选择的助记词输入组件。
+
 import 'package:bip39_mnemonic/bip39_mnemonic.dart' as bip39m;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

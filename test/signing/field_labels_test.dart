@@ -1,3 +1,5 @@
+// 验证签名动作和审阅字段的中文标签及账户格式展示。
+
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';

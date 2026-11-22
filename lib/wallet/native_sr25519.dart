@@ -1,3 +1,5 @@
+// 通过FFI调用本仓sr25519派生、签名和验签原语。
+
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';

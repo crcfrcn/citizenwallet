@@ -1,3 +1,6 @@
+// 验证离线签名页面的中文审阅、可签状态和拒绝状态。
+
+import 'package:citizenwallet/signing/chain_constants.dart';
 // 离线签名页 widget 测试(既有基线修复:runtime 升级哈希签的绿 banner 与明细
 // 不再自相矛盾)。normal + decoded==null 是 runtime 升级哈希签唯一产生的组合,
 // 旧代码在明细里错误地走了“拒绝签名”分支。
@@ -237,7 +240,7 @@ void main() {
       (index) => (expiresAt >> (index * 8)) & 0xff,
     );
     final authorizationTemplate = <int>[
-      ...List<int>.filled(32, 0x44),
+      ...List<int>.generate(32, (index) => int.parse(ChainConstants.genesisHash.substring(2 + index * 2, 4 + index * 2), radix: 16)),
       cid.length << 2,
       ...cid.codeUnits,
       ...List<int>.filled(32, 0),
@@ -265,6 +268,11 @@ void main() {
     );
     await ScreenshotGuard.waitForIdleForTest();
     await tester.pump();
+
+    expect(find.text('身份CID号'), findsOneWidget);
+    expect(find.text('CN220-CTZN2-198805200'), findsOneWidget);
+    expect(find.text(cid), findsNothing);
+    expect(request.body.payloadBytes, authorizationTemplate);
 
     // 核心断言:渲染过程不抛异常(修复前此处 FormatException 使整页红屏)。
     expect(tester.takeException(), isNull);

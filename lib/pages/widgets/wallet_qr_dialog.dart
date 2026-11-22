@@ -1,3 +1,5 @@
+// 统一构造并展示固定账户码，保证钱包各入口使用相同载荷。
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';

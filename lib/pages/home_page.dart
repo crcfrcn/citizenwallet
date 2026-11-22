@@ -1,3 +1,5 @@
+// 展示钱包列表并提供创建、导入及限定钱包范围的扫码入口。
+
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 

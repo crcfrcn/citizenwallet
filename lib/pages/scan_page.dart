@@ -1,3 +1,5 @@
+// 扫描相机或相册二维码，仅接受当前钱包所属账户的签名请求。
+
 import '../wallet/native_mldsa.dart';
 import 'dart:async';
 
@@ -200,7 +202,7 @@ class _ScanPageState extends State<ScanPage> {
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                '选择要绑定到该 CID 的账户',
+                '选择要绑定到该身份CID号的账户',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),

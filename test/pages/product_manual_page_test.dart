@@ -1,3 +1,5 @@
+// 验证产品手册入口、密钥关系展示及真实安装包版本呈现。
+
 import 'package:citizenwallet/pages/app_theme.dart';
 import 'package:citizenwallet/pages/product_manual_page.dart';
 import 'package:citizenwallet/pages/settings_page.dart';

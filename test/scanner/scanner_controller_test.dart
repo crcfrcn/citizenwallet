@@ -1,3 +1,5 @@
+// 验证扫码单次门控、图片识别、错误转发及生命周期释放。
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/scanner/scanner.dart';

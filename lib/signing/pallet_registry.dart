@@ -1,3 +1,5 @@
+// 登记离线交易解码所需的链上pallet与call索引。
+
 /// 链上 pallet / call 索引注册表。
 ///
 /// 索引由 runtime 的 `construct_runtime!` 宏中声明顺序决定。
@@ -15,6 +17,7 @@
 ///
 /// 手动执行重试/取消统一走 `VotingEngine::retry_passed_proposal`(9.4) 与
 /// `VotingEngine::cancel_passed_proposal`(9.5),业务 pallet 不承载 wrapper extrinsic。
+
 class PalletRegistry {
   const PalletRegistry._();
 
@@ -130,6 +133,7 @@ class PalletRegistry {
   static const int updateInstitutionInfoCall = 6;
   static const int addInstitutionAccountCall = 7;
   static const int proposeInstitutionGovernanceCall = 8;
+  static const int rotateInstitutionAdminWalletCall = 10;
   static const int registerInstitutionAdminsCall = 9;
 
   // ---- PersonalManage (7) · 个人多签生命周期 ----

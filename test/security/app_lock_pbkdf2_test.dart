@@ -1,3 +1,5 @@
+// 以标准向量核对PBKDF2-HMAC-SHA256的迭代和输出长度。
+
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';

@@ -1,3 +1,5 @@
+// 验证硬件金库AAD绑定、字节所有权、清零及原生错误传递。
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/security/hardware_secretvault.dart';
