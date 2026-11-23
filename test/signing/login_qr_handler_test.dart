@@ -11,7 +11,7 @@ String _loginRaw(String id, {int? expiresAt}) {
   return QrEnvelope<SignRequestBody>(
     kind: QrKind.signRequest,
     id: id,
-    expiresAt: expiresAt ?? now + 60,
+    expiresAt: expiresAt ?? now + maxQrRequestLifetimeSeconds,
     body: SignRequestBody.fromHex(
       action: QrActions.login,
       signerPublicKeyHex: '0x${'ab' * 32}',
@@ -21,6 +21,15 @@ String _loginRaw(String id, {int? expiresAt}) {
 }
 
 void main() {
+  test('所有临时签名共用300秒上限及过期边界', () {
+    const now = 1800000000;
+    expect(maxQrRequestLifetimeSeconds, 300);
+    expect(isQrRequestExpiryValid(now + 300, now), true);
+    expect(isQrRequestExpiryValid(now + 301, now), false);
+    expect(isQrRequestExpiryValid(now, now), false);
+    expect(isQrRequestExpiryValid(now - 1, now), false);
+  });
+
   group('parseLoginSignRequest 请求 id 校验', () {
     test('合法 id 通过并回传', () {
       final env = parseLoginSignRequest(_loginRaw('offline-req-test-0001'));

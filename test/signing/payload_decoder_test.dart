@@ -333,23 +333,38 @@ void main() {
   Uint8List withSigningTail(List<int> callData, {int nonce = 1, int tip = 0}) =>
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
 
-
   test('注册局钱包增删改独立审阅，拒绝混合人员配置和截断', () {
-    final fixture=(jsonDecode(File('test/signing/fixtures/role_permission.json').readAsStringSync()) as Map<String,dynamic>)['registry_wallets'] as Map<String,dynamic>;
-    final raw=_institutionBytes(fixture['call_hex'] as String);
-    for(final pallet in [30,31]) {
-      raw[0]=pallet;
-      final decoded=PayloadDecoder.decode(_institutionHex(withSigningTail(raw)));
-      expect(decoded,isNotNull);expect(decoded!.fields['governance_detail'],contains('更换钱包'));
-      expect(decoded.fields['governance_detail'],contains('原版本：7'));
-      expect(decoded.fields['actor_role_code'],fixture['actor_role_code']);
-      expect(decoded.fields['initial_threshold'],'沿用现有机构阈值');
-      expect(PayloadDecoder.decode(_institutionHex(raw)),isNull);
-      for(final end in [raw.length-1,raw.length-33]) {expect(PayloadDecoder.decode(_institutionHex(withSigningTail(raw.sublist(0,end)))),isNull);}
-      final withThreshold=[...raw.sublist(0,raw.length-1),1,2,0,0,0];
-      expect(PayloadDecoder.decode(_institutionHex(withSigningTail(withThreshold))),isNull);
-      final governance=[...raw];governance[1]=8;
-      expect(PayloadDecoder.decode(_institutionHex(withSigningTail(governance))),isNull);
+    final fixture = (jsonDecode(
+            File('test/signing/fixtures/role_permission.json')
+                .readAsStringSync())
+        as Map<String, dynamic>)['registry_wallets'] as Map<String, dynamic>;
+    final raw = _institutionBytes(fixture['call_hex'] as String);
+    for (final pallet in [30, 31]) {
+      raw[0] = pallet;
+      final decoded =
+          PayloadDecoder.decode(_institutionHex(withSigningTail(raw)));
+      expect(decoded, isNotNull);
+      expect(decoded!.fields['governance_detail'], contains('更换钱包'));
+      expect(decoded.fields['governance_detail'], contains('原版本：7'));
+      expect(decoded.fields['actor_role_code'], fixture['actor_role_code']);
+      expect(decoded.fields['initial_threshold'], '沿用现有机构阈值');
+      expect(PayloadDecoder.decode(_institutionHex(raw)), isNull);
+      for (final end in [raw.length - 1, raw.length - 33]) {
+        expect(
+            PayloadDecoder.decode(
+                _institutionHex(withSigningTail(raw.sublist(0, end)))),
+            isNull);
+      }
+      final withThreshold = [...raw.sublist(0, raw.length - 1), 1, 2, 0, 0, 0];
+      expect(
+          PayloadDecoder.decode(
+              _institutionHex(withSigningTail(withThreshold))),
+          isNull);
+      final governance = [...raw];
+      governance[1] = 8;
+      expect(
+          PayloadDecoder.decode(_institutionHex(withSigningTail(governance))),
+          isNull);
     }
   });
 
@@ -3274,22 +3289,7 @@ void main() {
       );
 
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
-      expect(decoded, isNotNull);
-      expect(decoded!.action, 'register_private_institution_admins');
-      expect(decoded.fields['cid_number'], cidNumber);
-      expect(decoded.fields['admins_len'], '2');
-      expect(
-        decoded.reviewFields['admins'],
-        contains(
-          '张三 / CN220-CTZN2-198805200-2026'
-          '(${ss58FromBytes(List<int>.filled(32, 0x31))})',
-        ),
-      );
-      expect(decoded.fields['actor_cid_number'], registryActorCid);
-      expect(
-        decoded.fields['fee_payer_description'],
-        '$registryActorCid 的链上费用账户',
-      );
+      expect(decoded, isNull, reason: '完整名单登记动作0已停用');
     });
 
     test('decodes register_public_institution_admins 公民资料允许暂空', () {
@@ -3308,11 +3308,7 @@ void main() {
       );
 
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
-      expect(decoded, isNotNull);
-      expect(decoded!.action, 'register_public_institution_admins');
-      expect(decoded.fields['admins_len'], '1');
-      expect(decoded.fields['admins'], contains('"cid_number":""'));
-      expect(decoded.reviewFields['admins'], contains('资料待完善'));
+      expect(decoded, isNull, reason: '完整名单登记动作0已停用');
       // 与OnChina真实RuntimeCall解码金标逐字节一致。
       expect(
         hexOf(payload),
@@ -3333,7 +3329,7 @@ void main() {
       int termStart = 0,
       int termEnd = 0,
       int assignedAccount = 0x31,
-      bool roleOnly = false,
+      bool roleOnly = true,
     }) {
       final target = <int>[
         ...List<int>.filled(32, assignedAccount),
@@ -3396,7 +3392,7 @@ void main() {
         expect(decoded, isNotNull);
         expect(decoded!.fields['expected_state_hash'], '0x${'ab' * 32}');
         expect(decoded.fields['initial_threshold'], '2');
-        expect(decoded.fields['admins_len'], '2');
+        expect(decoded.fields.containsKey('admins'), isFalse);
         expect(decoded.reviewFields['governance_detail'], contains('登记办理岗'));
         expect(
           decoded.reviewFields['governance_detail'],
@@ -3404,7 +3400,7 @@ void main() {
         );
         expect(decoded.reviewFields['governance_detail'], contains('任期0—0'));
         expect(decoded.reviewFields['governance_detail'], contains('本次登记生成引用'));
-        expect(decoded.summary, contains('完整名册'));
+        expect(decoded.summary, contains('岗位任职'));
       }
     });
 
@@ -3424,9 +3420,7 @@ void main() {
       final decoded = PayloadDecoder.decode(
         hexOf(withSigningTail(Uint8List.fromList(call))),
       );
-      expect(decoded, isNotNull);
-      expect(decoded!.fields['initial_threshold'], 'none');
-      expect(decoded.fields['admins_len'], '2');
+      expect(decoded, isNull, reason: '组合动作2已停用');
     });
 
     test('后续登记保留二进制来源，明确不重置机构阈值', () {
@@ -3469,7 +3463,7 @@ void main() {
         registrationCall(reference: [1]),
         registrationCall(source: 6),
         registrationCall(legalChange: true),
-        registrationCall(roleOnly: true),
+        registrationCall(roleOnly: false),
         registrationCall(mutation: 1),
         registrationCall(permissionOperation: 2),
         registrationCall(status: 1),
@@ -3490,8 +3484,11 @@ void main() {
     });
 
     test('岗位人员引用独立于实际钱包名单，冷钱包完整展示而不猜测链上资格', () {
-      final call=registrationCall(assignedAccount:0x77);
-      expect(PayloadDecoder.decode(hexOf(withSigningTail(Uint8List.fromList(call)))),isNotNull);
+      final call = registrationCall(assignedAccount: 0x77);
+      expect(
+          PayloadDecoder.decode(
+              hexOf(withSigningTail(Uint8List.fromList(call)))),
+          isNotNull);
     });
 
     test('登记拒绝旧名册格式、新字段截断和任意尾随字节', () {

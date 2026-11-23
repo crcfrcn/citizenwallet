@@ -1605,6 +1605,7 @@ class PayloadDecoder {
     if (cidRead == null) return null;
     final cidNumber = cidRead.$1;
     offset = cidRead.$2;
+    final governanceVariant = offset < bytes.length ? bytes[offset] : -1;
     final actionRead = _readInstitutionGovernanceAction(bytes, offset);
     if (actionRead == null) return null;
     offset = actionRead.$3;
@@ -1615,19 +1616,22 @@ class PayloadDecoder {
     if (roleRead == null) return null;
     offset = roleRead.$2;
     if (!_hasValidSigningTail(bytes, offset)) return null;
+    final fields = <String, String>{
+      'cid_number': cidNumber,
+      'institution_action_variant': governanceVariant.toString(),
+      'governance_action': actionRead.$1,
+      'governance_detail': actionRead.$2,
+      'actor_cid_number': actorRead.$1,
+      'proposer_role_code': roleRead.$1,
+      'fee_payer_description': _reviewValue('fee_payer_description', {
+        'actor_cid_number': actorRead.$1,
+      }),
+    };
     return DecodedPayload(
       action: action,
       summary: '$entityLabel $cidNumber 发起${actionRead.$1}',
-      fields: {
-        'cid_number': cidNumber,
-        'governance_action': actionRead.$1,
-        'governance_detail': actionRead.$2,
-        'actor_cid_number': actorRead.$1,
-        'proposer_role_code': roleRead.$1,
-        'fee_payer_description': _reviewValue('fee_payer_description', {
-          'actor_cid_number': actorRead.$1,
-        }),
-      },
+      fields: fields,
+      reviewFields: {...fields}..remove('institution_action_variant'),
     );
   }
 
@@ -1645,32 +1649,17 @@ class PayloadDecoder {
     offset = cidRead.$2;
     if (offset >= bytes.length) return null;
     final variant = bytes[offset++];
-    if (variant == 4) return _decodeRegistryWalletOperations(bytes, offset, action: action, cidNumber: cidNumber, entityLabel: entityLabel);
-    if (variant != 0 && variant != 2) return null;
-    final adminsRead = _readAdminPersons(
-      bytes,
-      offset,
-      minCount: 1,
-      maxCount: 1989,
-    );
-    if (adminsRead == null) return null;
-    final admins = adminsRead.$1;
-    offset = adminsRead.$2;
-    var detail = '登记完整管理员名册';
-    var mutations = 0;
-    if (variant == 2) {
-      final roles = _skipRoleGovernance(
-        bytes,
-        offset,
-        registration: true,
-        // 岗位人员引用独立于实际钱包，资格由链上现有规则验证。
-        adminAccounts: null,
-      );
-      if (roles == null) return null;
-      detail = roles.$1;
-      offset = roles.$2;
-      mutations = roles.$3;
+    if (variant == 4) {
+      return _decodeRegistryWalletOperations(bytes, offset,
+          action: action, cidNumber: cidNumber, entityLabel: entityLabel);
     }
+    if (variant != 1) return null;
+    final roles = _skipRoleGovernance(bytes, offset,
+        registration: true, adminAccounts: null);
+    if (roles == null) return null;
+    final detail = roles.$1;
+    offset = roles.$2;
+    final mutations = roles.$3;
     final actorRead = _readCidNumber(bytes, offset);
     if (actorRead == null) return null;
     offset = actorRead.$2;
@@ -1696,9 +1685,8 @@ class PayloadDecoder {
     if (!_hasValidSigningTail(bytes, offset)) return null;
     final fields = <String, String>{
       'cid_number': cidNumber,
-      'admins_len': admins.length.toString(),
-      'admins': _adminMachineValue(admins),
-      'governance_action': mutations > 0 ? '首次登记并初始化岗位' : '登记名册和任职',
+      'institution_action_variant': '1',
+      'governance_action': mutations > 0 ? '首次岗位配置' : '岗位任职配置',
       'governance_detail': detail,
       'actor_cid_number': actorRead.$1,
       'actor_role_code': roleRead.$1,
@@ -1710,48 +1698,86 @@ class PayloadDecoder {
     };
     return DecodedPayload(
       action: action,
-      summary: '注册局登记$entityLabel $cidNumber 的完整名册（${admins.length}人）及岗位任职',
+      summary: '注册局配置$entityLabel $cidNumber 的岗位任职',
       fields: fields,
       reviewFields: {
-        ...fields,
-        'admins': _adminReviewValue(admins),
+        ...({...fields}..remove('institution_action_variant')),
         'initial_threshold': threshold == 'none' ? '沿用现有机构阈值' : threshold,
       },
     );
   }
 
-
   // Registry-only variant4. Personnel, roles and thresholds are absent from this payload.
-  static DecodedPayload? _decodeRegistryWalletOperations(Uint8List bytes, int offset, {required String action, required String cidNumber, required String entityLabel}) {
-    final added=_readAdminPersons(bytes, offset,minCount:0,maxCount:1989);
-    if(added==null)return null;offset=added.$2;
-    final sources=<String>{},targets=added.$1.map((a)=>a.accountId).toSet();
-    final details=<String>['新增钱包：${_adminReviewValue(added.$1)}'];
-    final (removed,size)=_decodeCompactU32(bytes,offset);
-    if(size==0||removed>1989)return null;offset+=size;
-    for(var i=0;i<removed;i++) {
-      if(offset+40>bytes.length)return null;
-      final wallet=_bytesToLowerHex(bytes.sublist(offset,offset+32));
-      if(!sources.add(wallet))return null;
-      details.add('删除钱包：$wallet；原版本：${_readUnsignedU64(bytes,offset+32)}');offset+=40;
+  static DecodedPayload? _decodeRegistryWalletOperations(
+      Uint8List bytes, int offset,
+      {required String action,
+      required String cidNumber,
+      required String entityLabel}) {
+    final added = _readAdminPersons(bytes, offset, minCount: 0, maxCount: 1989);
+    if (added == null) return null;
+    offset = added.$2;
+    final sources = <String>{},
+        targets = added.$1.map((a) => a.accountId).toSet();
+    final details = <String>['新增钱包：${_adminReviewValue(added.$1)}'];
+    final (removed, size) = _decodeCompactU32(bytes, offset);
+    if (size == 0 || removed > 1989) return null;
+    offset += size;
+    for (var i = 0; i < removed; i++) {
+      if (offset + 40 > bytes.length) return null;
+      final wallet = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
+      if (!sources.add(wallet)) return null;
+      details.add('删除钱包：$wallet；原版本：${_readUnsignedU64(bytes, offset + 32)}');
+      offset += 40;
     }
-    final (replaced,prefix)=_decodeCompactU32(bytes,offset);
-    if(prefix==0||replaced>1989||added.$1.length+removed+replaced==0||added.$1.length+removed+replaced>1989)return null;offset+=prefix;
-    for(var i=0;i<replaced;i++) {
-      if(offset+104>bytes.length)return null;
-      final admin=_bytesToLowerHex(bytes.sublist(offset,offset+32));
-      final old=_bytesToLowerHex(bytes.sublist(offset+32,offset+64));
-      final next=_bytesToLowerHex(bytes.sublist(offset+64,offset+96));
-      if(admin!=old||old==next||!sources.add(old)||!targets.add(next))return null;
-      details.add('更换钱包：$old → $next；原版本：${_readUnsignedU64(bytes,offset+96)}');offset+=104;
+    final (replaced, prefix) = _decodeCompactU32(bytes, offset);
+    if (prefix == 0 ||
+        replaced > 1989 ||
+        added.$1.length + removed + replaced == 0 ||
+        added.$1.length + removed + replaced > 1989) {
+      return null;
     }
-    if(sources.any(targets.contains))return null;
-    final actor=_readCidNumber(bytes,offset);if(actor==null)return null;offset=actor.$2;
-    final role=_readRoleCode(bytes,offset);if(role==null)return null;offset=role.$2;
-    if(offset+33>bytes.length)return null;
-    final hash=_bytesToLowerHex(bytes.sublist(offset,offset+32));offset+=32;
-    if(bytes[offset++]!=0||!_hasValidSigningTail(bytes,offset))return null;
-    return DecodedPayload(action:action,summary:'注册局维护$entityLabel $cidNumber 管理员钱包：新增${added.$1.length}、删除$removed、更换$replaced',fields:{'cid_number':cidNumber,'governance_action':'管理员钱包维护','governance_detail':details.join('；'),'actor_cid_number':actor.$1,'actor_role_code':role.$1,'expected_state_hash':hash,'initial_threshold':'沿用现有机构阈值'});
+    offset += prefix;
+    for (var i = 0; i < replaced; i++) {
+      if (offset + 104 > bytes.length) return null;
+      final admin = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
+      final old = _bytesToLowerHex(bytes.sublist(offset + 32, offset + 64));
+      final next = _bytesToLowerHex(bytes.sublist(offset + 64, offset + 96));
+      if (admin != old ||
+          old == next ||
+          !sources.add(old) ||
+          !targets.add(next)) {
+        return null;
+      }
+      details
+          .add('更换钱包：$old → $next；原版本：${_readUnsignedU64(bytes, offset + 96)}');
+      offset += 104;
+    }
+    if (sources.any(targets.contains)) return null;
+    final actor = _readCidNumber(bytes, offset);
+    if (actor == null) return null;
+    offset = actor.$2;
+    final role = _readRoleCode(bytes, offset);
+    if (role == null) return null;
+    offset = role.$2;
+    if (offset + 33 > bytes.length) return null;
+    final hash = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
+    offset += 32;
+    if (bytes[offset++] != 0 || !_hasValidSigningTail(bytes, offset)) {
+      return null;
+    }
+    return DecodedPayload(
+        action: action,
+        summary:
+            '注册局维护$entityLabel $cidNumber 管理员钱包：新增${added.$1.length}、删除$removed、更换$replaced',
+        fields: {
+          'cid_number': cidNumber,
+          'governance_action': '管理员钱包维护',
+          'governance_detail': details.join('；'),
+          'actor_cid_number': actor.$1,
+          'actor_role_code': role.$1,
+          'expected_state_hash': hash,
+          'initial_threshold': '沿用现有机构阈值'
+        });
   }
 
   // ResolutionIssuance(8) / propose_issuance(0)

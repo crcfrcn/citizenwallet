@@ -55,7 +55,7 @@ SignRequestEnvelope _buildTestRequest({
   return QrEnvelope<SignRequestBody>(
     kind: QrKind.signRequest,
     id: requestId,
-    expiresAt: expiresAt ?? now + 90,
+    expiresAt: expiresAt ?? now + maxQrRequestLifetimeSeconds,
     body: SignRequestBody.fromHex(
       action: action,
       signerPublicKeyHex: signerPublicKey,
@@ -208,7 +208,6 @@ void main() {
         action: QrActions.contactsDelete);
     expect(OfflineSignService().verifyPayload(wrong).canSign, isFalse);
   });
-
 
   test('充值签名指定账户须与原文目标相同，未知动作不能冒用', () {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -605,7 +604,7 @@ void main() {
       expect(service.verifyPayload(mismatch).status, SignDecisionStatus.reject);
     });
 
-    test('MLS设备登记复用 0x1C，且只接受载荷账户和签发时间一致的请求', () async {
+    test('MLS设备登记统一300秒，保留账户及精确过期校验', () async {
       const cid = 'CN220-CTZN2-198805200-2026';
       final issuedAtMillis = DateTime.now().millisecondsSinceEpoch;
       final payload = _mlsDeviceBindPayload(
@@ -618,7 +617,7 @@ void main() {
         signerPublicKey: signingAccount.accountId,
         payloadHex: '0x${_toHex(payload)}',
         action: QrActions.mlsDeviceBind,
-        expiresAt: issuedAtMillis ~/ 1000 + 120,
+        expiresAt: issuedAtMillis ~/ 1000 + 300,
       );
 
       final verification = service.verifyPayload(request);
@@ -638,17 +637,32 @@ void main() {
         isTrue,
       );
 
-      final mismatchedExpiry = _buildTestRequest(
-        requestId: 'offline-mls-device-bind-expiry',
+      for (final seconds in [120, 299, 301]) {
+        final mismatchedExpiry = _buildTestRequest(
+          requestId: 'offline-mls-device-bind-expiry-$seconds',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: '0x${_toHex(payload)}',
+          action: QrActions.mlsDeviceBind,
+          expiresAt: issuedAtMillis ~/ 1000 + seconds,
+        );
+        expect(
+          service.verifyPayload(mismatchedExpiry).status,
+          SignDecisionStatus.reject,
+          reason: '只接受300秒，拒绝$seconds秒',
+        );
+      }
+      final wrongAccount = _buildTestRequest(
+        requestId: 'offline-mls-device-bind-account',
         signerPublicKey: signingAccount.accountId,
-        payloadHex: '0x${_toHex(payload)}',
+        payloadHex: '0x${_toHex(_mlsDeviceBindPayload(
+          cidNumber: cid,
+          accountId: '0x${'11' * 32}',
+          issuedAtMillis: issuedAtMillis,
+        ))}',
         action: QrActions.mlsDeviceBind,
-        expiresAt: request.expiresAt! + 1,
+        expiresAt: issuedAtMillis ~/ 1000 + 300,
       );
-      expect(
-        service.verifyPayload(mismatchedExpiry).status,
-        SignDecisionStatus.reject,
-      );
+      expect(service.verifyPayload(wrongAccount).status, SignDecisionStatus.reject);
     });
 
     test('首次绑定按所选账户签署精确授权并在响应带回 account_id', () async {
@@ -996,6 +1010,50 @@ void main() {
       expect(verification.actionLabel, '发起私权机构治理');
       expect(verification.rejectReason, contains('普通链交易不能只签 32 字节哈希'));
     });
+
+    for (final variant in [0, 2]) {
+      test('旧机构完整名册动作$variant可审阅但必须拒签', () async {
+        const cid = 'GZ018-SFGYR-201206100-2026';
+        final call = <int>[
+          31,
+          8,
+          ..._scaleString(cid),
+          variant,
+          4,
+          ...List<int>.filled(32, 0x11),
+          0,
+          ..._scaleString('F'),
+          ..._scaleString('G'),
+          if (variant == 2) ...[
+            4,
+            1,
+            ..._scaleString('R_GOV'),
+            ..._scaleString('Renamed'),
+            0,
+            0
+          ],
+          ..._scaleString(cid),
+          ..._scaleString('R_GOV'),
+        ];
+        final request = _buildTestRequest(
+          requestId: 'retired-institution-action-$variant',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: signingPayloadHex('0x${_toHex(call)}'),
+          action: QrActions.privateInstitutionGovernance,
+        );
+        final verified = service.verifyPayload(request);
+        expect(
+            verified.decoded?.fields['institution_action_variant'], '$variant');
+        expect(verified.canSign, isFalse);
+        expect(verified.rejectReason, contains('已停用'));
+        await expectLater(
+          service.signParsedRequest(
+              accountId: signingAccount.accountId, request: request),
+          throwsA(isA<OfflineSignException>().having((error) => error.code,
+              'code', OfflineSignErrorCode.contentMismatch)),
+        );
+      });
+    }
 
     // 固定公开合成载荷，验证新动作可签及旧格式/伪装/错误链不能被放行。
     for (final kind in ['CTZN', 'NATP']) {
@@ -1361,7 +1419,9 @@ class _FakeWalletManager extends WalletManager {
     if (accountId != account.accountId) {
       throw const WalletAuthException('未找到指定账户');
     }
-    final message = transactionReview == null ? payload : NativeMldsa.reviewMessage(_hexToBytes(accountId), transactionReview);
+    final message = transactionReview == null
+        ? payload
+        : NativeMldsa.reviewMessage(_hexToBytes(accountId), transactionReview);
     return NativeSr25519.sign(_hexToBytes(_miniSecretHex!), message);
   }
 }
@@ -1369,8 +1429,10 @@ class _FakeWalletManager extends WalletManager {
 // 使用同一公开核心核对链交易摘要，业务域签名与hash-only升级请求保持原字节。
 Uint8List _messageForRequest(SignRequestEnvelope request) {
   final body = request.body;
-  if (QrActions.isChainAction(body.action) && !QrActions.isRuntimeHashOnly(body.action)) {
-    return NativeMldsa.reviewMessage(_hexToBytes(body.signerPublicKeyHex), body.payloadBytes);
+  if (QrActions.isChainAction(body.action) &&
+      !QrActions.isRuntimeHashOnly(body.action)) {
+    return NativeMldsa.reviewMessage(
+        _hexToBytes(body.signerPublicKeyHex), body.payloadBytes);
   }
   return QrSigner.signingBytesFor(body);
 }

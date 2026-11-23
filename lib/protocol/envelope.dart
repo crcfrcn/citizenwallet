@@ -9,8 +9,8 @@ import 'package:citizenwallet/protocol/bodies/sign_response_body.dart';
 import 'package:citizenwallet/protocol/bodies/user_contact_body.dart';
 import 'package:citizenwallet/protocol/bodies/account_id_code_body.dart';
 
-/// 公民钱包接受的临时签名码最长有效期；限制异常长的防重放记录占用。
-const int maxQrRequestLifetimeSeconds = 24 * 60 * 60;
+/// 临时签名请求统一使用300秒上限，供登录、离线签名和MLS绑定共用。
+const int maxQrRequestLifetimeSeconds = 300;
 
 bool isQrRequestExpiryValid(int expiresAt, int nowSeconds) =>
     expiresAt > nowSeconds &&

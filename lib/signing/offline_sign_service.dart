@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'chain_constants.dart';
 import '../protocol/qr_protocols.dart';
+import '../protocol/envelope.dart';
 import '../storage/wallet_isar.dart';
 import '../wallet/wallet_manager.dart';
 import 'action_labels.dart';
@@ -167,6 +168,14 @@ class OfflineSignService {
       expectedAction: QrActions.actionKeyForCode(body.action),
     );
 
+    if (decoded != null &&
+        ['0', '2'].contains(decoded.fields['institution_action_variant'])) {
+      return OfflineSignVerification(
+          decoded: decoded,
+          status: SignDecisionStatus.reject,
+          actionLabel: qrActionLabel,
+          rejectReason: '完整管理员名单动作0、2已停用，拒绝签名');
+    }
     if (body.action == QrActions.topup &&
         decoded != null &&
         decoded.fields['account_id'] != body.signerPublicKeyHex) {
@@ -326,7 +335,8 @@ class OfflineSignService {
       final issuedAtMillis = int.tryParse(decoded.fields['issued_at'] ?? '');
       if (payloadSigner != body.signerPublicKeyHex ||
           issuedAtMillis == null ||
-          request.expiresAt != issuedAtMillis ~/ 1000 + 120) {
+          request.expiresAt !=
+              issuedAtMillis ~/ 1000 + maxQrRequestLifetimeSeconds) {
         return OfflineSignVerification(
           decoded: decoded,
           status: SignDecisionStatus.reject,
