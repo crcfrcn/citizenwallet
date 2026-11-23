@@ -257,10 +257,12 @@ class PayloadDecoder {
       }
       // 该本机授权没有 pallet/call 前缀，必须由 QR_V1 已登记动作限定后再解码，
       // 防止长度恰好相同的链交易被误识别为默认账户切换。
-      if (expectedAction == 'institution_wallet_accept')
+      if (expectedAction == 'institution_wallet_accept') {
         return _decodeInstitutionWalletAcceptance(raw);
-      if (expectedAction == 'contacts_delete')
+      }
+      if (expectedAction == 'contacts_delete') {
         return _decodeContactsDelete(raw);
+      }
       if (expectedAction == 'topup') return _decodeTopup(raw);
       if (expectedAction == 'cid_rebind') {
         return _decodeCidRebind(raw);
@@ -471,8 +473,9 @@ class PayloadDecoder {
           if (cid == null) return null;
           final change =
               _readInstitutionWalletChange(bytes, cid.$2, mode: '本人双签');
-          if (change == null || !_hasValidSigningTail(bytes, change.$2))
+          if (change == null || !_hasValidSigningTail(bytes, change.$2)) {
             return null;
+          }
           return DecodedPayload(
               action: isPublic
                   ? 'rotate_public_institution_admin_wallet'
@@ -1642,6 +1645,7 @@ class PayloadDecoder {
     offset = cidRead.$2;
     if (offset >= bytes.length) return null;
     final variant = bytes[offset++];
+    if (variant == 4) return _decodeRegistryWalletOperations(bytes, offset, action: action, cidNumber: cidNumber, entityLabel: entityLabel);
     if (variant != 0 && variant != 2) return null;
     final adminsRead = _readAdminPersons(
       bytes,
@@ -1659,7 +1663,8 @@ class PayloadDecoder {
         bytes,
         offset,
         registration: true,
-        adminAccounts: admins.map((a) => a.accountId).toSet(),
+        // 岗位人员引用独立于实际钱包，资格由链上现有规则验证。
+        adminAccounts: null,
       );
       if (roles == null) return null;
       detail = roles.$1;
@@ -1713,6 +1718,40 @@ class PayloadDecoder {
         'initial_threshold': threshold == 'none' ? '沿用现有机构阈值' : threshold,
       },
     );
+  }
+
+
+  // Registry-only variant4. Personnel, roles and thresholds are absent from this payload.
+  static DecodedPayload? _decodeRegistryWalletOperations(Uint8List bytes, int offset, {required String action, required String cidNumber, required String entityLabel}) {
+    final added=_readAdminPersons(bytes, offset,minCount:0,maxCount:1989);
+    if(added==null)return null;offset=added.$2;
+    final sources=<String>{},targets=added.$1.map((a)=>a.accountId).toSet();
+    final details=<String>['新增钱包：${_adminReviewValue(added.$1)}'];
+    final (removed,size)=_decodeCompactU32(bytes,offset);
+    if(size==0||removed>1989)return null;offset+=size;
+    for(var i=0;i<removed;i++) {
+      if(offset+40>bytes.length)return null;
+      final wallet=_bytesToLowerHex(bytes.sublist(offset,offset+32));
+      if(!sources.add(wallet))return null;
+      details.add('删除钱包：$wallet；原版本：${_readUnsignedU64(bytes,offset+32)}');offset+=40;
+    }
+    final (replaced,prefix)=_decodeCompactU32(bytes,offset);
+    if(prefix==0||replaced>1989||added.$1.length+removed+replaced==0||added.$1.length+removed+replaced>1989)return null;offset+=prefix;
+    for(var i=0;i<replaced;i++) {
+      if(offset+104>bytes.length)return null;
+      final admin=_bytesToLowerHex(bytes.sublist(offset,offset+32));
+      final old=_bytesToLowerHex(bytes.sublist(offset+32,offset+64));
+      final next=_bytesToLowerHex(bytes.sublist(offset+64,offset+96));
+      if(admin!=old||old==next||!sources.add(old)||!targets.add(next))return null;
+      details.add('更换钱包：$old → $next；原版本：${_readUnsignedU64(bytes,offset+96)}');offset+=104;
+    }
+    if(sources.any(targets.contains))return null;
+    final actor=_readCidNumber(bytes,offset);if(actor==null)return null;offset=actor.$2;
+    final role=_readRoleCode(bytes,offset);if(role==null)return null;offset=role.$2;
+    if(offset+33>bytes.length)return null;
+    final hash=_bytesToLowerHex(bytes.sublist(offset,offset+32));offset+=32;
+    if(bytes[offset++]!=0||!_hasValidSigningTail(bytes,offset))return null;
+    return DecodedPayload(action:action,summary:'注册局维护$entityLabel $cidNumber 管理员钱包：新增${added.$1.length}、删除$removed、更换$replaced',fields:{'cid_number':cidNumber,'governance_action':'管理员钱包维护','governance_detail':details.join('；'),'actor_cid_number':actor.$1,'actor_role_code':role.$1,'expected_state_hash':hash,'initial_threshold':'沿用现有机构阈值'});
   }
 
   // ResolutionIssuance(8) / propose_issuance(0)
@@ -4667,7 +4706,9 @@ class PayloadDecoder {
     if (prefixLen == 0 ||
         (proofLen != 64 && proofLen != 5261) ||
         expiresAt <= 0 ||
-        offset + 112 + prefixLen + proofLen > bytes.length) return null;
+        offset + 112 + prefixLen + proofLen > bytes.length) {
+      return null;
+    }
     return (
       {
         'admin_account_id':
@@ -4693,7 +4734,7 @@ class PayloadDecoder {
       if (change == null) return null;
       final detail = change.$1.entries
           .map((e) => '${{
-                'admin_account_id': '管理员身份锚点',
+                'admin_account_id': '原管理员钱包',
                 'old_wallet_account_id': '原钱包',
                 'new_wallet_account_id': '新钱包',
                 'wallet_revision': '机构钱包版本',

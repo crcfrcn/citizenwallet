@@ -1,23 +1,5 @@
 // 登记离线交易解码所需的链上pallet与call索引。
 
-/// 链上 pallet / call 索引注册表。
-///
-/// 索引由 runtime 的 `construct_runtime!` 宏中声明顺序决定。
-/// 链升级调整 pallet 顺序后，需同步更新此文件中的常量。
-///
-/// 防误签靠两色严格模式:decoder 解析失败 / QR action 与 payload 解码动作不一致
-/// 直接红色拒签。
-///
-/// 投票引擎统一入口:
-/// - 业务 pallet 不承载投票，机构岗位选民/个人多签管理员走 `InternalVote::cast`(20.0)
-/// - 联合投票内部投票阶段走 `JointVote::cast_admin`(21.0),
-///   联合公投阶段走 `JointVote::cast_referendum`(21.1)
-/// - 引擎核心 `VotingEngine` (9) 仅承载 `finalize_proposal`(9.3) /
-///   `retry_passed_proposal`(9.4) / `cancel_passed_proposal`(9.5)。
-///
-/// 手动执行重试/取消统一走 `VotingEngine::retry_passed_proposal`(9.4) 与
-/// `VotingEngine::cancel_passed_proposal`(9.5),业务 pallet 不承载 wrapper extrinsic。
-
 class PalletRegistry {
   const PalletRegistry._();
 

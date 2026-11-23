@@ -1,9 +1,5 @@
 // 定义扫码设备及生命周期错误的分类和统一异常。
 
-/// 扫码设备层错误分类。
-///
-/// 这里只描述设备和生命周期失败；“二维码码型不符合当前业务”属于产品页面职责。
-
 enum ScannerFailureKind {
   permissionDenied,
   cameraUnavailable,

@@ -333,6 +333,26 @@ void main() {
   Uint8List withSigningTail(List<int> callData, {int nonce = 1, int tip = 0}) =>
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
 
+
+  test('注册局钱包增删改独立审阅，拒绝混合人员配置和截断', () {
+    final fixture=(jsonDecode(File('test/signing/fixtures/role_permission.json').readAsStringSync()) as Map<String,dynamic>)['registry_wallets'] as Map<String,dynamic>;
+    final raw=_institutionBytes(fixture['call_hex'] as String);
+    for(final pallet in [30,31]) {
+      raw[0]=pallet;
+      final decoded=PayloadDecoder.decode(_institutionHex(withSigningTail(raw)));
+      expect(decoded,isNotNull);expect(decoded!.fields['governance_detail'],contains('更换钱包'));
+      expect(decoded.fields['governance_detail'],contains('原版本：7'));
+      expect(decoded.fields['actor_role_code'],fixture['actor_role_code']);
+      expect(decoded.fields['initial_threshold'],'沿用现有机构阈值');
+      expect(PayloadDecoder.decode(_institutionHex(raw)),isNull);
+      for(final end in [raw.length-1,raw.length-33]) {expect(PayloadDecoder.decode(_institutionHex(withSigningTail(raw.sublist(0,end)))),isNull);}
+      final withThreshold=[...raw.sublist(0,raw.length-1),1,2,0,0,0];
+      expect(PayloadDecoder.decode(_institutionHex(withSigningTail(withThreshold))),isNull);
+      final governance=[...raw];governance[1]=8;
+      expect(PayloadDecoder.decode(_institutionHex(withSigningTail(governance))),isNull);
+    }
+  });
+
   group('机构钱包更换与个人CID独立', () {
     final fixture = (jsonDecode(
             File('test/signing/fixtures/role_permission.json')
@@ -3454,7 +3474,6 @@ void main() {
         registrationCall(permissionOperation: 2),
         registrationCall(status: 1),
         registrationCall(termStart: 1),
-        registrationCall(assignedAccount: 0x77),
         registrationCall(threshold: null),
         registrationCall(threshold: 1),
         registrationCall(initial: false, threshold: 2),
@@ -3468,6 +3487,11 @@ void main() {
           isNull,
         );
       }
+    });
+
+    test('岗位人员引用独立于实际钱包名单，冷钱包完整展示而不猜测链上资格', () {
+      final call=registrationCall(assignedAccount:0x77);
+      expect(PayloadDecoder.decode(hexOf(withSigningTail(Uint8List.fromList(call)))),isNotNull);
     });
 
     test('登记拒绝旧名册格式、新字段截断和任意尾随字节', () {
