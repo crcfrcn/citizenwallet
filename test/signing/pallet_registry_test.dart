@@ -18,8 +18,7 @@ void main() {
         PalletRegistry.votingEnginePallet,
         PalletRegistry.runtimeUpgradePallet,
         PalletRegistry.resolutionDestroyPallet,
-        PalletRegistry.personalManagePallet,
-        PalletRegistry.personalAdminsPallet,
+        PalletRegistry.personalPallet,
         PalletRegistry.grandpaKeyChangePallet,
         PalletRegistry.resolutionIssuancePallet,
         PalletRegistry.offchainTransactionPallet,
@@ -29,7 +28,10 @@ void main() {
         PalletRegistry.addressRegistryPallet,
         PalletRegistry.squarePostPallet,
       };
-      expect(pallets.length, 17);
+      // 个人生命周期与成员治理合并为同一个Personal(7)，原29不再登记。
+      expect(pallets.length, 16);
+      expect(pallets, contains(7));
+      expect(pallets, isNot(contains(29)));
     });
 
     test('投票引擎 sub-pallet call_index', () {
@@ -63,8 +65,10 @@ void main() {
       expect(PalletRegistry.proposeSweepCall, 2);
 
       // 机构管理员由 entity 任职结果管理；只有个人多签保留管理员集合变更调用。
-      expect(PalletRegistry.isPersonalAdminSetChangeCall(29, 0), isTrue);
-      expect(PalletRegistry.isPersonalAdminSetChangeCall(7, 3), isFalse);
+      expect(PalletRegistry.isPersonalAdminSetChangeCall(7, 3), isTrue);
+      expect(PalletRegistry.isPersonalAdminSetChangeCall(29, 0), isFalse);
+      expect(PalletRegistry.isPersonalAdminSetChangeCall(7, 2), isFalse);
+      expect(PalletRegistry.isPersonalAdminSetChangeCall(7, 4), isFalse);
 
       // PublicManage(30) / PrivateManage(31):机构登记管理。
       expect(PalletRegistry.publicManagePallet, 30);
@@ -75,12 +79,11 @@ void main() {
       expect(PalletRegistry.proposeInstitutionGovernanceCall, 8);
       expect(PalletRegistry.registerInstitutionAdminsCall, 9);
 
-      // PersonalManage(7):个人多签生命周期;PersonalAdmins(29):管理员集合变更。
-      expect(PalletRegistry.personalManagePallet, 7);
+      // Personal(7):个人生命周期与成员变更；2及原29不复用。
+      expect(PalletRegistry.personalPallet, 7);
       expect(PalletRegistry.proposeCreatePersonalCall, 0);
       expect(PalletRegistry.proposeClosePersonalCall, 1);
-      expect(PalletRegistry.personalAdminsPallet, 29);
-      expect(PalletRegistry.proposePersonalAdminSetChangeCall, 0);
+      expect(PalletRegistry.proposePersonalAdminSetChangeCall, 3);
     });
 
     test('CitizenIdentity(10) 身份注册 + 注册局占号/吊销 call_index', () {

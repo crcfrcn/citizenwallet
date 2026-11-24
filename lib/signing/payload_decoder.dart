@@ -507,10 +507,10 @@ class PayloadDecoder {
         }
       }
 
-      // ── PersonalManage(7) ──
+      // ── Personal(7) ──
       // 个人多签生命周期 pallet,MODULE_TAG = b"per-mgmt"。
       // ACTION enum 独立(ACTION_CREATE=0/ACTION_CLOSE=1),与实体生命周期模块互不干扰。
-      if (palletIndex == PalletRegistry.personalManagePallet) {
+      if (palletIndex == PalletRegistry.personalPallet) {
         if (callIndex == PalletRegistry.proposeCreatePersonalCall) {
           return _decodeProposeCreatePersonal(bytes);
         }
@@ -523,8 +523,8 @@ class PayloadDecoder {
         }
       }
 
-      // ── PersonalAdmins(29) ──
-      // 个人多签管理员集合变更独立 pallet,propose_admin_set_change(call_index=0)。
+      // ── Personal(7) ──
+      // 个人成员变更归同一pallet，propose_admin_set_change(call_index=3)。
       if (PalletRegistry.isPersonalAdminSetChangeCall(palletIndex, callIndex)) {
         return _decodeProposeAdminSetChange(bytes);
       }
@@ -2179,7 +2179,7 @@ class PayloadDecoder {
     return '${padded.substring(0, split)}.${padded.substring(split)}';
   }
 
-  // PersonalManage(7) / propose_create(0)
+  // Personal(7) / propose_create(0)
   // 格式：[7][0][BoundedVec account_name][BoundedVec<Admin> admins][u32 regular_threshold][u128 amount]
   // 个人多签独立 pallet,MODULE_TAG = b"per-mgmt"。
   // 机构生命周期模块 call=3 留洞不复用。
@@ -2205,6 +2205,7 @@ class PayloadDecoder {
       offset,
       minCount: 2,
       maxCount: 64,
+      personal: true,
     );
     if (adminsRead == null) return null;
     final admins = adminsRead.$1;
@@ -2445,10 +2446,10 @@ class PayloadDecoder {
     );
   }
 
-  // PersonalAdmins(29.0)。PublicAdmins/PrivateAdmins 只供机构生命周期内部调用，
-  // 没有对外管理员变更 extrinsic，禁止把个人账户布局复用于机构 CID。
+  // Personal(7.3)只变更个人成员；机构成员按entity岗位任职合同处理。
+  // 禁止把个人账户布局复用于机构CID。
   // 格式：[pallet][call][institution_code:[u8;4]][account:AccountId32]
-  //       [Compact<N>][admins:N*(account_id+cid_number+family_name+given_name)]
+  //       [Compact<N>][admins:N*(account_id+family_name+given_name)]
   //       [new_threshold:u32_le]
   static DecodedPayload? _decodeProposeAdminSetChange(Uint8List bytes) {
     if (bytes.length < 75) return null;
@@ -2471,6 +2472,7 @@ class PayloadDecoder {
       offset,
       minCount: 2,
       maxCount: 64,
+      personal: true,
     );
     if (adminsRead == null) return null;
     final admins = adminsRead.$1;
@@ -4473,9 +4475,7 @@ class PayloadDecoder {
     return value;
   }
 
-  static int _minimumRegularThreshold(int adminsLen) {
-    return (adminsLen ~/ 2) + 1;
-  }
+  static int _minimumRegularThreshold(int adminsLen) => 1;
 
   /// 个人多签管理员集合变更阈值合法性。
   static bool _validAdminChangeThreshold(
@@ -4485,7 +4485,7 @@ class PayloadDecoder {
   ) {
     return InstitutionCode.isPersonal(code) &&
         adminsLen >= 2 &&
-        threshold > adminsLen ~/ 2 &&
+        threshold > 0 &&
         threshold <= adminsLen;
   }
 
@@ -4494,7 +4494,7 @@ class PayloadDecoder {
     int callIndex,
     String code,
   ) {
-    if (palletIndex == PalletRegistry.personalAdminsPallet) {
+    if (palletIndex == PalletRegistry.personalPallet) {
       return callIndex == PalletRegistry.proposePersonalAdminSetChangeCall &&
           InstitutionCode.isPersonal(code);
     }
@@ -4503,8 +4503,7 @@ class PayloadDecoder {
 
   static String _adminSetChangeActionForPallet(int palletIndex) {
     return switch (palletIndex) {
-      PalletRegistry.personalAdminsPallet =>
-        'propose_personal_admin_set_change',
+      PalletRegistry.personalPallet => 'propose_personal_admin_set_change',
       _ => 'propose_unknown_admin_set_change',
     };
   }
@@ -4588,14 +4587,14 @@ class PayloadDecoder {
 
   /// 严格解码统一的 `Vec<Admin>`。
   ///
-  /// 公权、私权机构和个人多签的 SCALE 顺序都为
-  /// `account_id + cid_number + family_name + given_name`。非空公民 CID 必须具有
-  /// CTZN 结构；字段是否必须非空由所属业务规则决定。重复账户全部拒签。
+  /// 个人成员的SCALE顺序为account_id、family_name、given_name；姓名仅作备注。
+  /// 机构成员仍按所属机构合同读取CID。两类数据均按钱包账户去重。
   static (List<_DecodedAdminPerson>, int)? _readAdminPersons(
     Uint8List bytes,
     int offset, {
     required int minCount,
     required int maxCount,
+    bool personal = false,
   }) {
     final (count, countSize) = _decodeCompactU32(bytes, offset);
     if (countSize == 0 || count < minCount || count > maxCount) return null;
@@ -4610,15 +4609,18 @@ class PayloadDecoder {
       offset += 32;
       final accountHex = _bytesToLowerHex(accountBytes);
       if (!seen.add(accountHex)) return null;
-      final cidRead = _readUtf8Vec(bytes, offset);
-      if (cidRead.$1 == null) return null;
-      final citizenCidNumber = cidRead.$1!;
-      if (utf8.encode(citizenCidNumber).length > 32 ||
-          (citizenCidNumber.isNotEmpty &&
-              !_isStructuredCitizenCid(citizenCidNumber))) {
-        return null;
+      String? citizenCidNumber;
+      if (!personal) {
+        final cidRead = _readUtf8Vec(bytes, offset);
+        if (cidRead.$1 == null) return null;
+        citizenCidNumber = cidRead.$1!;
+        if (utf8.encode(citizenCidNumber).length > 32 ||
+            (citizenCidNumber.isNotEmpty &&
+                !_isStructuredCitizenCid(citizenCidNumber))) {
+          return null;
+        }
+        offset = cidRead.$2;
       }
-      offset = cidRead.$2;
       final familyNameRead = _readAdminName(bytes, offset, allowEmpty: true);
       if (familyNameRead == null) return null;
       offset = familyNameRead.$2;
@@ -4692,7 +4694,7 @@ class PayloadDecoder {
     return (read.$1.length, _adminReviewValue(read.$1), read.$2);
   }
 
-  // SCALE matches adminbase::InstitutionWalletAcceptance; no personal CID account slot is changed.
+  // SCALE遵循entitybase的机构钱包接受证明；此机构合同不用于个人成员。
   static DecodedPayload? _decodeInstitutionWalletAcceptance(Uint8List bytes) {
     if (bytes.length < 32) return null;
     final cid = _readCidNumber(bytes, 32);

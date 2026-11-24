@@ -208,6 +208,14 @@ void main() {
     return [...compactU32(bytes.length), ...bytes];
   }
 
+  List<int> personalMember(
+          List<int> account, String familyName, String givenName) =>
+      [
+        ...account,
+        ...compactVec(familyName),
+        ...compactVec(givenName),
+      ];
+
   List<int> adminPerson(
     List<int> adminAccount,
     String familyName,
@@ -2521,7 +2529,7 @@ void main() {
     test('decodes personal propose_admin_set_change only', () {
       final account = List<int>.generate(32, (i) => 0x80 + i);
       for (final item in [
-        (29, 0, 'PMUL', 2, 2, 'propose_personal_admin_set_change'),
+        (7, 3, 'PMUL', 2, 2, 'propose_personal_admin_set_change'),
       ]) {
         final adminAccounts = List<List<int>>.generate(
           item.$4,
@@ -2534,7 +2542,7 @@ void main() {
           ...account,
           item.$4 << 2, // Compact(admins.length)
           for (var i = 0; i < adminAccounts.length; i++)
-            ...adminPerson(
+            ...personalMember(
               adminAccounts[i],
               i == 0 ? '张' : '管理',
               i == 0 ? '三' : '员',
@@ -2554,13 +2562,11 @@ void main() {
         expect(jsonDecode(decoded.fields['admins']!) as List<dynamic>, [
           {
             'account_id': '0x${hexLower(adminAccounts[0])}',
-            'cid_number': '',
             'family_name': '张',
             'given_name': '三',
           },
           {
             'account_id': '0x${hexLower(adminAccounts[1])}',
-            'cid_number': '',
             'family_name': '管理',
             'given_name': '员',
           },
@@ -2592,13 +2598,13 @@ void main() {
     test('rejects propose_admin_set_change without new_threshold', () {
       final account = List<int>.generate(32, (i) => 0x80 + i);
       final payload = Uint8List.fromList([
-        0x1d,
-        0x00,
+        0x07,
+        0x03,
         ...InstitutionCode.codeBytes('PMUL'),
         ...account,
         0x08,
-        ...adminPerson(List<int>.filled(32, 0x11), '张', '三'),
-        ...adminPerson(List<int>.filled(32, 0x22), '李', '四'),
+        ...personalMember(List<int>.filled(32, 0x11), '张', '三'),
+        ...personalMember(List<int>.filled(32, 0x22), '李', '四'),
       ]);
 
       expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
@@ -2607,13 +2613,13 @@ void main() {
     test('rejects propose_admin_set_change with trailing bytes', () {
       final account = List<int>.generate(32, (i) => 0x80 + i);
       final payload = Uint8List.fromList([
-        0x1d,
-        0x00,
+        0x07,
+        0x03,
         ...InstitutionCode.codeBytes('PMUL'),
         ...account,
         0x08,
-        ...adminPerson(List<int>.filled(32, 0x11), '张', '三'),
-        ...adminPerson(List<int>.filled(32, 0x22), '李', '四'),
+        ...personalMember(List<int>.filled(32, 0x11), '张', '三'),
+        ...personalMember(List<int>.filled(32, 0x22), '李', '四'),
         ...u32Le(2),
         0xff,
       ]);
@@ -2621,27 +2627,34 @@ void main() {
       expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
     });
 
-    test('rejects propose_admin_set_change below majority threshold', () {
+    test('accepts personal admin change threshold one of three', () {
       final account = List<int>.generate(32, (i) => 0x80 + i);
       final payload = Uint8List.fromList([
-        0x1d, 0x00,
+        0x07, 0x03,
         ...InstitutionCode.codeBytes('PMUL'),
         ...account,
         0x0c, // Compact(3)
-        ...adminPerson(List<int>.filled(32, 0x11), '张', '三'),
-        ...adminPerson(List<int>.filled(32, 0x22), '李', '四'),
-        ...adminPerson(List<int>.filled(32, 0x33), '王', '五'),
+        ...personalMember(List<int>.filled(32, 0x11), '张', '三'),
+        ...personalMember(List<int>.filled(32, 0x22), '李', '四'),
+        ...personalMember(List<int>.filled(32, 0x33), '王', '五'),
         ...u32Le(1),
       ]);
 
-      expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
+      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
+      expect(decoded, isNotNull);
+      expect(decoded!.reviewFields['new_threshold'], '1/3');
+      for (final threshold in [0, 4]) {
+        final invalid = Uint8List.fromList(
+            [...payload.take(payload.length - 4), ...u32Le(threshold)]);
+        expect(PayloadDecoder.decode(hexOf(withSigningTail(invalid))), isNull);
+      }
     });
 
     test('rejects propose_admin_set_change legacy pure-account layout', () {
       final account = List<int>.filled(32, 0x80);
       final payload = <int>[
-        0x1d,
-        0x00,
+        0x07,
+        0x03,
         ...InstitutionCode.codeBytes('PMUL'),
         ...account,
         ...compactU32(2),
@@ -2655,8 +2668,8 @@ void main() {
     test('rejects propose_admin_set_change legacy combined-name layout', () {
       final account = List<int>.filled(32, 0x80);
       final payload = <int>[
-        0x1d,
-        0x00,
+        0x07,
+        0x03,
         ...InstitutionCode.codeBytes('PMUL'),
         ...account,
         ...compactU32(2),
@@ -2673,13 +2686,13 @@ void main() {
       final account = List<int>.filled(32, 0x80);
       final duplicate = List<int>.filled(32, 0x11);
       final payload = <int>[
-        0x1d,
-        0x00,
+        0x07,
+        0x03,
         ...InstitutionCode.codeBytes('PMUL'),
         ...account,
         ...compactU32(2),
-        ...adminPerson(duplicate, '张', '三'),
-        ...adminPerson(duplicate, '李', '四'),
+        ...personalMember(duplicate, '张', '三'),
+        ...personalMember(duplicate, '李', '四'),
         ...u32Le(2),
       ];
       expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
@@ -2688,18 +2701,31 @@ void main() {
     test('rejects propose_admin_set_change malformed UTF-8 name', () {
       final account = List<int>.filled(32, 0x80);
       final payload = <int>[
-        0x1d,
-        0x00,
+        0x07,
+        0x03,
         ...InstitutionCode.codeBytes('PMUL'),
         ...account,
         ...compactU32(2),
         ...List<int>.filled(32, 0x11),
-        ...compactVec(''),
         ...compactU32(1),
         0xff,
         ...compactVec('三'),
-        ...adminPerson(List<int>.filled(32, 0x22), '李', '四'),
+        ...personalMember(List<int>.filled(32, 0x22), '李', '四'),
         ...u32Le(2),
+      ];
+      expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
+    });
+
+    test('rejects closed 29.0 with otherwise valid personal members', () {
+      final payload = [
+        0x1d,
+        0x00,
+        ...InstitutionCode.codeBytes('PMUL'),
+        ...List<int>.filled(32, 0x80),
+        ...compactU32(2),
+        ...personalMember(List<int>.filled(32, 0x11), '张', '三'),
+        ...personalMember(List<int>.filled(32, 0x22), '李', '四'),
+        ...u32Le(2)
       ];
       expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
     });
@@ -3110,7 +3136,7 @@ void main() {
 
     test('decodes personal close action as propose_close_personal', () {
       final payload = Uint8List.fromList([
-        0x07, 0x01, // PersonalManage.propose_close
+        0x07, 0x01, // Personal.propose_close
         ...List<int>.filled(32, 0x33),
         ...List<int>.filled(32, 0x44),
       ]);
@@ -3538,9 +3564,9 @@ void main() {
       () {
         final name = utf8.encode('家庭基金');
         final admins = [
-          adminPerson(List<int>.filled(32, 0x11), '张', '三'),
-          adminPerson(List<int>.filled(32, 0x22), '李', '四'),
-          adminPerson(List<int>.filled(32, 0x33), '管理', '员'),
+          personalMember(List<int>.filled(32, 0x11), '张', '三'),
+          personalMember(List<int>.filled(32, 0x22), '李', '四'),
+          personalMember(List<int>.filled(32, 0x33), '管理', '员'),
         ];
         final payload = Uint8List.fromList([
           0x07,
@@ -3571,9 +3597,9 @@ void main() {
     test('rejects propose_create_personal without regular_threshold', () {
       final name = utf8.encode('家庭基金');
       final admins = [
-        adminPerson(List<int>.filled(32, 0x11), '张', '三'),
-        adminPerson(List<int>.filled(32, 0x22), '李', '四'),
-        adminPerson(List<int>.filled(32, 0x33), '王', '五'),
+        personalMember(List<int>.filled(32, 0x11), '张', '三'),
+        personalMember(List<int>.filled(32, 0x22), '李', '四'),
+        personalMember(List<int>.filled(32, 0x33), '王', '五'),
       ];
       final payload = Uint8List.fromList([
         0x07,
@@ -3591,14 +3617,14 @@ void main() {
     });
 
     test(
-      'rejects propose_create_personal regular_threshold below majority',
+      'accepts personal ordinary threshold below majority but rejects zero and overflow',
       () {
         final name = utf8.encode('家庭基金');
         final admins = [
-          adminPerson(List<int>.filled(32, 0x11), '张', '三'),
-          adminPerson(List<int>.filled(32, 0x22), '李', '四'),
-          adminPerson(List<int>.filled(32, 0x33), '王', '五'),
-          adminPerson(List<int>.filled(32, 0x44), '赵', '六'),
+          personalMember(List<int>.filled(32, 0x11), '张', '三'),
+          personalMember(List<int>.filled(32, 0x22), '李', '四'),
+          personalMember(List<int>.filled(32, 0x33), '王', '五'),
+          personalMember(List<int>.filled(32, 0x44), '赵', '六'),
         ];
         final payload = Uint8List.fromList([
           0x07,
@@ -3613,7 +3639,18 @@ void main() {
 
         final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
 
-        expect(decoded, isNull);
+        expect(decoded, isNotNull);
+        expect(decoded!.fields['regular_threshold'], '2/4');
+        expect(decoded.fields['create_threshold'], '4/4');
+        for (final threshold in [0, 5]) {
+          final invalid = Uint8List.fromList([
+            ...payload.take(payload.length - 20),
+            ...u32Le(threshold),
+            ...payload.skip(payload.length - 16)
+          ]);
+          expect(
+              PayloadDecoder.decode(hexOf(withSigningTail(invalid))), isNull);
+        }
       },
     );
 

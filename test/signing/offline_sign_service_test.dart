@@ -662,7 +662,8 @@ void main() {
         action: QrActions.mlsDeviceBind,
         expiresAt: issuedAtMillis ~/ 1000 + 300,
       );
-      expect(service.verifyPayload(wrongAccount).status, SignDecisionStatus.reject);
+      expect(service.verifyPayload(wrongAccount).status,
+          SignDecisionStatus.reject);
     });
 
     test('首次绑定按所选账户签署精确授权并在响应带回 account_id', () async {
@@ -860,7 +861,7 @@ void main() {
       );
     });
 
-    test('链交易拒绝错创世、错交易版本和裸 call data，但不锁 spec_version', () {
+    test('链交易仅接受交易版本6，拒绝5和未知版本，不锁 spec_version', () {
       const callData =
           '0x0400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0100000000000000000000000000000000';
 
@@ -876,14 +877,15 @@ void main() {
           .status;
 
       expect(
+        verify(signingPayloadHex(callData, transactionVersion: 6)),
+        SignDecisionStatus.normal,
+      );
+      expect(
         verify(signingPayloadHex(callData, genesisHash: '0x${'99' * 32}')),
         SignDecisionStatus.reject,
       );
-      // 错版本从唯一声明派生，不维护另一张版本白名单。
-      for (final version in [
-        ChainConstants.transactionVersion - 1,
-        ChainConstants.transactionVersion + 1,
-      ]) {
+      // 按本轮升级目标覆盖上一版本5及未知版本的拒签边界。
+      for (final version in [5, 7, 0xffffffff]) {
         expect(
           verify(signingPayloadHex(callData, transactionVersion: version)),
           SignDecisionStatus.reject,

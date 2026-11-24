@@ -118,20 +118,18 @@ class PalletRegistry {
   static const int rotateInstitutionAdminWalletCall = 10;
   static const int registerInstitutionAdminsCall = 9;
 
-  // ---- PersonalManage (7) · 个人多签生命周期 ----
+  // ---- Personal (7) · 个人多签生命周期与成员治理 ----
   // 个人多签独立 pallet,MODULE_TAG = b"per-mgmt",
   // ACTION enum 独立命名空间(ACTION_CREATE=0/ACTION_CLOSE=1)。
   // propose_create(account_name, admins, regular_threshold, amount):
-  // admins_len 由 admins 长度派生,regular_threshold 由用户输入且必须严格过半。
-  static const int personalManagePallet = 7;
+  // admins_len由名单长度派生，普通阈值允许1..N，创建仍须全员通过。
+  static const int personalPallet = 7;
   static const int proposeCreatePersonalCall = 0;
   static const int proposeClosePersonalCall = 1;
   // call_index 2 永久留洞：个人多签 pending 状态由投票引擎终态回调清理。
 
-  // ---- PersonalAdmins (29) · 个人多签管理员集合变更 ----
-  // 独立 pallet,承载 propose_admin_set_change(call_index=0)。
-  static const int personalAdminsPallet = 29;
-  static const int proposePersonalAdminSetChangeCall = 0;
+  static const int proposePersonalAdminSetChangeCall = 3;
+  // pallet 29 已关闭，不保留个人成员调用入口。
 
   // ---- ResolutionDestroy (13) ----
   // call_index 1 留洞不复用。
@@ -139,7 +137,7 @@ class PalletRegistry {
   static const int proposeDestroyCall = 0;
 
   static bool isPersonalAdminSetChangeCall(int palletIndex, int callIndex) {
-    return palletIndex == personalAdminsPallet &&
+    return palletIndex == personalPallet &&
         callIndex == proposePersonalAdminSetChangeCall;
   }
 
