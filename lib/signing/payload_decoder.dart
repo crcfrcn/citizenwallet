@@ -96,14 +96,13 @@ class DecodedCidAccountAuthorizationTemplate {
   }
 }
 
-/// 管理员人员的钱包端解码结果。
+/// 个人多签成员的钱包端解码结果。
 ///
 /// 字段名与 runtime、CitizenApp 完全一致；账户是唯一授权与去重
 /// 字段，姓、名只在确认页按中文顺序合并显示。
 typedef _DecodedAdminPerson = ({
   Uint8List accountBytes,
   String accountId,
-  String? citizenCidNumber,
   String familyName,
   String givenName,
 });
@@ -134,7 +133,7 @@ class PayloadDecoder {
   ///
   /// 返回 null 表示无法识别或解码失败 → strict 模式下 Reject → 禁止签名。
   // 二进制前缀域:
-  //   ACTIVATE_ADMIN → 前 4 字节 GMB(3B) || 0x18
+  //   ROLE_ACCESS → 前 4 字节 GMB(3B) || 0x18
   //   DECRYPT        → 前 4 字节 GMB(3B) || 0x19
   // 这两个域签的是**原始可解析字节**:冷钱包对整段 payloadHex 直接 sr25519 签名,
   // 本 decoder 仅读 4 字节前缀跳过 + 按偏移取字段展示。与
@@ -142,9 +141,9 @@ class PayloadDecoder {
   // 结构不同(它们不进 SIGN_OP_TAGS,不走 signingMessage)。
   //
   // 四方逐字节锁步(node 构造 / node 验签解析 / 本 decoder 解码 / CitizenApp 构造):
-  //   - citizenchain node: governance/admins_change/activation.rs(build/decode)、
+  //   - citizenchain node: governance/roles/activation.rs(build/decode)、
   //     transaction/.../settlement/admin_unlock.rs(build_challenge_payload)
-  //   - CitizenApp: governance/admins-change/services/admin_activation_service.dart
+  //   - CitizenApp通过SDK的roleAccess/clearingDecrypt唯一编码原语构造。
   // 金标布局: citizenchain/runtime/primitives/tests/fixtures/
   //   binary_prefix_domain_vectors.json(本仓副本 test/signing/fixtures/)。
   //
@@ -160,36 +159,36 @@ class PayloadDecoder {
   /// 机构 CID 固定槽长度，与 primitives::core_const::CID_NUMBER_MAX_BYTES 对齐。
   static const _institutionCidSlotLen = 32;
 
-  /// 对齐 primitives::sign::ACTIVATE_ADMIN_PAYLOAD_LEN。
-  static const _activateAdminPayloadLen =
+  /// 对齐 primitives::sign::ROLE_ACCESS_PAYLOAD_LEN。
+  static const _roleAccessPayloadLen =
       _binaryPrefixLen + _institutionCidSlotLen + 4 + 1 + 32 + 8 + 16;
 
-  /// 对齐 primitives::sign::DECRYPT_ADMIN_PAYLOAD_LEN。
-  static const _decryptAdminPayloadLen =
+  /// 对齐 primitives::sign::CLEARING_DECRYPT_PAYLOAD_LEN。
+  static const _clearingDecryptPayloadLen =
       _binaryPrefixLen + _institutionCidSlotLen + 32 + 8 + 16;
 
-  /// ACTIVATE_ADMIN op_tag(对齐 OP_SIGN_ACTIVATE_ADMIN)。
-  static const _opSignActivateAdmin = 0x18;
+  /// ROLE_ACCESS op_tag(对齐 OP_SIGN_ROLE_ACCESS)。
+  static const _opSignRoleAccess = 0x18;
 
-  /// DECRYPT op_tag(对齐 OP_SIGN_DECRYPT)。
-  static const _opSignDecrypt = 0x19;
+  /// DECRYPT op_tag(对齐 OP_SIGN_CLEARING_DECRYPT)。
+  static const _opSignClearingDecrypt = 0x19;
 
-  /// ACTIVATE_ADMIN 4 字节二进制前缀 GMB || 0x18。
-  static final _activateAdminPrefix = Uint8List.fromList([
+  /// ROLE_ACCESS 4 字节二进制前缀 GMB || 0x18。
+  static final _roleAccessPrefix = Uint8List.fromList([
     ..._gmbPrefix,
-    _opSignActivateAdmin,
+    _opSignRoleAccess,
   ]);
 
   /// DECRYPT 4 字节二进制前缀 GMB || 0x19。
-  static final _decryptPrefix = Uint8List.fromList([
+  static final _clearingDecryptPrefix = Uint8List.fromList([
     ..._gmbPrefix,
-    _opSignDecrypt,
+    _opSignClearingDecrypt,
   ]);
-  // 'onchina_admin_governance' 是链上中国平台管理员 payload 的业务域(JSON
+  // 'onchina_admin_governance' 是链上中国岗位人员确认 payload 的业务域(JSON
   // envelope 的 domain 字段值),只用于**识别与展示**;签名字节另由 qr_signer 走
-  // signing_message(OP_SIGN_ONCHINA_ADMIN=0x20, 整段 JSON UTF-8) 构造。
+  // signing_message(OP_SIGN_ONCHINA_CONFIRM=0x20, 整段 JSON UTF-8) 构造。
   // 2026-08-06 之前这段 JSON 是裸文本直签,域分离只靠本字符串字段 —— 已收敛。
-  static const String _onchinaAdminActionDomain = 'onchina_admin_governance';
+  static const String _onchinaConfirmActionDomain = 'onchina_admin_governance';
 
   static DecodedPayload? _decodeContactsDelete(Uint8List raw) {
     try {
@@ -248,18 +247,15 @@ class PayloadDecoder {
   }
 
   static DecodedPayload? decode(String payloadHex, {String? expectedAction}) {
-    // 先尝试解码非链上交易：管理员激活 / 清算行管理员解密 challenge。
+    // 先尝试解码非链上交易：岗位访问 / 清算解密 challenge。
     try {
       final raw = _hexToBytes(payloadHex);
-      final adminAction = _decodeOnchinaAdminAction(raw);
+      final adminAction = _decodeOnchinaConfirmAction(raw);
       if (adminAction != null) {
         return adminAction;
       }
       // 该本机授权没有 pallet/call 前缀，必须由 QR_V1 已登记动作限定后再解码，
       // 防止长度恰好相同的链交易被误识别为默认账户切换。
-      if (expectedAction == 'institution_wallet_accept') {
-        return _decodeInstitutionWalletAcceptance(raw);
-      }
       if (expectedAction == 'contacts_delete') {
         return _decodeContactsDelete(raw);
       }
@@ -296,15 +292,15 @@ class PayloadDecoder {
         final deployment = _decodeNodeDeployAuthorization(raw);
         if (deployment != null) return deployment;
       }
-      if (raw.length == _activateAdminPayloadLen &&
-          _hasPrefix(raw, _activateAdminPrefix)) {
-        return _decodeActivateAdminAccount(raw);
+      if (raw.length == _roleAccessPayloadLen &&
+          _hasPrefix(raw, _roleAccessPrefix)) {
+        return _decodeRoleAccess(raw);
       }
       // DECRYPT challenge = prefix(4) + cid_number(32) + signer_public_key(32)
       //   + timestamp(8) + nonce(16)，长度由 primitives 单源常量锁定。
-      if (raw.length == _decryptAdminPayloadLen &&
-          _hasPrefix(raw, _decryptPrefix)) {
-        return _decodeDecryptAdmin(raw);
+      if (raw.length == _clearingDecryptPayloadLen &&
+          _hasPrefix(raw, _clearingDecryptPrefix)) {
+        return _decodeClearingDecrypt(raw);
       }
       final citizenIdentity = _decodeCitizenIdentityPayload(raw);
       if (citizenIdentity != null) {
@@ -432,11 +428,11 @@ class PayloadDecoder {
       // SCALE 解析。改走 OfflineSignService.verifyPayload 的"哈希直签例外":
       // 用户在冷钱包屏幕上核对 32 字节哈希后放行。
 
-      // ── PublicManage(30) / PrivateManage(31) ──
+      // ── PublicEntity(30) / PrivateEntity(31) ──
       // 公权机构与私权机构生命周期分别由两个 pallet 承载。
-      if (palletIndex == PalletRegistry.publicManagePallet ||
-          palletIndex == PalletRegistry.privateManagePallet) {
-        final isPublic = palletIndex == PalletRegistry.publicManagePallet;
+      if (palletIndex == PalletRegistry.publicEntityPallet ||
+          palletIndex == PalletRegistry.privateEntityPallet) {
+        final isPublic = palletIndex == PalletRegistry.publicEntityPallet;
         final entityLabel = isPublic ? '公权机构' : '私权机构';
         final closeAction = isPublic
             ? 'propose_close_public_institution'
@@ -468,21 +464,6 @@ class PayloadDecoder {
             entityLabel: entityLabel,
           );
         }
-        if (callIndex == PalletRegistry.rotateInstitutionAdminWalletCall) {
-          final cid = _readCidNumber(bytes, 2);
-          if (cid == null) return null;
-          final change =
-              _readInstitutionWalletChange(bytes, cid.$2, mode: '本人双签');
-          if (change == null || !_hasValidSigningTail(bytes, change.$2)) {
-            return null;
-          }
-          return DecodedPayload(
-              action: isPublic
-                  ? 'rotate_public_institution_admin_wallet'
-                  : 'rotate_private_institution_admin_wallet',
-              summary: '本人更换机构管理员钱包',
-              fields: {'cid_number': cid.$1, ...change.$1});
-        }
         if (callIndex == PalletRegistry.proposeInstitutionGovernanceCall) {
           return _decodeProposeInstitutionGovernance(
             bytes,
@@ -490,19 +471,21 @@ class PayloadDecoder {
                 ? 'propose_public_institution_governance'
                 : 'propose_private_institution_governance',
             entityLabel: entityLabel,
+            isPublic: isPublic,
           );
         }
-        if (callIndex == PalletRegistry.registerInstitutionAdminsCall) {
+        if (callIndex == PalletRegistry.registerInstitutionRolesCall) {
           final registrationAction = isPublic
-              ? 'register_public_institution_admins'
-              : 'register_private_institution_admins';
+              ? 'register_public_institution_roles'
+              : 'register_private_institution_roles';
           if (expectedAction != null && expectedAction != registrationAction) {
             return null;
           }
-          return _decodeRegisterInstitutionAdmins(
+          return _decodeRegisterInstitutionRoles(
             bytes,
             action: registrationAction,
             entityLabel: entityLabel,
+            isPublic: isPublic,
           );
         }
       }
@@ -984,66 +967,79 @@ class PayloadDecoder {
     );
   }
 
-  static DecodedPayload? _decodeOnchinaAdminAction(Uint8List raw) {
+  static DecodedPayload? _decodeOnchinaConfirmAction(Uint8List raw) {
     try {
       final text = utf8.decode(raw);
       final value = jsonDecode(text);
-      if (value is! Map<String, dynamic>) return null;
-      if (value['domain'] != _onchinaAdminActionDomain) return null;
-      if (value['qr_proto'] != 'QR_V1') return null;
+      if (value is! Map<String, dynamic> ||
+          value.length != 12 ||
+          jsonEncode(value) != text ||
+          value['domain'] != _onchinaConfirmActionDomain ||
+          value['qr_proto'] != 'QR_V1') {
+        return null;
+      }
       final actionType = value['action_type'];
-      final actorCidNumber = value['actor_cid_number'];
+      final actorCid = value['actor_cid_number'];
       final province = value['actor_province_name'];
-      final actorPublicKey = value['actor_public_key'];
+      final accountId = value['account_id'];
       final target = value['target'];
       final beforeHash = value['before_hash'];
       final afterHash = value['after_hash'];
+      final actionId = value['action_id'];
+      final requestHash = value['request_hash'];
+      final expiresAt = value['expires_at'];
       if (actionType is! String ||
-          actorCidNumber is! String ||
-          !_isStructuredInstitutionCid(actorCidNumber) ||
+          actionType.isEmpty ||
+          const {'CREATE_ADMIN', 'UPDATE_ADMIN', 'DELETE_ADMIN'}
+              .contains(actionType) ||
+          actorCid is! String ||
+          !_isStructuredInstitutionCid(actorCid) ||
           province is! String ||
-          actorPublicKey is! String ||
-          !_isCanonicalHex32(actorPublicKey) ||
+          accountId is! String ||
+          !_isCanonicalHex32(accountId) ||
           target is! String ||
           beforeHash is! String ||
-          afterHash is! String) {
+          afterHash is! String ||
+          actionId is! String ||
+          actionId.isEmpty ||
+          requestHash is! String ||
+          expiresAt is! int ||
+          expiresAt <= 0) {
         return null;
       }
+      final fields = <String, String>{
+        'action_type': _onchinaConfirmActionLabel(actionType),
+        'actor_cid_number': actorCid,
+        'actor_province_name': province,
+        'account_id': accountId,
+        'target': target,
+        'before_hash': beforeHash,
+        'after_hash': afterHash,
+        'action_id': actionId,
+        'request_hash': requestHash,
+        'expires_at': expiresAt.toString(),
+      };
       return DecodedPayload(
-        action: 'onchina_admin_action',
-        summary: '链上中国平台管理员治理',
-        fields: <String, String>{
-          'action_type': _onchinaAdminActionLabel(actionType),
-          'actor_cid_number': actorCidNumber,
+        action: 'onchina_confirm',
+        summary: '链上中国操作确认',
+        fields: fields,
+        reviewFields: {
+          'action_type': fields['action_type']!,
+          'actor_cid_number': actorCid,
           'actor_province_name': province,
-          'actor_public_key': actorPublicKey,
-          'target': target,
-          'before_hash': beforeHash,
-          'after_hash': afterHash,
-        },
-        reviewFields: <String, String>{
-          'action_type': _onchinaAdminActionLabel(actionType),
-          'actor_cid_number': actorCidNumber,
-          'actor_province_name': province,
-          'actor_public_key': actorPublicKey,
+          'account_id': accountId,
           'target': target,
         },
       );
-    } catch (_) {
+    } on Object {
       return null;
     }
   }
 
-  static String _onchinaAdminActionLabel(String actionType) {
+  static String _onchinaConfirmActionLabel(String actionType) {
     switch (actionType) {
       case 'PASSKEY_REGISTER':
         return '更新 Passkey';
-      case 'CREATE_ADMIN':
-        return '新增管理员';
-      case 'UPDATE_ADMIN':
-        return '编辑管理员';
-      case 'DELETE_ADMIN':
-        return '删除管理员';
       case 'INSTITUTION_CREATE':
         return '创建机构';
       case 'INSTITUTION_UPDATE':
@@ -1190,8 +1186,8 @@ class PayloadDecoder {
   // InternalVote(20) / cast(0)
   // 格式：[0x14][0x00][proposal_id:u128_le][ticket_claim][approve:bool]
   //
-  // 统一入口:所有业务 pallet(admins/resolution_destroy/grandpa_key/
-  // entity_manage/multisig_transfer 五路)的机构岗位选民/个人管理员投票都走 InternalVote::cast(20.0),
+  // 统一入口：机构治理、个人多签、决议销毁、共识密钥及多签转账的
+  // 机构岗位选民/个人成员投票都走 InternalVote::cast(20.0)，
   // 冷钱包不按业务 pallet 分路解码投票 payload。
   static DecodedPayload? _decodeInternalVote(Uint8List bytes) {
     if (bytes.length < 20) return null;
@@ -1277,7 +1273,7 @@ class PayloadDecoder {
     );
   }
 
-  // JointVote(21) / cast_admin(0)
+  // JointVote(21) / cast_role_vote(0)
   // 格式：[0x15][0x00][proposal_id:u128_le][cid_number][voter_role_code][approve]
   static DecodedPayload? _decodeJointVote(Uint8List bytes) {
     if (bytes.length < 20) return null;
@@ -1393,15 +1389,15 @@ class PayloadDecoder {
   //   - 收到 32 字节 payload + QR 动作码 ∈ {两个 wasm 升级 action}
   //   - 用户在冷钱包屏幕上核对桌面 app 显示的 WASM 哈希后放行,
   //     签的就是这份 WASM 哈希。
-  // 管理员激活（非链上交易，二进制前缀域）
+  // 本机岗位授权（非链上交易，二进制前缀域）
   // 格式：prefix(4B = GMB||0x18) + cid_number(32B,右补零)
   //      + institution_code([u8;4]) + kind(u8) + signer_public_key(32B)
   //      + timestamp(8B, u64 LE) + nonce(16B) = 97B。
-  // CID 是机构唯一主键，协议账户不参与本地管理员身份绑定。
-  static DecodedPayload? _decodeActivateAdminAccount(Uint8List bytes) {
-    if (bytes.length != _activateAdminPayloadLen) return null;
+  // CID是机构唯一主键，签名账户仍按固定原字段读取。
+  static DecodedPayload? _decodeRoleAccess(Uint8List bytes) {
+    if (bytes.length != _roleAccessPayloadLen) return null;
 
-    var offset = _activateAdminPrefix.length;
+    var offset = _roleAccessPrefix.length;
     final cidRead = _readFixedInstitutionCidSlot(bytes, offset);
     if (cidRead == null) return null;
     final cidNumber = cidRead.$1;
@@ -1411,7 +1407,7 @@ class PayloadDecoder {
     offset += 4;
     final code = InstitutionCode.codeToString(codeBytes);
     final kind = bytes[offset++];
-    if (!_activationAccountKindMatchesCode(code, kind) ||
+    if (!_roleAccessKindMatchesCode(code, kind) ||
         !_cidContainsInstitutionCode(cidNumber, code)) {
       return null;
     }
@@ -1420,8 +1416,8 @@ class PayloadDecoder {
     final institutionLabel = InstitutionCode.codeLabel(code);
 
     return DecodedPayload(
-      action: 'activate_admin_account',
-      summary: '激活$institutionLabel管理员',
+      action: 'role_access',
+      summary: '授权$institutionLabel本机岗位访问',
       fields: {
         'cid_number': cidNumber,
         'institution_code': institutionLabel,
@@ -1439,7 +1435,7 @@ class PayloadDecoder {
     );
   }
 
-  /// 管理员激活载荷中的机构码必须与 CID 核心段一致。
+  /// 岗位权限载荷中的机构码必须与 CID 核心段一致。
   ///
   /// 这里只核对 CID 内嵌的 3/4 字符机构码，不复制链端校验和与盈利属性规则。
   static bool _cidContainsInstitutionCode(String cidNumber, String code) {
@@ -1464,26 +1460,24 @@ class PayloadDecoder {
         year.toString().padLeft(4, '0') == text;
   }
 
-  /// 公权管理员非空公民 CID 只接受 CTZN 机构码段；完整校验和由 runtime 裁决。
-  static bool _isStructuredCitizenCid(String cidNumber) {
-    return _isStructuredInstitutionCid(cidNumber) &&
-        RegExp(r'^[A-Z0-9]{5}-CTZN[A-Z0-9]-[0-9]{9}-[0-9]{4,10}$')
-            .hasMatch(cidNumber);
-  }
-
-  // 清算行管理员解密（非链上交易，二进制前缀域）。
+  // 清算解密授权（非链上交易，二进制前缀域）。
   // 格式：prefix(4B = GMB||0x19) + cid_number(32B,右补零)
   //      + signer_public_key(32B)
   //      + timestamp(8B, u64 LE) + nonce(16B)。旧 48B 槽位不兼容并直接拒绝。
-  static DecodedPayload? _decodeDecryptAdmin(Uint8List bytes) {
-    if (bytes.length != _decryptAdminPayloadLen) return null;
+  static DecodedPayload? _decodeClearingDecrypt(Uint8List bytes) {
+    if (bytes.length != _clearingDecryptPayloadLen) return null;
     final cidRead = _readFixedInstitutionCidSlot(bytes, _binaryPrefixLen);
     if (cidRead == null) return null;
 
     return DecodedPayload(
-      action: 'decrypt_admin',
-      summary: '解密清算行管理员 - ${cidRead.$1}',
-      fields: {'cid_number': cidRead.$1},
+      action: 'clearing_decrypt',
+      summary: '清算解密授权 - ${cidRead.$1}',
+      fields: {
+        'cid_number': cidRead.$1,
+        'signer_public_key': _bytesToLowerHex(
+          bytes.sublist(cidRead.$2, cidRead.$2 + 32),
+        ),
+      },
     );
   }
 
@@ -1506,7 +1500,7 @@ class PayloadDecoder {
     return (cidNumber, offset + _institutionCidSlotLen);
   }
 
-  // PublicManage(30) / PrivateManage(31) / update_institution_info(6)
+  // PublicEntity(30) / PrivateEntity(31) / update_institution_info(6)
   // SCALE: cid_number + cid_full_name + cid_short_name + actor_cid_number + actor_role_code。
   static DecodedPayload? _decodeUpdateInstitutionInfo(
     Uint8List bytes, {
@@ -1546,7 +1540,7 @@ class PayloadDecoder {
     );
   }
 
-  // PublicManage(30) / PrivateManage(31) / add_institution_account(7)
+  // PublicEntity(30) / PrivateEntity(31) / add_institution_account(7)
   // SCALE: cid_number + account_names:Vec<BoundedVec<u8>> + actor_cid_number + actor_role_code。
   static DecodedPayload? _decodeAddInstitutionAccount(
     Uint8List bytes, {
@@ -1592,91 +1586,70 @@ class PayloadDecoder {
     );
   }
 
-  // PublicManage(30) / PrivateManage(31) / propose_institution_governance(8)
-  // SCALE: cid_number + InstitutionGovernanceAction + actor_cid_number
-  //      + proposer_role_code。公权、私权 action 内管理员统一为 Admin 四字段。
+  // PublicEntity(30) / PrivateEntity(31)：call8是治理结构，call9是独立岗位登记结构。
   static DecodedPayload? _decodeProposeInstitutionGovernance(
     Uint8List bytes, {
     required String action,
     required String entityLabel,
+    required bool isPublic,
   }) {
-    var offset = 2;
-    final cidRead = _readCidNumber(bytes, offset);
-    if (cidRead == null) return null;
-    final cidNumber = cidRead.$1;
-    offset = cidRead.$2;
-    final governanceVariant = offset < bytes.length ? bytes[offset] : -1;
-    final actionRead = _readInstitutionGovernanceAction(bytes, offset);
-    if (actionRead == null) return null;
-    offset = actionRead.$3;
-    final actorRead = _readCidNumber(bytes, offset);
-    if (actorRead == null) return null;
-    offset = actorRead.$2;
-    final roleRead = _readRoleCode(bytes, offset);
-    if (roleRead == null) return null;
-    offset = roleRead.$2;
-    if (!_hasValidSigningTail(bytes, offset)) return null;
+    final cid = _readCidNumber(bytes, 2);
+    if (cid == null) return null;
+    final governance = _readRoleGovernance(bytes, cid.$2, isPublic: isPublic);
+    if (governance == null) return null;
+    final actor = _readCidNumber(bytes, governance.$2);
+    if (actor == null) return null;
+    final role = _readRoleCode(bytes, actor.$2);
+    if (role == null || !_hasValidSigningTail(bytes, role.$2)) return null;
     final fields = <String, String>{
-      'cid_number': cidNumber,
-      'institution_action_variant': governanceVariant.toString(),
-      'governance_action': actionRead.$1,
-      'governance_detail': actionRead.$2,
-      'actor_cid_number': actorRead.$1,
-      'proposer_role_code': roleRead.$1,
+      'cid_number': cid.$1,
+      'governance_action': '岗位/任职治理',
+      'governance_detail': governance.$1,
+      'actor_cid_number': actor.$1,
+      'proposer_role_code': role.$1,
       'fee_payer_description': _reviewValue('fee_payer_description', {
-        'actor_cid_number': actorRead.$1,
+        'actor_cid_number': actor.$1,
       }),
     };
     return DecodedPayload(
       action: action,
-      summary: '$entityLabel $cidNumber 发起${actionRead.$1}',
+      summary: '$entityLabel ${cid.$1} 发起岗位/任职治理',
       fields: fields,
-      reviewFields: {...fields}..remove('institution_action_variant'),
     );
   }
 
-  // call 9复用统一action；签名同时锁定目标机构状态和显式首次阈值。
-  // 旧名册直编码不回退兼容，完整岗位权限/任职必须从签名字节独立审阅。
-  static DecodedPayload? _decodeRegisterInstitutionAdmins(
+  // 登记只含role_mutations、assignment_changes；没有旧治理枚举或法代Option槽。
+  static DecodedPayload? _decodeRegisterInstitutionRoles(
     Uint8List bytes, {
     required String action,
     required String entityLabel,
+    required bool isPublic,
   }) {
-    var offset = 2;
-    final cidRead = _readCidNumber(bytes, offset);
-    if (cidRead == null) return null;
-    final cidNumber = cidRead.$1;
-    offset = cidRead.$2;
-    if (offset >= bytes.length) return null;
-    final variant = bytes[offset++];
-    if (variant == 4) {
-      return _decodeRegistryWalletOperations(bytes, offset,
-          action: action, cidNumber: cidNumber, entityLabel: entityLabel);
-    }
-    if (variant != 1) return null;
-    final roles = _skipRoleGovernance(bytes, offset,
-        registration: true, adminAccounts: null);
-    if (roles == null) return null;
-    final detail = roles.$1;
-    offset = roles.$2;
-    final mutations = roles.$3;
-    final actorRead = _readCidNumber(bytes, offset);
-    if (actorRead == null) return null;
-    offset = actorRead.$2;
-    final roleRead = _readRoleCode(bytes, offset);
-    if (roleRead == null) return null;
-    offset = roleRead.$2;
+    final cid = _readCidNumber(bytes, 2);
+    if (cid == null) return null;
+    final registration = _readRoleGovernance(
+      bytes,
+      cid.$2,
+      registration: true,
+      isPublic: isPublic,
+    );
+    if (registration == null) return null;
+    final actor = _readCidNumber(bytes, registration.$2);
+    if (actor == null) return null;
+    final role = _readRoleCode(bytes, actor.$2);
+    if (role == null) return null;
+    var offset = role.$2;
     if (offset + 33 > bytes.length) return null;
     final stateHash = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
     offset += 32;
     final thresholdTag = bytes[offset++];
     String threshold;
     if (thresholdTag == 0) {
-      if (mutations != 0) return null;
+      if (registration.$3 != 0) return null;
       threshold = 'none';
     } else if (thresholdTag == 1 && offset + 4 <= bytes.length) {
       final value = _readU32Le(bytes, offset);
-      if (value < 2 || mutations == 0) return null;
+      if (value < 2 || registration.$3 == 0) return null;
       threshold = value.toString();
       offset += 4;
     } else {
@@ -1684,100 +1657,26 @@ class PayloadDecoder {
     }
     if (!_hasValidSigningTail(bytes, offset)) return null;
     final fields = <String, String>{
-      'cid_number': cidNumber,
-      'institution_action_variant': '1',
-      'governance_action': mutations > 0 ? '首次岗位配置' : '岗位任职配置',
-      'governance_detail': detail,
-      'actor_cid_number': actorRead.$1,
-      'actor_role_code': roleRead.$1,
+      'cid_number': cid.$1,
+      'governance_action': registration.$3 > 0 ? '首次岗位配置' : '岗位任职配置',
+      'governance_detail': registration.$1,
+      'actor_cid_number': actor.$1,
+      'actor_role_code': role.$1,
       'expected_state_hash': stateHash,
       'initial_threshold': threshold,
       'fee_payer_description': _reviewValue('fee_payer_description', {
-        'actor_cid_number': actorRead.$1,
+        'actor_cid_number': actor.$1,
       }),
     };
     return DecodedPayload(
       action: action,
-      summary: '注册局配置$entityLabel $cidNumber 的岗位任职',
+      summary: '注册局配置$entityLabel ${cid.$1} 的岗位任职',
       fields: fields,
       reviewFields: {
-        ...({...fields}..remove('institution_action_variant')),
+        ...fields,
         'initial_threshold': threshold == 'none' ? '沿用现有机构阈值' : threshold,
       },
     );
-  }
-
-  // Registry-only variant4. Personnel, roles and thresholds are absent from this payload.
-  static DecodedPayload? _decodeRegistryWalletOperations(
-      Uint8List bytes, int offset,
-      {required String action,
-      required String cidNumber,
-      required String entityLabel}) {
-    final added = _readAdminPersons(bytes, offset, minCount: 0, maxCount: 1989);
-    if (added == null) return null;
-    offset = added.$2;
-    final sources = <String>{},
-        targets = added.$1.map((a) => a.accountId).toSet();
-    final details = <String>['新增钱包：${_adminReviewValue(added.$1)}'];
-    final (removed, size) = _decodeCompactU32(bytes, offset);
-    if (size == 0 || removed > 1989) return null;
-    offset += size;
-    for (var i = 0; i < removed; i++) {
-      if (offset + 40 > bytes.length) return null;
-      final wallet = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
-      if (!sources.add(wallet)) return null;
-      details.add('删除钱包：$wallet；原版本：${_readUnsignedU64(bytes, offset + 32)}');
-      offset += 40;
-    }
-    final (replaced, prefix) = _decodeCompactU32(bytes, offset);
-    if (prefix == 0 ||
-        replaced > 1989 ||
-        added.$1.length + removed + replaced == 0 ||
-        added.$1.length + removed + replaced > 1989) {
-      return null;
-    }
-    offset += prefix;
-    for (var i = 0; i < replaced; i++) {
-      if (offset + 104 > bytes.length) return null;
-      final admin = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
-      final old = _bytesToLowerHex(bytes.sublist(offset + 32, offset + 64));
-      final next = _bytesToLowerHex(bytes.sublist(offset + 64, offset + 96));
-      if (admin != old ||
-          old == next ||
-          !sources.add(old) ||
-          !targets.add(next)) {
-        return null;
-      }
-      details
-          .add('更换钱包：$old → $next；原版本：${_readUnsignedU64(bytes, offset + 96)}');
-      offset += 104;
-    }
-    if (sources.any(targets.contains)) return null;
-    final actor = _readCidNumber(bytes, offset);
-    if (actor == null) return null;
-    offset = actor.$2;
-    final role = _readRoleCode(bytes, offset);
-    if (role == null) return null;
-    offset = role.$2;
-    if (offset + 33 > bytes.length) return null;
-    final hash = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
-    offset += 32;
-    if (bytes[offset++] != 0 || !_hasValidSigningTail(bytes, offset)) {
-      return null;
-    }
-    return DecodedPayload(
-        action: action,
-        summary:
-            '注册局维护$entityLabel $cidNumber 管理员钱包：新增${added.$1.length}、删除$removed、更换$replaced',
-        fields: {
-          'cid_number': cidNumber,
-          'governance_action': '管理员钱包维护',
-          'governance_detail': details.join('；'),
-          'actor_cid_number': actor.$1,
-          'actor_role_code': role.$1,
-          'expected_state_hash': hash,
-          'initial_threshold': '沿用现有机构阈值'
-        });
   }
 
   // ResolutionIssuance(8) / propose_issuance(0)
@@ -2205,7 +2104,6 @@ class PayloadDecoder {
       offset,
       minCount: 2,
       maxCount: 64,
-      personal: true,
     );
     if (adminsRead == null) return null;
     final admins = adminsRead.$1;
@@ -2251,7 +2149,7 @@ class PayloadDecoder {
     );
   }
 
-  // PublicManage(30) / PrivateManage(31) / propose_close_*_institution(1)
+  // PublicEntity(30) / PrivateEntity(31) / propose_close_*_institution(1)
   /// 机构自定义账户关闭提案。
   /// SCALE:actor_cid_number + proposer_role_code + institution_account_id
   /// + beneficiary_account_id。
@@ -2472,7 +2370,6 @@ class PayloadDecoder {
       offset,
       minCount: 2,
       maxCount: 64,
-      personal: true,
     );
     if (adminsRead == null) return null;
     final admins = adminsRead.$1;
@@ -4588,13 +4485,12 @@ class PayloadDecoder {
   /// 严格解码统一的 `Vec<Admin>`。
   ///
   /// 个人成员的SCALE顺序为account_id、family_name、given_name；姓名仅作备注。
-  /// 机构成员仍按所属机构合同读取CID。两类数据均按钱包账户去重。
+  /// 个人成员按账户去重，不含人员CID字段。
   static (List<_DecodedAdminPerson>, int)? _readAdminPersons(
     Uint8List bytes,
     int offset, {
     required int minCount,
     required int maxCount,
-    bool personal = false,
   }) {
     final (count, countSize) = _decodeCompactU32(bytes, offset);
     if (countSize == 0 || count < minCount || count > maxCount) return null;
@@ -4609,18 +4505,6 @@ class PayloadDecoder {
       offset += 32;
       final accountHex = _bytesToLowerHex(accountBytes);
       if (!seen.add(accountHex)) return null;
-      String? citizenCidNumber;
-      if (!personal) {
-        final cidRead = _readUtf8Vec(bytes, offset);
-        if (cidRead.$1 == null) return null;
-        citizenCidNumber = cidRead.$1!;
-        if (utf8.encode(citizenCidNumber).length > 32 ||
-            (citizenCidNumber.isNotEmpty &&
-                !_isStructuredCitizenCid(citizenCidNumber))) {
-          return null;
-        }
-        offset = cidRead.$2;
-      }
       final familyNameRead = _readAdminName(bytes, offset, allowEmpty: true);
       if (familyNameRead == null) return null;
       offset = familyNameRead.$2;
@@ -4630,7 +4514,6 @@ class PayloadDecoder {
       admins.add((
         accountBytes: accountBytes,
         accountId: accountHex,
-        citizenCidNumber: citizenCidNumber,
         familyName: familyNameRead.$1,
         givenName: givenNameRead.$1,
       ));
@@ -4664,8 +4547,6 @@ class PayloadDecoder {
       for (final admin in admins)
         {
           'account_id': admin.accountId,
-          if (admin.citizenCidNumber != null)
-            'cid_number': admin.citizenCidNumber,
           'family_name': admin.familyName,
           'given_name': admin.givenName,
         },
@@ -4675,251 +4556,107 @@ class PayloadDecoder {
   static String _adminReviewValue(List<_DecodedAdminPerson> admins) {
     return admins.map((admin) {
       final name = '${admin.familyName}${admin.givenName}';
-      final cid = admin.citizenCidNumber;
-      final profile = [
-        if (name.isNotEmpty) name,
-        if (cid != null && cid.isNotEmpty) cid,
-      ].join(' / ');
+      final profile = name;
       return '${profile.isEmpty ? '资料待完善' : profile}(${_bytesToSs58(admin.accountBytes)})';
     }).join('、');
   }
 
-  /// 机构治理共用读取器；对外只返回人数、展示文本和新偏移。
-  static (int, String, int)? _readInstitutionAdmins(
-    Uint8List bytes,
-    int offset,
-  ) {
-    final read = _readAdminPersons(bytes, offset, minCount: 0, maxCount: 1989);
-    if (read == null) return null;
-    return (read.$1.length, _adminReviewValue(read.$1), read.$2);
-  }
-
-  // SCALE遵循entitybase的机构钱包接受证明；此机构合同不用于个人成员。
-  static DecodedPayload? _decodeInstitutionWalletAcceptance(Uint8List bytes) {
-    if (bytes.length < 32) return null;
-    final cid = _readCidNumber(bytes, 32);
-    if (cid == null) return null;
-    final offset = cid.$2;
-    if (bytes.length != offset + 113 || bytes[offset + 104] > 1) return null;
-    final oldWallet = _bytesToLowerHex(bytes.sublist(offset + 32, offset + 64));
-    final newWallet = _bytesToLowerHex(bytes.sublist(offset + 64, offset + 96));
-    if (oldWallet == newWallet) return null;
-    final expiry = _readU64Le(bytes, offset + 105);
-    if (expiry <= 0) return null;
-    return DecodedPayload(
-        action: 'institution_wallet_accept',
-        summary: '确认接收本机构管理员钱包授权',
-        fields: {
-          'genesis_hash': _bytesToLowerHex(bytes.sublist(0, 32)),
-          'cid_number': cid.$1,
-          'admin_account_id':
-              _bytesToLowerHex(bytes.sublist(offset, offset + 32)),
-          'old_wallet_account_id': oldWallet,
-          'new_wallet_account_id': newWallet,
-          'wallet_revision': _readUnsignedU64(bytes, offset + 96).toString(),
-          'wallet_change_mode': bytes[offset + 104] == 0 ? '本人双签' : '机构投票',
-          'expires_at': expiry.toString(),
-        });
-  }
-
-  static (Map<String, String>, int)? _readInstitutionWalletChange(
-      Uint8List bytes, int offset,
-      {required String mode}) {
-    if (offset + 112 >= bytes.length) return null;
-    final oldWallet = _bytesToLowerHex(bytes.sublist(offset + 32, offset + 64));
-    final newWallet = _bytesToLowerHex(bytes.sublist(offset + 64, offset + 96));
-    if (oldWallet == newWallet) return null;
-    final expiresAt = _readU64Le(bytes, offset + 104);
-    final (proofLen, prefixLen) = _decodeCompactU32(bytes, offset + 112);
-    if (prefixLen == 0 ||
-        (proofLen != 64 && proofLen != 5261) ||
-        expiresAt <= 0 ||
-        offset + 112 + prefixLen + proofLen > bytes.length) {
-      return null;
-    }
-    return (
-      {
-        'admin_account_id':
-            _bytesToLowerHex(bytes.sublist(offset, offset + 32)),
-        'old_wallet_account_id': oldWallet,
-        'new_wallet_account_id': newWallet,
-        'wallet_revision': _readUnsignedU64(bytes, offset + 96).toString(),
-        'wallet_change_mode': mode,
-        'expires_at': expiresAt.toString(),
-      },
-      offset + 112 + prefixLen + proofLen
-    );
-  }
-
-  static (String, String, int)? _readInstitutionGovernanceAction(
-    Uint8List bytes,
-    int offset,
-  ) {
-    if (offset >= bytes.length) return null;
-    final variant = bytes[offset++];
-    if (variant == 3) {
-      final change = _readInstitutionWalletChange(bytes, offset, mode: '机构投票');
-      if (change == null) return null;
-      final detail = change.$1.entries
-          .map((e) => '${{
-                'admin_account_id': '原管理员钱包',
-                'old_wallet_account_id': '原钱包',
-                'new_wallet_account_id': '新钱包',
-                'wallet_revision': '机构钱包版本',
-                'wallet_change_mode': '更换方式',
-                'expires_at': '证明到期时间'
-              }[e.key]}：${e.value}')
-          .join('；');
-      return ('更换管理员钱包（机构投票）', detail, change.$2);
-    }
-    if (variant == 0) {
-      final admins = _readInstitutionAdmins(bytes, offset);
-      if (admins == null || admins.$1 < 1) return null;
-      return ('替换管理员集合', '${admins.$1} 名管理员：${admins.$2}', admins.$3);
-    }
-    if (variant == 1) {
-      final next = _skipRoleGovernance(bytes, offset);
-      if (next == null) return null;
-      return ('岗位/任职治理', next.$1, next.$2);
-    }
-    if (variant == 2) {
-      final admins = _readInstitutionAdmins(bytes, offset);
-      if (admins == null || admins.$1 < 1) return null;
-      final next = _skipRoleGovernance(bytes, admins.$3);
-      if (next == null) return null;
-      return ('替换管理员并治理岗位', '${admins.$1} 名管理员；${next.$1}', next.$2);
-    }
-    return null;
-  }
-
-  static (String, int, int)? _skipRoleGovernance(
+  /// 两个真实结构共用向量布局；只有治理结构在末尾包含法代Option。
+  static (String, int, int)? _readRoleGovernance(
     Uint8List bytes,
     int offset, {
     bool registration = false,
-    Set<String>? adminAccounts,
+    required bool isPublic,
   }) {
     final details = <String>[];
-    final roleMutations = _skipRoleMutations(
+    final mutations = _readRoleMutations(
       bytes,
       offset,
       registration: registration,
+      isPublic: isPublic,
       details: details,
-      adminAccounts: adminAccounts,
     );
-    if (roleMutations == null) return null;
-    offset = roleMutations.$2;
-    final assignmentChanges = _skipAssignmentChanges(
+    if (mutations == null) return null;
+    final changes = _readAssignmentChanges(
       bytes,
-      offset,
+      mutations.$2,
       registration: registration,
+      isPublic: isPublic,
       details: details,
-      adminAccounts: adminAccounts,
     );
-    if (assignmentChanges == null) return null;
-    offset = assignmentChanges.$2;
-    if (registration && (offset >= bytes.length || bytes[offset] != 0)) {
-      return null;
+    if (changes == null) return null;
+    offset = changes.$2;
+    var legal = '';
+    if (!registration) {
+      final read =
+          _readLegalRepresentativeChange(bytes, offset, isPublic: isPublic);
+      if (read == null) return null;
+      legal = read.$1;
+      offset = read.$2;
     }
-    final legal = _skipLegalRepresentativeChange(bytes, offset);
-    if (legal == null) return null;
-    offset = legal.$2;
-    if (!registration &&
-        roleMutations.$1 == 0 &&
-        assignmentChanges.$1 == 0 &&
-        legal.$1.isEmpty) {
-      return null;
-    }
-    final legalText = legal.$1.isEmpty ? '' : '，${legal.$1}';
+    if (mutations.$1 == 0 && changes.$1 == 0 && legal.isEmpty) return null;
     return (
-      '${roleMutations.$1} 个岗位生命周期操作，${assignmentChanges.$1} 个任职集合变更$legalText${details.isEmpty ? '' : '；${details.join('；')}'}',
+      '${mutations.$1} 个岗位生命周期操作，${changes.$1} 个任职集合变更${legal.isEmpty ? '' : '；$legal'}${details.isEmpty ? '' : '；${details.join('；')}'}',
       offset,
-      roleMutations.$1,
+      mutations.$1,
     );
   }
 
-  /// 严格读取 `Vec<InstitutionRoleMutation>`。
-  ///
-  /// Create 不含岗位码；权限与初始任职必须随创建原子提交。Rename/Delete 只接受
-  /// 已有岗位码，因而旧 `InstitutionRoleChange` 布局不会被误识别为新协议。
-  static (int, int)? _skipRoleMutations(
+  /// Create按Runtime顺序读取名称、任期要求、seats、权限和人员CID任职。
+  static (int, int)? _readRoleMutations(
     Uint8List bytes,
     int offset, {
     bool registration = false,
-    List<String>? details,
-    Set<String>? adminAccounts,
+    required bool isPublic,
+    required List<String> details,
   }) {
     final (count, countSize) = _decodeCompactU32(bytes, offset);
     if (countSize == 0 || count > 1989) return null;
     offset += countSize;
-    final seenExistingRoleCodes = <String>{};
+    final seen = <String>{};
     for (var index = 0; index < count; index++) {
       if (offset >= bytes.length) return null;
       final variant = bytes[offset++];
       if (registration && variant != 0) return null;
       if (variant == 0) {
-        final name = _readUtf8Vec(bytes, offset);
-        if (name.$1 == null ||
-            name.$1!.isEmpty ||
-            utf8.encode(name.$1!).length > 128) {
-          return null;
-        }
+        final name = _readStrictBoundedUtf8(bytes, offset, maxLength: 128);
+        if (name == null || name.$1.isEmpty) return null;
         offset = name.$2;
-        if (offset >= bytes.length || bytes[offset] > 1) return null;
+        if (offset + 5 > bytes.length || bytes[offset] > 1) return null;
         final termRequired = bytes[offset++] == 1;
-        final roleDetails = <String>[];
-        final permissions = _skipRolePermissionSpecs(
-          bytes,
-          offset,
-          details: roleDetails,
-        );
+        final seats = _readU32Le(bytes, offset);
+        offset += 4;
+        if (seats == 0 || seats > 1989) return null;
+        details.add('创建岗位：${name.$1}，席位$seats，${termRequired ? '有任期' : '无任期'}');
+        final permissions =
+            _skipRolePermissionSpecs(bytes, offset, details: details);
         if (permissions == null || permissions.$1 == 0) return null;
-        offset = permissions.$2;
-        final assignments = _skipAssignmentTargets(
+        final assignments = _readAssignmentTargets(
           bytes,
-          offset,
+          permissions.$2,
           registration: registration,
           retainedAllowed: false,
-          details: roleDetails,
-          adminAccounts: adminAccounts,
+          isPublic: isPublic,
+          details: details,
           termRequired: termRequired,
         );
-        if (assignments == null) return null;
+        if (assignments == null || assignments.$1 > seats) return null;
         offset = assignments.$2;
-        if (registration) {
-          details?.add(
-            '创建岗位：${name.$1}（${termRequired ? '有任期' : '无任期'}）；${roleDetails.join('；')}',
-          );
-        }
-        continue;
-      }
-      if (variant == 1) {
-        final code = _readUtf8Vec(bytes, offset);
-        if (code.$1 == null ||
-            code.$1!.isEmpty ||
-            !seenExistingRoleCodes.add(code.$1!)) {
-          return null;
-        }
+      } else if (variant == 1 || variant == 2) {
+        final code = _readRoleCode(bytes, offset);
+        if (code == null || !seen.add(code.$1)) return null;
         offset = code.$2;
-        final name = _readUtf8Vec(bytes, offset);
-        if (name.$1 == null ||
-            name.$1!.isEmpty ||
-            utf8.encode(name.$1!).length > 128) {
-          return null;
+        if (variant == 1) {
+          final name = _readStrictBoundedUtf8(bytes, offset, maxLength: 128);
+          if (name == null || name.$1.isEmpty) return null;
+          offset = name.$2;
+          details.add('岗位${code.$1}改名为${name.$1}');
+        } else {
+          details.add('删除岗位${code.$1}');
         }
-        offset = name.$2;
-        continue;
+      } else {
+        return null;
       }
-      if (variant == 2) {
-        final code = _readUtf8Vec(bytes, offset);
-        if (code.$1 == null ||
-            code.$1!.isEmpty ||
-            !seenExistingRoleCodes.add(code.$1!)) {
-          return null;
-        }
-        offset = code.$2;
-        continue;
-      }
-      return null;
     }
     return (count, offset);
   }
@@ -4956,35 +4693,32 @@ class PayloadDecoder {
     return (count, offset);
   }
 
-  static (int, int)? _skipAssignmentTargets(
+  /// 同一岗位内以person_cid去重；签名钱包不属于任职载荷。
+  static (int, int)? _readAssignmentTargets(
     Uint8List bytes,
     int offset, {
     bool registration = false,
     bool retainedAllowed = true,
-    List<String>? details,
-    Set<String>? adminAccounts,
+    required bool isPublic,
+    required List<String> details,
     bool? termRequired,
   }) {
     final (count, countSize) = _decodeCompactU32(bytes, offset);
     if (countSize == 0 || count > 1989) return null;
     offset += countSize;
-    final seenAccounts = <String>{};
+    final seen = <String>{};
     for (var index = 0; index < count; index++) {
-      if (offset + 32 + 4 + 4 + 1 > bytes.length) return null;
-      final account = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
-      if (!seenAccounts.add(account)) return null;
-      if (adminAccounts != null && !adminAccounts.contains(account)) {
-        return null;
-      }
-      final accountBytes = bytes.sublist(offset, offset + 32);
-      offset += 32;
+      final person = _readPersonCid(bytes, offset, isPublic: isPublic);
+      if (person == null || !seen.add(person.$1)) return null;
+      offset = person.$2;
+      if (offset + 9 > bytes.length) return null;
       final start = _readU32Le(bytes, offset);
-      offset += 4;
-      final end = _readU32Le(bytes, offset);
-      offset += 4;
-      if (registration &&
-          ((termRequired == true && (start == 0 || end < start)) ||
-              (termRequired == false && (start != 0 || end != 0)))) {
+      final end = _readU32Le(bytes, offset + 4);
+      offset += 8;
+      if ((termRequired == true && (start == 0 || end < start)) ||
+          (termRequired == false && (start != 0 || end != 0)) ||
+          (termRequired == null &&
+              !((start == 0 && end == 0) || (start > 0 && end >= start)))) {
         return null;
       }
       final source = bytes[offset++];
@@ -4995,86 +4729,82 @@ class PayloadDecoder {
       if (offset + refLength >= bytes.length) return null;
       final reference = bytes.sublist(offset, offset + refLength);
       offset += refLength;
-      // 新建/改任职为Registry空引用；其余仅可透传存量引用，真实性由Runtime与链状态核验。
+      // 登记仅允许新Registry空引用或保留已有来源；链状态真实性仍由Runtime核验。
       if (registration &&
           ((!retainedAllowed && (source != 1 || refLength != 0)) ||
               (retainedAllowed && refLength == 0 && source != 1))) {
         return null;
       }
       final status = bytes[offset++];
-      if (registration ? status != 0 : status > 1) return null;
-      if (registration) {
-        const sources = ['创世', '注册局', '普选', '互选', '提名任免', '机构内部治理'];
-        final origin = refLength == 0
-            ? '本次登记生成引用'
-            : '保留${sources[source]}来源 ${_bytesToLowerHex(reference)}';
-        details?.add('任职：${_bytesToSs58(accountBytes)}，任期$start—$end，$origin');
-      }
+      if (status != 0) return null;
+      const sources = ['创世', '注册局', '普选', '互选', '提名任免', '机构内部治理'];
+      final origin = refLength == 0
+          ? '本次${sources[source]}生成引用'
+          : '${sources[source]}来源 ${_bytesToLowerHex(reference)}';
+      details.add('任职人员：${person.$1}，任期$start—$end，$origin');
     }
     return (count, offset);
   }
 
-  static (int, int)? _skipAssignmentChanges(
+  static (int, int)? _readAssignmentChanges(
     Uint8List bytes,
     int offset, {
     bool registration = false,
-    List<String>? details,
-    Set<String>? adminAccounts,
+    required bool isPublic,
+    required List<String> details,
   }) {
     final (count, countSize) = _decodeCompactU32(bytes, offset);
     if (countSize == 0 || count > 1989) return null;
     offset += countSize;
-    final seenRoles = <String>{};
+    final seen = <String>{};
     for (var index = 0; index < count; index++) {
-      final role = _readUtf8Vec(bytes, offset);
-      if (role.$1 == null || role.$1!.isEmpty || !seenRoles.add(role.$1!)) {
-        return null;
-      }
-      offset = role.$2;
+      final role = _readRoleCode(bytes, offset);
+      if (role == null || !seen.add(role.$1)) return null;
       final roleDetails = <String>[];
-      final assignments = _skipAssignmentTargets(
+      final assignments = _readAssignmentTargets(
         bytes,
-        offset,
+        role.$2,
         registration: registration,
+        isPublic: isPublic,
         details: roleDetails,
-        adminAccounts: adminAccounts,
       );
       if (assignments == null) return null;
       offset = assignments.$2;
-      if (registration) {
-        details?.add(
-          '岗位${role.$1}的完整任职集合（${assignments.$1}人）：${roleDetails.join('；')}',
-        );
-      }
+      details.add(
+          '岗位${role.$1}的完整任职集合（${assignments.$1}人）：${roleDetails.join('；')}');
     }
     return (count, offset);
   }
 
-  static (String, int)? _skipLegalRepresentativeChange(
+  static (String, int)? _readLegalRepresentativeChange(
     Uint8List bytes,
-    int offset,
-  ) {
+    int offset, {
+    required bool isPublic,
+  }) {
     if (offset >= bytes.length) return null;
-    final optionTag = bytes[offset++];
-    if (optionTag == 0) return ('', offset);
-    if (optionTag != 1 || offset >= bytes.length) return null;
+    final option = bytes[offset++];
+    if (option == 0) return ('', offset);
+    if (option != 1 || offset >= bytes.length) return null;
     final variant = bytes[offset++];
-    if (variant == 1) {
-      return ('含法定代表人解除', offset);
-    }
+    if (variant == 1) return ('解除法定代表人', offset);
     if (variant != 0) return null;
-    final familyName = _readUtf8Vec(bytes, offset);
-    if (familyName.$1 == null || familyName.$1!.isEmpty) return null;
-    offset = familyName.$2;
-    final givenName = _readUtf8Vec(bytes, offset);
-    if (givenName.$1 == null || givenName.$1!.isEmpty) return null;
-    offset = givenName.$2;
+    final family = _readAdminName(bytes, offset);
+    if (family == null) return null;
+    final given = _readAdminName(bytes, family.$2);
+    if (given == null) return null;
+    final person = _readPersonCid(bytes, given.$2, isPublic: isPublic);
+    if (person == null) return null;
+    return ('法定代表人：${family.$1}${given.$1}，${person.$1}', person.$2);
+  }
+
+  /// 离线端校验人员CID的公开类型与布局；完整CID绑定及授权仍由Runtime裁决。
+  static (String, int)? _readPersonCid(Uint8List bytes, int offset,
+      {required bool isPublic}) {
     final cid = _readCidNumber(bytes, offset);
-    if (cid == null) return null;
-    offset = cid.$2;
-    if (offset + 32 > bytes.length) return null;
-    offset += 32;
-    return ('含法定代表人任命/更换', offset);
+    if (cid == null || !_isStructuredInstitutionCid(cid.$1)) return null;
+    final code = cid.$1.split('-')[1].substring(0, 4);
+    if (code != 'CTZN' && (isPublic || code != 'NATP')) return null;
+    return cid;
   }
 
   /// OnchainIssuance 元数据字段的严格 `BoundedVec<u8>` 解码。
@@ -5188,13 +4918,10 @@ class PayloadDecoder {
     return (cidRead.$1, cidRead.$2);
   }
 
-  /// 激活凭证里的账户 kind 与机构码是否匹配。
+  /// 岗位访问凭证的机构 kind 与机构码是否匹配。
   ///
-  /// kind 语义对齐链端 admin-primitives::AdminAccountKind(SCALE 判别值):
-  ///   0 = PublicInstitution
-  ///   1 = PrivateInstitution
-  ///   2 = PersonalMultisig
-  static bool _activationAccountKindMatchesCode(String code, int kind) {
+  /// 固定二进制合同仅接受 0 公权机构、1 私权机构；个人多签不能授权机构岗位。
+  static bool _roleAccessKindMatchesCode(String code, int kind) {
     if (InstitutionCode.isPublicLegal(code) ||
         InstitutionCode.isFixedGovernance(code)) {
       return kind == 0;
@@ -5202,7 +4929,7 @@ class PayloadDecoder {
     if (InstitutionCode.isPrivateLegal(code)) {
       return kind == 1;
     }
-    // 非法人机构由上层明确路由到 public/private admins，两个 kind 都合法。
+    // 非法人机构由上层明确路由到公权或私权实体，两个机构 kind 都合法。
     if (InstitutionCode.isUnincorporated(code)) return kind == 0 || kind == 1;
     return false;
   }

@@ -2,6 +2,7 @@
 
 import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:io';
 
 import 'payload_decoder_test.dart'
     show topupText, cidRebindPayload, selfRebindCall;
@@ -861,7 +862,7 @@ void main() {
       );
     });
 
-    test('链交易仅接受交易版本6，拒绝5和未知版本，不锁 spec_version', () {
+    test('链交易仅接受交易版本7，拒绝6和未知版本，不锁 spec_version', () {
       const callData =
           '0x0400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0100000000000000000000000000000000';
 
@@ -877,15 +878,15 @@ void main() {
           .status;
 
       expect(
-        verify(signingPayloadHex(callData, transactionVersion: 6)),
+        verify(signingPayloadHex(callData, transactionVersion: 7)),
         SignDecisionStatus.normal,
       );
       expect(
         verify(signingPayloadHex(callData, genesisHash: '0x${'99' * 32}')),
         SignDecisionStatus.reject,
       );
-      // 按本轮升级目标覆盖上一版本5及未知版本的拒签边界。
-      for (final version in [5, 7, 0xffffffff]) {
+      // 按已核验的本轮 Wasm 目标覆盖上一版本及未知版本的拒签边界。
+      for (final version in [6, 8, 0xffffffff]) {
         expect(
           verify(signingPayloadHex(callData, transactionVersion: version)),
           SignDecisionStatus.reject,
@@ -1014,7 +1015,7 @@ void main() {
     });
 
     for (final variant in [0, 2]) {
-      test('旧机构完整名册动作$variant可审阅但必须拒签', () async {
+      test('旧机构完整名册动作$variant不能解码或签名', () async {
         const cid = 'GZ018-SFGYR-201206100-2026';
         final call = <int>[
           31,
@@ -1044,16 +1045,17 @@ void main() {
           action: QrActions.privateInstitutionGovernance,
         );
         final verified = service.verifyPayload(request);
-        expect(
-            verified.decoded?.fields['institution_action_variant'], '$variant');
+        expect(verified.status, SignDecisionStatus.reject);
+        expect(verified.decoded, isNull);
         expect(verified.canSign, isFalse);
-        expect(verified.rejectReason, contains('已停用'));
+        expect(verified.rejectReason, contains('无法解码'));
         await expectLater(
           service.signParsedRequest(
               accountId: signingAccount.accountId, request: request),
           throwsA(isA<OfflineSignException>().having((error) => error.code,
               'code', OfflineSignErrorCode.contentMismatch)),
         );
+        expect(walletManager.signCallCount, 0);
       });
     }
 
@@ -1167,6 +1169,173 @@ void main() {
         expect(walletManager.signCallCount, 0);
       });
     }
+    test('公私权岗位治理和登记完整冷签，经真实原生验签并拒绝重放和错动作', () async {
+      final fixture = jsonDecode(
+              File('test/signing/fixtures/call_data.json').readAsStringSync())
+          as Map<String, dynamic>;
+      final rows = (fixture['cases'] as List)
+          .cast<Map<String, dynamic>>()
+          .where((row) => [30, 31].contains(row['pallet_index']));
+      for (final row in rows) {
+        final action = QrActions.chain(
+            row['pallet_index'] as int, row['call_index'] as int);
+        final request = _buildTestRequest(
+          requestId: 'institution-roles-${row['name']}',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex:
+              signingPayloadHex(row['expected_call_data_hex'] as String),
+          action: action,
+        );
+        final verification = service.verifyPayload(request);
+        expect(verification.canSign, isTrue, reason: verification.rejectReason);
+        expect(verification.decoded!.reviewFields['governance_detail'],
+            contains('CN220-CTZN2-198805200-2026'));
+        final response = await service.signParsedRequest(
+            accountId: signingAccount.accountId, request: request);
+        expect(
+            _verifySr25519(
+                signerPublicKeyHex: response.body.signerPublicKeyHex,
+                message: _messageForRequest(request),
+                signatureHex: response.body.signatureHex),
+            isTrue);
+        await expectLater(
+            service.signParsedRequest(
+                accountId: signingAccount.accountId, request: request),
+            throwsA(isA<OfflineSignException>()
+                .having((e) => e.code, 'code', OfflineSignErrorCode.replayed)));
+        final mismatch = _buildTestRequest(
+          requestId: 'institution-roles-mismatch-${row['name']}',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: request.body.payloadHex,
+          action: action ^ 1,
+        );
+        expect(service.verifyPayload(mismatch).canSign, isFalse);
+      }
+      expect(walletManager.signCallCount, 4);
+    });
+
+    test('岗位访问和清算解密冷签原始97/92字节，拒绝错误账户和交叉动作', () async {
+      const cid = 'LN001-NRC0G-944805165-2026';
+      final cidSlot = Uint8List(32)..setAll(0, utf8.encode(cid));
+      for (final action in [QrActions.roleAccess, QrActions.clearingDecrypt]) {
+        final payload = <int>[
+          0x47,
+          0x4d,
+          0x42,
+          action == QrActions.roleAccess ? 0x18 : 0x19,
+          ...cidSlot,
+          if (action == QrActions.roleAccess) ...[78, 82, 67, 0, 0],
+          ..._hexToBytes(signingAccount.accountId),
+          ..._u64Le(123),
+          ...List.filled(16, 8)
+        ];
+        final request = _buildTestRequest(
+            requestId: 'binary-role-domain-$action',
+            signerPublicKey: signingAccount.accountId,
+            payloadHex: '0x${_toHex(payload)}',
+            action: action);
+        final verification = service.verifyPayload(request);
+        expect(verification.canSign, isTrue, reason: verification.rejectReason);
+        expect(verification.decoded!.fields['signer_public_key'],
+            signingAccount.accountId);
+        if (action == QrActions.roleAccess) {
+          final invalidCode = Uint8List.fromList(payload)..[39] = 48;
+          expect(
+              service
+                  .verifyPayload(_buildTestRequest(
+                    requestId: 'binary-role-invalid-code',
+                    signerPublicKey: signingAccount.accountId,
+                    payloadHex: '0x${_toHex(invalidCode)}',
+                    action: action,
+                  ))
+                  .canSign,
+              isFalse);
+        }
+        expect(QrSigner.signingBytesFor(request.body), orderedEquals(payload));
+        final response = await service.signParsedRequest(
+            accountId: signingAccount.accountId, request: request);
+        expect(
+            _verifySr25519(
+                signerPublicKeyHex: response.body.signerPublicKeyHex,
+                message: Uint8List.fromList(payload),
+                signatureHex: response.body.signatureHex),
+            isTrue);
+        final changed = Uint8List.fromList(payload)..[3] ^= 1;
+        expect(
+            _verifySr25519(
+                signerPublicKeyHex: response.body.signerPublicKeyHex,
+                message: changed,
+                signatureHex: response.body.signatureHex),
+            isFalse);
+        final mismatch = _buildTestRequest(
+            requestId: 'binary-role-wrong-account-$action',
+            signerPublicKey: '0x${'11' * 32}',
+            payloadHex: request.body.payloadHex,
+            action: action);
+        expect(service.verifyPayload(mismatch).canSign, isFalse);
+        final wrongAction = _buildTestRequest(
+            requestId: 'binary-role-wrong-action-$action',
+            signerPublicKey: signingAccount.accountId,
+            payloadHex: request.body.payloadHex,
+            action: action == QrActions.roleAccess
+                ? QrActions.clearingDecrypt
+                : QrActions.roleAccess);
+        expect(service.verifyPayload(wrongAction).canSign, isFalse);
+      }
+      expect(walletManager.signCallCount, 2);
+    });
+
+    test('链上中国确认使用真实account_id字段与原0x20域，旧管理员入口拒签', () async {
+      final expiry = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 120;
+      final payload = <String, Object>{
+        'domain': 'onchina_admin_governance',
+        'qr_proto': 'QR_V1',
+        'action_id': 'onchina-confirm-real-wire',
+        'action_type': 'INSTITUTION_CREATE_ACCOUNT',
+        'account_id': signingAccount.accountId,
+        'actor_cid_number': 'ZS001-FRG07-249474503-2026',
+        'actor_province_name': '中枢省',
+        'target': 'LN001-NRC0G-944805165-2026',
+        'request_hash': '0x${'ab' * 32}',
+        'before_hash': 'none',
+        'after_hash': '0x${'cd' * 32}',
+        'expires_at': expiry,
+      };
+      SignRequestEnvelope request(String id) => _buildTestRequest(
+          requestId: id,
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: '0x${_toHex(utf8.encode(jsonEncode(payload)))}',
+          action: QrActions.onchinaConfirm,
+          expiresAt: expiry);
+      final valid = request('onchina-confirm-signed');
+      final checked = service.verifyPayload(valid);
+      expect(checked.canSign, isTrue, reason: checked.rejectReason);
+      expect(checked.decoded!.reviewFields['account_id'],
+          signingAccount.accountId);
+      final response = await service.signParsedRequest(
+          accountId: signingAccount.accountId, request: valid);
+      expect(
+          _verifySr25519(
+              signerPublicKeyHex: response.body.signerPublicKeyHex,
+              message: QrSigner.signingBytesFor(valid.body),
+              signatureHex: response.body.signatureHex),
+          isTrue);
+      payload['account_id'] = '0x${'11' * 32}';
+      expect(service.verifyPayload(request('onchina-wrong-account')).canSign,
+          isFalse);
+      payload['account_id'] = signingAccount.accountId;
+      for (final old in ['CREATE_ADMIN', 'UPDATE_ADMIN', 'DELETE_ADMIN']) {
+        payload['action_type'] = old;
+        expect(service.verifyPayload(request('onchina-rejected-$old')).canSign,
+            isFalse);
+      }
+      payload['action_type'] = 'INSTITUTION_CREATE_ACCOUNT';
+      payload['actor_public_key'] = payload.remove('account_id')!;
+      expect(
+          service.verifyPayload(request('onchina-legacy-public-key')).canSign,
+          isFalse);
+    });
+
     test('signParsedRequest 自助注册签完整载荷且拒绝重放', () async {
       final request = _buildTestRequest(
         requestId: 'self-occupy-signed-once',

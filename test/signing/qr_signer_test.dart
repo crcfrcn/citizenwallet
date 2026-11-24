@@ -22,23 +22,23 @@ List<int> _u64Le(int value) =>
     List<int>.generate(8, (index) => (value >> (index * 8)) & 0xff);
 
 List<int> _occupyAuthorizationTemplate(String cid, int expiresAt) => [
-  ...List<int>.filled(32, 0x44),
-  cid.length << 2,
-  ...cid.codeUnits,
-  ...List<int>.filled(32, 0),
-  ..._u64Le(0),
-  ..._u64Le(expiresAt),
-];
+      ...List<int>.filled(32, 0x44),
+      cid.length << 2,
+      ...cid.codeUnits,
+      ...List<int>.filled(32, 0),
+      ..._u64Le(0),
+      ..._u64Le(expiresAt),
+    ];
 
 List<int> _rebindAuthorizationTemplate(String cid, int expiresAt) => [
-  ...List<int>.filled(32, 0x44),
-  cid.length << 2,
-  ...cid.codeUnits,
-  ...List<int>.filled(32, 0x55),
-  ...List<int>.filled(32, 0),
-  ..._u64Le(7),
-  ..._u64Le(expiresAt),
-];
+      ...List<int>.filled(32, 0x44),
+      cid.length << 2,
+      ...cid.codeUnits,
+      ...List<int>.filled(32, 0x55),
+      ...List<int>.filled(32, 0),
+      ..._u64Le(7),
+      ..._u64Le(expiresAt),
+    ];
 
 void main() {
   late QrSigner signer;
@@ -594,7 +594,10 @@ void main() {
   test('普通链交易无论长度都保留完整审阅材料，摘要由账户签名端统一处理', () {
     for (final length in [255, 256, 257, 400]) {
       final bytes = Uint8List.fromList(List<int>.filled(length, 0x55));
-      final body = SignRequestBody.fromHex(action: 0x0400, signerPublicKeyHex: '0x${'07' * 32}', payloadHex: '0x${_hexBytes(bytes)}');
+      final body = SignRequestBody.fromHex(
+          action: 0x0400,
+          signerPublicKeyHex: '0x${'07' * 32}',
+          payloadHex: '0x${_hexBytes(bytes)}');
       expect(QrSigner.signingBytesFor(body), bytes);
     }
   });
@@ -631,7 +634,7 @@ void main() {
     });
   });
 
-  _onchinaAdminSigningDomain();
+  _onchinaConfirmSigningDomain();
 }
 
 /// 链上中国治理动作签名域(op_tag 0x20)与链端金标逐字节对拍。
@@ -639,12 +642,12 @@ void main() {
 /// 该域此前对**裸 JSON 文本直签**(无 GMB 前缀、无 op_tag、不进 SIGN_OP_TAGS),
 /// 2026-08-06 审计后收敛到统一哈希域。金标真源:
 /// `citizenchain/runtime/primitives/tests/fixtures/signing_domain_vectors.json`
-void _onchinaAdminSigningDomain() {
+void _onchinaConfirmSigningDomain() {
   test('onchina 治理动作签 signing_message(0x20),与链端金标逐字节相同', () {
     // 金标向量:op_tag=0x20, scale_payload=0102030405060708
     final payload = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]);
     final body = SignRequestBody(
-      action: QrActions.onchinaAdmin,
+      action: QrActions.onchinaConfirm,
       alg: 1,
       signerPublicKey: base64Url.encode(Uint8List(32)).replaceAll('=', ''),
       payload: base64Url.encode(payload).replaceAll('=', ''),

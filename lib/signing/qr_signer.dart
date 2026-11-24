@@ -47,8 +47,8 @@ class QrSigner {
   static const int _opSignCidRebind = 0x11;
   static const int _opSignCidAdminRebind = 0x1F;
 
-  /// 链上中国平台管理员治理动作;与 primitives::sign::OP_SIGN_ONCHINA_ADMIN 同值。
-  static const int _opSignOnchinaAdmin = 0x20;
+  /// 链上中国岗位人员确认动作;与 primitives::sign::OP_SIGN_ONCHINA_CONFIRM 同值。
+  static const int _opSignOnchinaConfirm = 0x20;
 
   /// 本机默认账户切换；与 primitives::sign::OP_SIGN_SWITCH_DEFAULT_ACCOUNT 同值。
   static const int _opSignSwitchDefaultAccount = 0x21;
@@ -174,9 +174,6 @@ class QrSigner {
     final payload = body.payloadBytes;
     // 充值使用完整业务原文，热/冷两端均不预hash，不套用链交易>256B转换。
     if (body.action == QrActions.topup) return payload;
-    if (body.action == QrActions.institutionWalletAccept) {
-      return _gmbSigningMessage(0x25, payload);
-    }
     if (body.action == QrActions.citizenIdentity) {
       return _gmbSigningMessage(_opSignCitizenIdentity, payload);
     }
@@ -201,8 +198,8 @@ class QrSigner {
       return _gmbSigningMessage(opTag, exactPayload);
     }
     // 链上中国治理动作:走统一哈希域,不再对裸 JSON 文本直签。
-    if (body.action == QrActions.onchinaAdmin) {
-      return _gmbSigningMessage(_opSignOnchinaAdmin, payload);
+    if (body.action == QrActions.onchinaConfirm) {
+      return _gmbSigningMessage(_opSignOnchinaConfirm, payload);
     }
     if (body.action == QrActions.switchDefaultAccount) {
       return _gmbSigningMessage(_opSignSwitchDefaultAccount, payload);

@@ -168,14 +168,6 @@ class OfflineSignService {
       expectedAction: QrActions.actionKeyForCode(body.action),
     );
 
-    if (decoded != null &&
-        ['0', '2'].contains(decoded.fields['institution_action_variant'])) {
-      return OfflineSignVerification(
-          decoded: decoded,
-          status: SignDecisionStatus.reject,
-          actionLabel: qrActionLabel,
-          rejectReason: '完整管理员名单动作0、2已停用，拒绝签名');
-    }
     if (body.action == QrActions.topup &&
         decoded != null &&
         decoded.fields['account_id'] != body.signerPublicKeyHex) {
@@ -285,28 +277,21 @@ class OfflineSignService {
       }
     }
 
-    if (body.action == QrActions.institutionWalletAccept) {
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final expiry = int.tryParse(decoded.fields['expires_at'] ?? '') ?? 0;
-      if (decoded.fields['new_wallet_account_id'] != body.signerPublicKeyHex ||
-          expiry <= now ||
-          expiry > now + 30 * 24 * 60 * 60 ||
-          (request.expiresAt ?? 0) > expiry) {
+    if (body.action == QrActions.roleAccess ||
+        body.action == QrActions.clearingDecrypt ||
+        body.action == QrActions.onchinaConfirm) {
+      final field = body.action == QrActions.onchinaConfirm
+          ? 'account_id'
+          : 'signer_public_key';
+      if (decoded.fields[field] != body.signerPublicKeyHex ||
+          (body.action == QrActions.onchinaConfirm &&
+              decoded.fields['expires_at'] != request.expiresAt.toString())) {
         return OfflineSignVerification(
-            decoded: decoded,
-            status: SignDecisionStatus.reject,
-            actionLabel: qrActionLabel,
-            rejectReason: '机构新钱包或接收证明期限不匹配，已拒绝签名');
-      }
-    }
-    if (decoded.action == 'rotate_public_institution_admin_wallet' ||
-        decoded.action == 'rotate_private_institution_admin_wallet') {
-      if (decoded.fields['old_wallet_account_id'] != body.signerPublicKeyHex) {
-        return OfflineSignVerification(
-            decoded: decoded,
-            status: SignDecisionStatus.reject,
-            actionLabel: qrActionLabel,
-            rejectReason: '本人更换的原钱包与签名账户不符，已拒绝签名');
+          decoded: decoded,
+          status: SignDecisionStatus.reject,
+          actionLabel: qrActionLabel,
+          rejectReason: '授权账户或期限与签名请求不符，已拒绝签名',
+        );
       }
     }
     if (body.action == QrActions.contactsDelete &&

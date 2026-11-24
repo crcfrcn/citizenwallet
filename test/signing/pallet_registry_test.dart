@@ -13,8 +13,8 @@ void main() {
         // 普通转账统一走 OnchainTransaction(4).transfer_with_remark(0),不再暴露 Balances 直签入口。
         PalletRegistry.onchainTransactionPallet,
         PalletRegistry.multisigTransferPallet,
-        PalletRegistry.publicManagePallet,
-        PalletRegistry.privateManagePallet,
+        PalletRegistry.publicEntityPallet,
+        PalletRegistry.privateEntityPallet,
         PalletRegistry.votingEnginePallet,
         PalletRegistry.runtimeUpgradePallet,
         PalletRegistry.resolutionDestroyPallet,
@@ -70,14 +70,14 @@ void main() {
       expect(PalletRegistry.isPersonalAdminSetChangeCall(7, 2), isFalse);
       expect(PalletRegistry.isPersonalAdminSetChangeCall(7, 4), isFalse);
 
-      // PublicManage(30) / PrivateManage(31):机构登记管理。
-      expect(PalletRegistry.publicManagePallet, 30);
-      expect(PalletRegistry.privateManagePallet, 31);
+      // PublicEntity(30) / PrivateEntity(31):机构登记管理。
+      expect(PalletRegistry.publicEntityPallet, 30);
+      expect(PalletRegistry.privateEntityPallet, 31);
       expect(PalletRegistry.proposeCloseInstitutionCall, 1);
       expect(PalletRegistry.updateInstitutionInfoCall, 6);
       expect(PalletRegistry.addInstitutionAccountCall, 7);
       expect(PalletRegistry.proposeInstitutionGovernanceCall, 8);
-      expect(PalletRegistry.registerInstitutionAdminsCall, 9);
+      expect(PalletRegistry.registerInstitutionRolesCall, 9);
 
       // Personal(7):个人生命周期与成员变更；2及原29不复用。
       expect(PalletRegistry.personalPallet, 7);

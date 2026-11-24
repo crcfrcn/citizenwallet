@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:citizenwallet/signing/offline_sign_service.dart';
-import 'package:citizenwallet/signing/qr_signer.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
 
@@ -216,19 +215,6 @@ void main() {
         ...compactVec(givenName),
       ];
 
-  List<int> adminPerson(
-    List<int> adminAccount,
-    String familyName,
-    String givenName, {
-    String citizenCidNumber = '',
-  }) =>
-      [
-        ...adminAccount,
-        ...compactVec(citizenCidNumber),
-        ...compactVec(familyName),
-        ...compactVec(givenName),
-      ];
-
   List<int> u128LeForTest(BigInt value) {
     final out = List<int>.filled(16, 0);
     var tmp = value;
@@ -341,132 +327,67 @@ void main() {
   Uint8List withSigningTail(List<int> callData, {int nonce = 1, int tip = 0}) =>
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
 
-  test('注册局钱包增删改独立审阅，拒绝混合人员配置和截断', () {
-    final fixture = (jsonDecode(
-            File('test/signing/fixtures/role_permission.json')
-                .readAsStringSync())
-        as Map<String, dynamic>)['registry_wallets'] as Map<String, dynamic>;
-    final raw = _institutionBytes(fixture['call_hex'] as String);
+  test('删除的机构钱包call10、治理钱包枚举、登记钱包维护和动作21均拒签', () {
+    final old =
+        readRolePermissionFixture()['rejected_legacy'] as Map<String, dynamic>;
+    final cid = old['cid_number'] as String;
+    final acceptance =
+        _institutionBytes(old['acceptance_payload_hex'] as String);
+    expect(
+        PayloadDecoder.decode(hexOf(acceptance),
+            expectedAction: 'institution_wallet_accept'),
+        isNull);
+    expect(QrActions.actionKeyForCode(21), isNull);
+    final request = QrEnvelope<SignRequestBody>(
+      kind: QrKind.signRequest,
+      id: 'rejected-institution-wallet-21',
+      expiresAt: DateTime.now().millisecondsSinceEpoch ~/ 1000 + 120,
+      body: SignRequestBody(
+          action: 21,
+          signerPublicKey:
+              base64Url.encode(List.filled(32, 4)).replaceAll('=', ''),
+          payload: base64Url.encode(acceptance).replaceAll('=', '')),
+    );
+    expect(OfflineSignService().verifyPayload(request).canSign, isFalse);
     for (final pallet in [30, 31]) {
-      raw[0] = pallet;
-      final decoded =
-          PayloadDecoder.decode(_institutionHex(withSigningTail(raw)));
-      expect(decoded, isNotNull);
-      expect(decoded!.fields['governance_detail'], contains('更换钱包'));
-      expect(decoded.fields['governance_detail'], contains('原版本：7'));
-      expect(decoded.fields['actor_role_code'], fixture['actor_role_code']);
-      expect(decoded.fields['initial_threshold'], '沿用现有机构阈值');
-      expect(PayloadDecoder.decode(_institutionHex(raw)), isNull);
-      for (final end in [raw.length - 1, raw.length - 33]) {
-        expect(
-            PayloadDecoder.decode(
-                _institutionHex(withSigningTail(raw.sublist(0, end)))),
-            isNull);
+      for (final variant in [0, 2]) {
+        final legacy = [
+          pallet,
+          8,
+          ...compactVec(cid),
+          variant,
+          8,
+          for (final value in [0x31, 0x32]) ...[
+            ...List.filled(32, value),
+            ...compactVec(''),
+            ...compactVec('张'),
+            ...compactVec('三'),
+          ],
+          if (variant == 2) ...[0, 0, 0],
+          ...compactVec(cid),
+          ...compactVec('RCHAIR'),
+        ];
+        expect(PayloadDecoder.decode(hexOf(withSigningTail(legacy))), isNull);
       }
-      final withThreshold = [...raw.sublist(0, raw.length - 1), 1, 2, 0, 0, 0];
-      expect(
-          PayloadDecoder.decode(
-              _institutionHex(withSigningTail(withThreshold))),
-          isNull);
-      final governance = [...raw];
-      governance[1] = 8;
-      expect(
-          PayloadDecoder.decode(_institutionHex(withSigningTail(governance))),
-          isNull);
-    }
-  });
-
-  group('机构钱包更换与个人CID独立', () {
-    final fixture = (jsonDecode(
-            File('test/signing/fixtures/role_permission.json')
-                .readAsStringSync())
-        as Map<String, dynamic>)['institution_wallet'] as Map<String, dynamic>;
-    test('新钱包证明严格匹配Runtime SCALE金标，拒绝未知方式和尾字节', () {
-      final raw = _institutionBytes(fixture['acceptance_hex'] as String);
-      final decoded = PayloadDecoder.decode(_institutionHex(raw),
-          expectedAction: 'institution_wallet_accept');
-      expect(decoded?.fields['admin_account_id'], fixture['admin_account_id']);
-      expect(decoded?.fields['old_wallet_account_id'],
-          fixture['old_wallet_account_id']);
-      expect(decoded?.fields['new_wallet_account_id'],
-          fixture['new_wallet_account_id']);
-      expect(decoded?.fields['wallet_revision'], '7');
-      expect(
-          PayloadDecoder.decode(_institutionHex([...raw, 0]),
-              expectedAction: 'institution_wallet_accept'),
-          isNull);
-      raw[raw.length - 9] = 2;
-      expect(
-          PayloadDecoder.decode(_institutionHex(raw),
-              expectedAction: 'institution_wallet_accept'),
-          isNull);
-    });
-    test('公私权call10完整消费新钱包证明，治理variant3独立审阅', () {
-      final call = _institutionBytes(fixture['self_call_hex'] as String);
-      for (final pallet in [30, 31]) {
-        call[0] = pallet;
-        final decoded =
-            PayloadDecoder.decode(_institutionHex(withSigningTail(call)));
-        expect(decoded?.fields['new_wallet_account_id'],
-            fixture['new_wallet_account_id']);
-        expect(decoded?.fields['wallet_revision'], '7');
-        expect(PayloadDecoder.decode(_institutionHex(call)), isNull);
-        final truncated = call.sublist(0, call.length - 1);
-        expect(
-            PayloadDecoder.decode(_institutionHex(withSigningTail(truncated))),
-            isNull);
-      }
-      final cid = (fixture['cid_number'] as String).codeUnits;
+      final self = _institutionBytes(old['self_call_hex'] as String)
+        ..[0] = pallet;
+      final registration = _institutionBytes(old['registry_call_hex'] as String)
+        ..[0] = pallet;
       final governance = [
-        30,
+        pallet,
         8,
-        cid.length << 2,
-        ...cid,
-        ..._institutionBytes(fixture['governance_action_hex'] as String),
-        cid.length << 2,
-        ...cid,
-        4 << 2,
-        ...'TEST'.codeUnits
+        ...compactVec(cid),
+        ..._institutionBytes(old['governance_action_hex'] as String),
+        ...compactVec(cid),
+        ...compactVec('RCHAIR')
       ];
-      final decoded =
-          PayloadDecoder.decode(_institutionHex(withSigningTail(governance)));
-      expect(decoded?.fields['governance_detail'],
-          contains(fixture['new_wallet_account_id']));
-      expect(decoded?.fields['governance_action'], contains('更换管理员钱包'));
-    });
-    test('接收证明只能由指定新钱包签署，使用独立0x25域并验证期限', () {
-      final raw = _institutionBytes(fixture['acceptance_hex'] as String);
-      raw.setRange(0, 32, _institutionBytes(ChainConstants.genesisHash));
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      raw.setRange(
-          raw.length - 8, raw.length, _rebindU64(BigInt.from(now + 180)));
-      SignRequestEnvelope request(List<int> signer) =>
-          QrEnvelope<SignRequestBody>(
-              kind: QrKind.signRequest,
-              id: 'institution-wallet-proof-test',
-              expiresAt: now + 120,
-              body: SignRequestBody(
-                  action: QrActions.institutionWalletAccept,
-                  signerPublicKey: base64Url.encode(signer).replaceAll('=', ''),
-                  payload: base64Url.encode(raw).replaceAll('=', '')));
-      final valid = request(List.filled(32, 4));
-      final service = OfflineSignService();
-      final parsed = QrSigner().parseRequest(jsonEncode(valid.toJson()));
-      expect(service.verifyPayload(parsed).canSign, isTrue);
-      expect(
-          service.verifyPayload(request(List.filled(32, 5))).canSign, isFalse);
-      final message = QrSigner.signingBytesFor(valid.body);
-      expect(message, hasLength(32));
-      final oldDomain = QrSigner.signingBytesFor(SignRequestBody(
-          action: QrActions.onchinaAdmin,
-          signerPublicKey: valid.body.signerPublicKey,
-          payload: valid.body.payload));
-      expect(message, isNot(orderedEquals(oldDomain)));
-      raw.setRange(
-          raw.length - 8, raw.length, _rebindU64(BigInt.from(now - 1)));
-      expect(
-          service.verifyPayload(request(List.filled(32, 4))).canSign, isFalse);
-    });
+      for (final call in [self, registration, governance]) {
+        expect(PayloadDecoder.decode(hexOf(withSigningTail(call))), isNull);
+        expect(PayloadDecoder.decode(hexOf(call)), isNull);
+        expect(PayloadDecoder.decode(hexOf(withSigningTail([...call, 0]))),
+            isNull);
+      }
+    }
   });
 
   test('自助换绑授权完整解码，摘要/截断/尾随/同账户/非规范CID及非法revision拒绝', () {
@@ -632,8 +553,6 @@ void main() {
     );
   }
 
-  String ss58FromBytes(List<int> bytes) => Keyring().encodeAddress(bytes, 2027);
-
   // 年份边界夹具内嵌于现有测试；按原校验和规则构造，避免无效校验位掩盖年份漏洞。
   String cidForYear(String year, {bool citizen = false}) {
     final r5 = citizen ? 'CN000' : 'GD001';
@@ -722,21 +641,27 @@ void main() {
     }
   });
 
-  test('机构管理员名册中的公民CID同步校验u32年份', () {
+  test('机构任职人员CID同步校验u32年份', () {
     for (final year in ['2026', '10000', '4294967295', '4294967296', '02026']) {
-      final citizen = cidForYear(year, citizen: true);
-      final target = cidForYear('4294967295');
+      final person = cidForYear(year, citizen: true);
+      final cid = cidForYear('4294967295');
       final call = [
         30,
         8,
-        ...compactVec(target),
+        ...compactVec(cid),
         0,
-        ...compactU32(2),
-        ...adminPerson(List.filled(32, 0x31), '张', '三',
-            citizenCidNumber: citizen),
-        ...adminPerson(List.filled(32, 0x32), '李', '四'),
-        ...compactVec(target),
-        ...compactVec('RCHAIR'),
+        4,
+        ...compactVec('R_TEST'),
+        4,
+        ...compactVec(person),
+        ...u32Le(0),
+        ...u32Le(0),
+        5,
+        0,
+        0,
+        0,
+        ...compactVec(cid),
+        ...compactVec('RCHAIR')
       ];
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)));
       expect(
@@ -1968,7 +1893,7 @@ void main() {
       expect(PayloadDecoder.decode('0x02'), isNull);
     });
 
-    test('decodes onchina_admin_action with SS58 review fields', () {
+    test('decodes onchina_confirm with SS58 review fields', () {
       final actor = '0x${List.filled(32, '11').join()}';
       final target = '0x${List.filled(32, '22').join()}';
       const actorCidNumber = 'GD001-FRG0M-000000001-2026';
@@ -1978,7 +1903,7 @@ void main() {
         'action_id': 'admin-action-test',
         'action_type': 'PASSKEY_REGISTER',
         'actor_cid_number': actorCidNumber,
-        'actor_public_key': actor,
+        'account_id': actor,
         'actor_province_name': '广东省',
         'target': target,
         'request_hash': '0x${List.filled(32, '33').join()}',
@@ -1990,11 +1915,11 @@ void main() {
       final decoded = PayloadDecoder.decode(hexOf(utf8.encode(payload)));
 
       expect(decoded, isNotNull);
-      expect(decoded!.action, 'onchina_admin_action');
+      expect(decoded!.action, 'onchina_confirm');
       expect(decoded.fields['action_type'], '更新 Passkey');
       expect(decoded.reviewFields['actor_cid_number'], actorCidNumber);
       expect(decoded.reviewFields['actor_province_name'], '广东省');
-      expect(decoded.reviewFields['actor_public_key'], actor);
+      expect(decoded.reviewFields['account_id'], actor);
       expect(decoded.reviewFields['target'], target);
       expect(decoded.reviewFields.containsKey('payload_hash'), isFalse);
     });
@@ -2004,9 +1929,9 @@ void main() {
       final target = '0x${List.filled(32, '22').join()}';
       const actorCidNumber = 'GD001-FRG0M-000000001-2026';
       final cases = {
-        'CREATE_ADMIN': '新增管理员',
-        'UPDATE_ADMIN': '编辑管理员',
-        'DELETE_ADMIN': '删除管理员',
+        'INSTITUTION_CREATE': '创建机构',
+        'INSTITUTION_UPDATE': '更新机构',
+        'INSTITUTION_CREATE_ACCOUNT': '新增机构账户',
       };
 
       for (final entry in cases.entries) {
@@ -2016,7 +1941,7 @@ void main() {
           'action_id': 'admin-action-${entry.key}',
           'action_type': entry.key,
           'actor_cid_number': actorCidNumber,
-          'actor_public_key': actor,
+          'account_id': actor,
           'actor_province_name': '广东省',
           'target': target,
           'request_hash': '0x${List.filled(32, '33').join()}',
@@ -2228,9 +2153,9 @@ void main() {
       final decoded = PayloadDecoder.decode(hexOf(payload));
 
       expect(decoded, isNotNull);
-      expect(decoded!.action, 'decrypt_admin');
+      expect(decoded!.action, 'clearing_decrypt');
       expect(decoded.fields['cid_number'], cidNumber);
-      expect(decoded.summary, contains('解密清算行管理员'));
+      expect(decoded.summary, '清算解密授权 - $cidNumber');
     });
 
     test('rejects legacy 48-byte clearing bank decrypt challenge', () {
@@ -2766,7 +2691,7 @@ void main() {
       final decoded = PayloadDecoder.decode(encodeHex(payload));
 
       expect(decoded, isNotNull);
-      expect(decoded!.action, 'activate_admin_account');
+      expect(decoded!.action, 'role_access');
       expect(decoded.fields['cid_number'], cidNumber);
       expect(decoded.fields['institution_code'], 'CGOV');
       expect(
@@ -2936,7 +2861,7 @@ void main() {
       expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
     });
 
-    test('PublicManage 保留 call 4 空洞并拒绝旧载荷', () {
+    test('PublicEntity 保留 call 4 空洞并拒绝旧载荷', () {
       final payload = buildProposalIdPayload(0x1e, 0x04, 500);
       final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
       expect(decoded, isNull);
@@ -2947,7 +2872,7 @@ void main() {
       final institutionAccount = List<int>.filled(32, 0x11);
       final beneficiary = List<int>.filled(32, 0x22);
       final payload = <int>[
-        0x1e, 0x01, // PublicManage.propose_close_public_institution
+        0x1e, 0x01, // PublicEntity.propose_close_public_institution
         ...compactVec(registryActorCid),
         ...compactVec('RLEGAL'),
         ...institutionAccount,
@@ -3163,400 +3088,299 @@ void main() {
       }
     });
 
-    List<int> buildPublicInstitutionAdminsForGovernance() {
-      return <int>[
-        ...compactU32(2),
-        ...adminPerson(
-          List<int>.filled(32, 0x31),
-          '张',
-          '三',
-          citizenCidNumber: 'CN220-CTZN2-198805200-2026',
-        ),
-        ...adminPerson(List<int>.filled(32, 0x32), '', ''),
-      ];
-    }
-
-    List<int> buildPrivateInstitutionAdminsForGovernance() {
-      return <int>[
-        ...compactU32(2),
-        ...adminPerson(
-          List<int>.filled(32, 0x31),
-          '张',
-          '三',
-          citizenCidNumber: 'CN220-CTZN2-198805200-2026',
-        ),
-        ...adminPerson(List<int>.filled(32, 0x32), '李', '四'),
-      ];
-    }
-
-    List<int> appendGovernanceCallTail(List<int> payload, String actorCid) {
-      return <int>[
-        ...payload,
-        ...compactVec(actorCid),
-        ...compactVec('RCHAIR'),
-      ];
-    }
-
-    test('decodes propose_public_institution_governance 替换管理员集合', () {
-      const cidNumber = 'GZ001-SFAS1-123456789-2026';
-      final payload = Uint8List.fromList(
-        appendGovernanceCallTail(<int>[
-          0x1e,
-          0x08,
-          ...compactVec(cidNumber),
-          0x00, // InstitutionGovernanceAction::ReplaceAdmins
-          ...buildPublicInstitutionAdminsForGovernance(),
-        ], cidNumber),
-      );
-
-      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
-      expect(decoded, isNotNull);
-      expect(decoded!.action, 'propose_public_institution_governance');
-      expect(decoded.fields['cid_number'], cidNumber);
-      expect(decoded.fields['governance_action'], '替换管理员集合');
-      expect(decoded.fields['governance_detail'], contains('2 名管理员'));
-      expect(decoded.fields['actor_cid_number'], cidNumber);
-      expect(decoded.fields['fee_payer_description'], '$cidNumber 的链上费用账户');
-      expect(decoded.reviewFields['governance_detail'], contains('资料待完善'));
-    });
-
-    test('decodes propose_public_institution_governance 解除法定代表人', () {
-      const cidNumber = 'GZ001-SFAS1-123456789-2026';
-      final payload = Uint8List.fromList(
-        appendGovernanceCallTail(<int>[
-          0x1e,
-          0x08,
-          ...compactVec(cidNumber),
-          0x01, // InstitutionGovernanceAction::MutateRolesAndAssignments
-          ...compactU32(0), // role_changes
-          ...compactU32(0), // assignment_changes
-          0x01, // Option<InstitutionLegalRepresentativeChange>::Some
-          0x01, // InstitutionLegalRepresentativeChange::Clear
-        ], cidNumber),
-      );
-
-      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
-      expect(decoded, isNotNull);
-      expect(decoded!.action, 'propose_public_institution_governance');
-      expect(decoded.fields['governance_action'], '岗位/任职治理');
-      expect(decoded.fields['governance_detail'], contains('含法定代表人解除'));
-    });
-
-    test('decodes 新协议岗位创建及其权限和初始任职', () {
-      const cidNumber = 'GZ001-SFAS1-123456789-2026';
-      final payload = Uint8List.fromList(
-        appendGovernanceCallTail(<int>[
-          0x1e,
-          0x08,
-          ...compactVec(cidNumber),
-          0x01, // InstitutionGovernanceAction::MutateRolesAndAssignments
-          ...compactU32(1), // role_mutations
-          0x00, // InstitutionRoleMutation::Create
-          ...compactVec('财务负责人'),
-          0x01, // term_required
-          ...compactU32(2), // permissions
-          ...compactVec('pub-mgmt'),
-          ...u32Le(3),
-          0x00, // Propose
-          ...compactVec('pub-mgmt'),
-          ...u32Le(3),
-          0x01, // Vote
-          ...compactU32(1), // initial assignments
-          ...List<int>.filled(32, 0x31),
-          ...u32Le(100),
-          ...u32Le(200),
-          0x05, // InstitutionGovernance
-          ...compactVec('proposal-42'),
-          0x00, // Active
-          ...compactU32(0), // assignment_changes
-          0x00, // legal_representative_change=None
-        ], cidNumber),
-      );
-
-      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
-      expect(decoded, isNotNull);
-      expect(decoded!.action, 'propose_public_institution_governance');
-      expect(decoded.fields['governance_detail'], contains('1 个岗位生命周期操作'));
-    });
-
-    test('旧 InstitutionRoleChange 布局必须拒绝解码', () {
-      const cidNumber = 'GZ001-SFAS1-123456789-2026';
-      final payload = Uint8List.fromList(
-        appendGovernanceCallTail(<int>[
-          0x1e,
-          0x08,
-          ...compactVec(cidNumber),
-          0x01,
-          ...compactU32(1),
-          ...compactVec('OLD_ROLE'),
-          ...compactVec('旧岗位'),
-          0x00,
-          0x00,
-          ...compactU32(0),
-          0x00,
-        ], cidNumber),
-      );
-
-      expect(PayloadDecoder.decode(hexOf(withSigningTail(payload))), isNull);
-    });
-
-    test('decodes register_private_institution_admins 注册局直接登记管理员', () {
-      const cidNumber = 'GD001-COMP1-123456789-2026';
-      final payload = Uint8List.fromList(
-        appendGovernanceCallTail(<int>[
-              0x1f,
-              0x09,
-              ...compactVec(cidNumber),
-              0x00, // ReplaceAdmins
-              ...buildPrivateInstitutionAdminsForGovernance(),
-            ], registryActorCid) +
-            List<int>.filled(32, 0xab) +
-            [0x00],
-      );
-
-      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
-      expect(decoded, isNull, reason: '完整名单登记动作0已停用');
-    });
-
-    test('decodes register_public_institution_admins 公民资料允许暂空', () {
-      const cidNumber = 'NX013-CREGN-937676656-2026';
-      final payload = Uint8List.fromList(
-        appendGovernanceCallTail(<int>[
-              0x1e,
-              0x09,
-              ...compactVec(cidNumber),
-              0x00, // ReplaceAdmins
-              ...compactU32(1),
-              ...adminPerson(List<int>.filled(32, 0x41), '', ''),
-            ], registryActorCid) +
-            List<int>.filled(32, 0xab) +
-            [0x00],
-      );
-
-      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(payload)));
-      expect(decoded, isNull, reason: '完整名单登记动作0已停用');
-      // 与OnChina真实RuntimeCall解码金标逐字节一致。
-      expect(
-        hexOf(payload),
-        '0x1e09684e583031332d435245474e2d3933373637363635362d3230323600044141414141414141414141414141414141414141414141414141414141414141000000685a533030312d46524730372d3234393437343530332d3230323618524348414952abababababababababababababababababababababababababababababababab00',
-      );
-    });
-
-    List<int> registrationCall({
-      int pallet = 0x1e,
+    const personCid = 'CN220-CTZN2-198805200-2026';
+    const otherPersonCid = 'CN951-CTZN1-539598435-2026';
+    List<int> roleCall({
+      int pallet = 30,
+      bool registration = true,
+      bool initial = true,
+      List<String> persons = const [personCid, otherPersonCid],
+      int seats = 2,
       int source = 1,
       List<int> reference = const [],
-      bool initial = true,
-      int? threshold = 2,
-      bool legalChange = false,
-      int mutation = 0,
-      int permissionOperation = 0,
       int status = 0,
-      int termStart = 0,
-      int termEnd = 0,
-      int assignedAccount = 0x31,
-      bool roleOnly = true,
+      int start = 0,
+      int end = 0,
+      bool term = false,
+      int permissionOperation = 0,
+      int mutation = 0,
+      int? threshold = 2,
+      List<int>? legal,
+      bool oldVariant = false,
+      bool oldWallet = false,
     }) {
-      final target = <int>[
-        ...List<int>.filled(32, assignedAccount),
-        ...u32Le(termStart),
-        ...u32Le(termEnd),
-        source,
-        ...compactU32(reference.length),
-        ...reference,
-        status,
+      final targets = [
+        ...compactU32(persons.length),
+        for (final person in persons) ...[
+          if (oldWallet) ...List.filled(32, 0x31) else ...compactVec(person),
+          ...u32Le(start),
+          ...u32Le(end),
+          source,
+          ...compactU32(reference.length),
+          ...reference,
+          status,
+        ],
       ];
-      final mutations = initial
-          ? <int>[
-              ...compactU32(1),
-              mutation,
-              ...compactVec('登记办理岗'),
-              0,
-              ...compactU32(1),
-              ...compactVec('cit-id'),
-              ...u32Le(0),
-              permissionOperation,
-              ...compactU32(1),
-              ...target,
-            ]
-          : compactU32(0);
-      final changes = initial
-          ? compactU32(0)
-          : <int>[
-              ...compactU32(1),
-              ...compactVec('R_EXISTING'),
-              ...compactU32(1),
-              ...target,
-            ];
-      return <int>[
+      return [
         pallet,
-        9,
-        ...compactVec('NX013-CREGN-937676656-2026'),
-        roleOnly ? 1 : 2,
-        if (!roleOnly) ...buildPublicInstitutionAdminsForGovernance(),
-        ...mutations,
-        ...changes,
-        legalChange ? 1 : 0,
-        if (legalChange) 1,
-        ...compactVec(registryActorCid),
+        registration ? 9 : 8,
+        ...compactVec(nrcActorCid),
+        if (oldVariant) 1,
+        if (initial) ...[
+          4,
+          mutation,
+          ...compactVec('财务岗'),
+          term ? 1 : 0,
+          ...u32Le(seats),
+          4,
+          ...compactVec('res-iss'),
+          ...u32Le(0),
+          permissionOperation,
+          ...targets,
+          0,
+        ] else ...[
+          0,
+          4,
+          ...compactVec('R_EXISTING'),
+          ...targets
+        ],
+        if (!registration) ...legal ?? [0],
+        ...compactVec(registration ? registryActorCid : nrcActorCid),
         ...compactVec('RCHAIR'),
-        ...List<int>.filled(32, 0xab),
-        threshold == null ? 0 : 1,
-        if (threshold != null) ...u32Le(threshold),
+        if (registration) ...[
+          ...List.filled(32, 0xab),
+          threshold == null ? 0 : 1,
+          if (threshold != null) ...u32Le(threshold),
+        ],
       ];
     }
 
-    test('统一登记冷签展开岗位权限任职、状态指纹和显式阈值', () {
-      for (final pallet in [0x1e, 0x1f]) {
-        final decoded = PayloadDecoder.decode(
-          hexOf(
-            withSigningTail(
-              Uint8List.fromList(registrationCall(pallet: pallet)),
-            ),
-          ),
-        );
-        expect(decoded, isNotNull);
-        expect(decoded!.fields['expected_state_hash'], '0x${'ab' * 32}');
-        expect(decoded.fields['initial_threshold'], '2');
-        expect(decoded.fields.containsKey('admins'), isFalse);
-        expect(decoded.reviewFields['governance_detail'], contains('登记办理岗'));
+    test('现行公私权call8/9逐字节匹配独立调用fixture并完整展示席位、权限、人员CID', () {
+      final fixture = jsonDecode(
+              File('test/signing/fixtures/call_data.json').readAsStringSync())
+          as Map<String, dynamic>;
+      for (final row in (fixture['cases'] as List)
+          .cast<Map<String, dynamic>>()
+          .where((row) => [30, 31].contains(row['pallet_index']))) {
+        final registration = row['call_index'] == 9;
+        final call = roleCall(
+            pallet: row['pallet_index'] as int,
+            registration: registration,
+            source: registration ? 1 : 5);
+        expect(hexOf(call), row['expected_call_data_hex']);
+        final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)))!;
+        expect(decoded.action, row['name']);
         expect(
-          decoded.reviewFields['governance_detail'],
-          contains('cit-id / 业务0 / 发起'),
-        );
-        expect(decoded.reviewFields['governance_detail'], contains('任期0—0'));
-        expect(decoded.reviewFields['governance_detail'], contains('本次登记生成引用'));
-        expect(decoded.summary, contains('岗位任职'));
+            decoded.fields.containsKey('institution_action_variant'), isFalse);
+        expect(decoded.fields.containsKey('wallet_revision'), isFalse);
+        final detail = decoded.reviewFields['governance_detail']!;
+        expect(detail, contains('财务岗'));
+        expect(detail, contains('席位2'));
+        expect(detail, contains('res-iss / 业务0 / 发起'));
+        expect(detail, contains(personCid));
+        expect(detail, contains(otherPersonCid));
+        expect(detail, contains('任期0—0'));
+        expect(decoded.fields['actor_cid_number'],
+            registration ? registryActorCid : nrcActorCid);
+        if (registration) {
+          expect(decoded.fields['initial_threshold'], '2');
+          expect(decoded.fields['expected_state_hash'], '0x${'ab' * 32}');
+          expect(decoded.fields['actor_role_code'], 'RCHAIR');
+        }
+        expect(PayloadDecoder.decode(hexOf(call)), isNull);
+        for (var cut = 0; cut < call.length; cut++) {
+          expect(
+              PayloadDecoder.decode(
+                  hexOf(withSigningTail(call.sublist(0, cut)))),
+              isNull,
+              reason: '${row['name']} cut=$cut');
+        }
+        expect(PayloadDecoder.decode(hexOf(withSigningTail([...call, 0]))),
+            isNull);
       }
     });
 
-    test('统一登记带空岗位变更的组合变体仍按名册登记解码', () {
-      final call = appendGovernanceCallTail([
-            0x1e,
-            9,
-            ...compactVec('NX013-CREGN-937676656-2026'),
-            2,
-            ...buildPublicInstitutionAdminsForGovernance(),
-            0,
-            0,
-            0,
-          ], registryActorCid) +
-          List<int>.filled(32, 0xab) +
-          [0];
-      final decoded = PayloadDecoder.decode(
-        hexOf(withSigningTail(Uint8List.fromList(call))),
-      );
-      expect(decoded, isNull, reason: '组合动作2已停用');
-    });
-
-    test('后续登记保留二进制来源，明确不重置机构阈值', () {
-      for (final source in [0, 1, 2, 3, 4, 5]) {
-        final decoded = PayloadDecoder.decode(
-          hexOf(
-            withSigningTail(
-              Uint8List.fromList(
-                registrationCall(
-                  initial: false,
-                  threshold: null,
-                  source: source,
-                  reference: [0xff, 0, 0x80, 0x7f],
-                ),
-              ),
-            ),
-          ),
-        );
-        expect(decoded, isNotNull);
-        expect(decoded!.fields['initial_threshold'], 'none');
-        expect(decoded.reviewFields['initial_threshold'], '沿用现有机构阈值');
-        expect(
-          decoded.reviewFields['governance_detail'],
-          contains('R_EXISTING'),
-        );
-        expect(
-          decoded.reviewFields['governance_detail'],
-          contains('0xff00807f'),
-        );
-        expect(
-          decoded.reviewFields['governance_detail'],
-          contains(ss58FromBytes(List<int>.filled(32, 0x31))),
-        );
+    test('公权只接受CTZN，私权接受CTZN/NATP，机构CID和SMTP均拒绝', () {
+      for (final code in ['CTZN', 'NATP', 'SMTP', 'NRC0']) {
+        final person = 'CN220-${code}2-198805200-2026';
+        for (final pallet in [30, 31]) {
+          final decoded = PayloadDecoder.decode(hexOf(
+              withSigningTail(roleCall(pallet: pallet, persons: [person]))));
+          expect(decoded != null,
+              code == 'CTZN' || (code == 'NATP' && pallet == 31),
+              reason: '$pallet $code');
+        }
       }
     });
 
-    test('登记拒绝来源伪造、夹带LR、治理专用变体和初始化配置错配', () {
-      final invalid = [
-        registrationCall(source: 5),
-        registrationCall(reference: [1]),
-        registrationCall(source: 6),
-        registrationCall(legalChange: true),
-        registrationCall(roleOnly: false),
-        registrationCall(mutation: 1),
-        registrationCall(permissionOperation: 2),
-        registrationCall(status: 1),
-        registrationCall(termStart: 1),
-        registrationCall(threshold: null),
-        registrationCall(threshold: 1),
-        registrationCall(initial: false, threshold: 2),
-        registrationCall(initial: false, threshold: null, source: 5),
-      ];
-      for (final call in invalid) {
-        expect(
-          PayloadDecoder.decode(
-            hexOf(withSigningTail(Uint8List.fromList(call))),
-          ),
-          isNull,
-        );
-      }
-    });
-
-    test('岗位人员引用独立于实际钱包名单，冷钱包完整展示而不猜测链上资格', () {
-      final call = registrationCall(assignedAccount: 0x77);
+    test('任职按人员CID去重，跨岗位可复用；不接受旧账户字节槽', () {
+      expect(
+          PayloadDecoder.decode(hexOf(
+              withSigningTail(roleCall(persons: [personCid, personCid])))),
+          isNull);
       expect(
           PayloadDecoder.decode(
-              hexOf(withSigningTail(Uint8List.fromList(call)))),
+              hexOf(withSigningTail(roleCall(oldWallet: true)))),
+          isNull);
+      final target = [
+        ...compactVec(personCid),
+        ...u32Le(0),
+        ...u32Le(0),
+        5,
+        0,
+        0
+      ];
+      final call = [
+        30,
+        8,
+        ...compactVec(nrcActorCid),
+        0,
+        8,
+        for (final role in ['R_A', 'R_B']) ...[
+          ...compactVec(role),
+          4,
+          ...target
+        ],
+        0,
+        ...compactVec(nrcActorCid),
+        ...compactVec('RCHAIR')
+      ];
+      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)));
+      expect(decoded, isNotNull);
+      expect(decoded!.fields['governance_detail'], contains('R_A'));
+      expect(decoded.fields['governance_detail'], contains('R_B'));
+      final duplicateRole = [
+        30,
+        8,
+        ...compactVec(nrcActorCid),
+        0,
+        8,
+        for (var i = 0; i < 2; i++) ...[...compactVec('R_A'), 4, ...target],
+        0,
+        ...compactVec(nrcActorCid),
+        ...compactVec('RCHAIR')
+      ];
+      expect(
+          PayloadDecoder.decode(hexOf(withSigningTail(duplicateRole))), isNull);
+    });
+
+    test('治理法代只含姓名和人员CID；解除、岗位改名和删除严格读取', () {
+      final base = [30, 8, ...compactVec(nrcActorCid)];
+      final tail = [...compactVec(nrcActorCid), ...compactVec('RCHAIR')];
+      for (final legal in [
+        [1, 1],
+        [
+          1,
+          0,
+          ...compactVec('张'),
+          ...compactVec('三'),
+          ...compactVec(personCid)
+        ],
+      ]) {
+        final call = [...base, 0, 0, ...legal, ...tail];
+        final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)))!;
+        expect(decoded.fields['governance_detail'],
+            contains(legal.length == 2 ? '解除法定代表人' : personCid));
+        expect(
+            PayloadDecoder.decode(hexOf(withSigningTail(
+                [...base, 0, 0, ...legal, ...List.filled(32, 7), ...tail]))),
+            isNull);
+      }
+      for (final mutation in [
+        [1, ...compactVec('R_A'), ...compactVec('新岗位')],
+        [2, ...compactVec('R_A')],
+      ]) {
+        final call = [...base, 4, ...mutation, 0, 0, ...tail];
+        expect(PayloadDecoder.decode(hexOf(withSigningTail(call))), isNotNull);
+      }
+      for (final invalid in [
+        [...base, 0, 0, 0, ...tail],
+        [...base, 0, 0, 2, ...tail],
+        [...base, 0, 0, 1, 2, ...tail],
+        [
+          ...base,
+          0,
+          0,
+          1,
+          0,
+          0,
+          ...compactVec('三'),
+          ...compactVec(personCid),
+          ...tail
+        ],
+        [
+          ...base,
+          0,
+          0,
+          1,
+          0,
+          ...compactVec('张'),
+          ...compactVec('三'),
+          ...compactVec('CN220-SMTP2-198805200-2026'),
+          ...tail
+        ],
+      ]) {
+        expect(PayloadDecoder.decode(hexOf(withSigningTail(invalid))), isNull);
+      }
+    });
+
+    test('登记拒绝非法来源、状态、席位、任期、权限与初始化阈值，拒绝旧治理前缀', () {
+      final invalid = [
+        roleCall(source: 5),
+        roleCall(source: 6),
+        roleCall(reference: [1]),
+        roleCall(status: 1),
+        roleCall(seats: 0),
+        roleCall(seats: 1990),
+        roleCall(seats: 1),
+        roleCall(start: 1),
+        roleCall(term: true),
+        roleCall(term: true, start: 10, end: 9),
+        roleCall(permissionOperation: 2),
+        roleCall(mutation: 1),
+        roleCall(mutation: 2),
+        roleCall(threshold: null),
+        roleCall(threshold: 1),
+        roleCall(initial: false, threshold: 2),
+        roleCall(initial: false, threshold: null, source: 5),
+        roleCall(oldVariant: true),
+      ];
+      for (var i = 0; i < invalid.length; i++) {
+        expect(
+            PayloadDecoder.decode(hexOf(withSigningTail(invalid[i]))), isNull,
+            reason: 'case $i');
+      }
+      expect(
+          PayloadDecoder.decode(
+              hexOf(withSigningTail(roleCall(term: true, start: 1, end: 2)))),
           isNotNull);
     });
 
-    test('登记拒绝旧名册格式、新字段截断和任意尾随字节', () {
-      final legacy = appendGovernanceCallTail([
-        0x1e,
-        9,
-        ...compactVec('NX013-CREGN-937676656-2026'),
-        ...buildPublicInstitutionAdminsForGovernance(),
-      ], registryActorCid);
-      expect(
-        PayloadDecoder.decode(
-          hexOf(withSigningTail(Uint8List.fromList(legacy))),
-        ),
-        isNull,
-      );
-      final call = registrationCall();
-      for (final cut in [1, 5, 32, 33, 36]) {
+    test('后续登记保留原来源引用并完整展示，法代Option不属于登记结构', () {
+      for (var source = 0; source <= 5; source++) {
+        final call = roleCall(
+            initial: false,
+            threshold: null,
+            source: source,
+            reference: [0xff, 0, 0x80, 0x7f]);
+        final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)))!;
+        expect(decoded.fields['initial_threshold'], 'none');
+        expect(decoded.reviewFields['initial_threshold'], '沿用现有机构阈值');
         expect(
-          PayloadDecoder.decode(
-            hexOf(
-              withSigningTail(
-                Uint8List.fromList(call.sublist(0, call.length - cut)),
-              ),
-            ),
-          ),
-          isNull,
-        );
+            decoded.reviewFields['governance_detail'], contains('R_EXISTING'));
+        expect(
+            decoded.reviewFields['governance_detail'], contains('0xff00807f'));
+        expect(decoded.reviewFields['governance_detail'], contains(personCid));
       }
+      final call = roleCall();
+      final actionEnd = call.length -
+          compactVec(registryActorCid).length -
+          compactVec('RCHAIR').length -
+          37;
       expect(
-        PayloadDecoder.decode(
-          hexOf(withSigningTail(Uint8List.fromList([...call, 0]))),
-        ),
-        isNull,
-      );
-      // 二维码动作码必须与实际公/私权call字节一致。
-      expect(
-        PayloadDecoder.decode(
-          hexOf(withSigningTail(Uint8List.fromList(call))),
-          expectedAction: 'register_private_institution_admins',
-        ),
-        isNull,
-      );
+          PayloadDecoder.decode(hexOf(withSigningTail(
+              [...call.take(actionEnd), 0, ...call.skip(actionEnd)]))),
+          isNull);
     });
 
     test(
@@ -4107,16 +3931,16 @@ void main() {
     }
     final root = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
     final vectors = (root['vectors'] as List).cast<Map<String, dynamic>>();
-    final byName = {for (final v in vectors) v['name'] as String: v};
+    final byTag = {for (final v in vectors) v['op_tag'] as String: v};
 
     test(
-      'ACTIVATE_ADMIN fixture payload → decode 解出 activate_admin_account',
+      'ROLE_ACCESS fixture payload → decode 解出 role_access',
       () {
-        final v = byName['ACTIVATE_ADMIN']!;
+        final v = byTag['0x18']!;
         final inputs = v['sample_inputs'] as Map<String, dynamic>;
         final decoded = PayloadDecoder.decode('0x${v['payload_hex']}');
         expect(decoded, isNotNull);
-        expect(decoded!.action, 'activate_admin_account');
+        expect(decoded!.action, 'role_access');
         // institution_code = "NRC"(fixture sample),kind=0 与 NRC 固定治理码匹配。
         expect(decoded.fields['institution_code'], isNotEmpty);
         expect(decoded.fields['cid_number'], inputs['cid_number']);
@@ -4124,19 +3948,18 @@ void main() {
       },
     );
 
-    test('DECRYPT fixture payload → decode 解出 decrypt_admin + cid_number', () {
-      final v = byName['DECRYPT']!;
+    test('DECRYPT fixture payload → decode 解出 clearing_decrypt + cid_number',
+        () {
+      final v = byTag['0x19']!;
       final inputs = v['sample_inputs'] as Map<String, dynamic>;
       final decoded = PayloadDecoder.decode('0x${v['payload_hex']}');
       expect(decoded, isNotNull);
-      expect(decoded!.action, 'decrypt_admin');
+      expect(decoded!.action, 'clearing_decrypt');
       expect(decoded.fields['cid_number'], inputs['cid_number']);
     });
   });
 }
 
-String _institutionHex(List<int> bytes) =>
-    '0x${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
 Uint8List _institutionBytes(String value) {
   final raw = value.replaceFirst('0x', '');
   return Uint8List.fromList(List.generate(raw.length ~/ 2,

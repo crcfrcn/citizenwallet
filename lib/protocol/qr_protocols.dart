@@ -52,7 +52,6 @@ class QrActions {
 
   static int get login => _code('login');
   static int get topup => _code('topup');
-  static int get institutionWalletAccept => _code('institution_wallet_accept');
   static int get citizenIdentity => _code('citizen_identity');
   static int get citizenOccupy => _code('citizen_occupy');
   static int get citizenRebind => _code('citizen_rebind');
@@ -65,9 +64,9 @@ class QrActions {
   static int get citizenserveCloudflarePublish =>
       _code('citizenserve_cloudflare_publish');
   static int get nodeDeploy => _code('node_deploy');
-  static int get onchinaAdmin => _code('onchina_admin_action');
-  static int get activateAdmin => _code('activate_admin_account');
-  static int get decryptAdmin => _code('decrypt_admin');
+  static int get onchinaConfirm => _code('onchina_confirm');
+  static int get roleAccess => _code('role_access');
+  static int get clearingDecrypt => _code('clearing_decrypt');
   static int get runtimeUpgradeHash => _code('runtime_upgrade_hash');
 
   /// 广场账户链下动作：Hot 由 CitizenApp 本机签名，Cold 由 CitizenWallet
@@ -106,8 +105,8 @@ class QrActions {
       _code('add_public_institution_account');
   static int get publicInstitutionGovernance =>
       _code('propose_public_institution_governance');
-  static int get publicInstitutionRegisterAdmins =>
-      _code('register_public_institution_admins');
+  static int get publicInstitutionRegisterRoles =>
+      _code('register_public_institution_roles');
   static int get privateInstitutionClose =>
       _code('propose_close_private_institution');
   static int get privateInstitutionUpdateInfo =>
@@ -116,8 +115,8 @@ class QrActions {
       _code('add_private_institution_account');
   static int get privateInstitutionGovernance =>
       _code('propose_private_institution_governance');
-  static int get privateInstitutionRegisterAdmins =>
-      _code('register_private_institution_admins');
+  static int get privateInstitutionRegisterRoles =>
+      _code('register_private_institution_roles');
   static int get multisigTransfer => _code('propose_transfer');
   static int get safetyFundTransfer => _code('propose_safety_fund_transfer');
   static int get sweepToMain => _code('propose_sweep_to_main');
@@ -192,7 +191,7 @@ class QrActions {
       action == citizenOccupy || action == citizenRebind;
 
   static bool isBinaryRaw(int action) =>
-      action == activateAdmin || action == decryptAdmin;
+      action == roleAccess || action == clearingDecrypt;
 
   static bool isRuntimeHashOnly(int action) =>
       GeneratedQrActionRegistry.isHashOnlyAction(action);

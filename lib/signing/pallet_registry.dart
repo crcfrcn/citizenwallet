@@ -69,7 +69,7 @@ class PalletRegistry {
   // ---- JointVote sub-pallet (21) · 联合投票(内部投票阶段 + 联合公投)----
   static const int jointVotePallet = 21;
 
-  /// `cast_admin(proposal_id, cid_number, voter_role_code, approve)` — 联合投票内部投票阶段。
+  /// `cast_role_vote(proposal_id, cid_number, voter_role_code, approve)` — 联合投票岗位投票阶段。
   static const int jointVoteCall = 0;
 
   /// `cast_referendum(proposal_id, approve)` — 联合公投阶段,链上按账户读取公民身份。
@@ -103,10 +103,10 @@ class PalletRegistry {
   static const int proposeRuntimeUpgradeCall = 0;
   static const int developerDirectUpgradeCall = 2;
 
-  // ---- PublicManage (30) / PrivateManage (31) ----
+  // ---- PublicEntity (30) / PrivateEntity (31) ----
   // 公权机构与私权机构登记管理分别由两个 pallet 承载。
-  static const int publicManagePallet = 30;
-  static const int privateManagePallet = 31;
+  static const int publicEntityPallet = 30;
+  static const int privateEntityPallet = 31;
   static const int proposeCloseInstitutionCall = 1;
   // call_index 4 永久留洞：机构 pending 状态由投票引擎终态回调清理。
 
@@ -115,8 +115,7 @@ class PalletRegistry {
   static const int updateInstitutionInfoCall = 6;
   static const int addInstitutionAccountCall = 7;
   static const int proposeInstitutionGovernanceCall = 8;
-  static const int rotateInstitutionAdminWalletCall = 10;
-  static const int registerInstitutionAdminsCall = 9;
+  static const int registerInstitutionRolesCall = 9;
 
   // ---- Personal (7) · 个人多签生命周期与成员治理 ----
   // 个人多签独立 pallet,MODULE_TAG = b"per-mgmt",
