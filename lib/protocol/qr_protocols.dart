@@ -105,6 +105,8 @@ class QrActions {
       _code('add_public_institution_account');
   static int get publicInstitutionGovernance =>
       _code('propose_public_institution_governance');
+  static int get publicInstitutionPolicy =>
+      _code('propose_public_institution_policy');
   static int get publicInstitutionRegisterRoles =>
       _code('register_public_institution_roles');
   static int get privateInstitutionClose =>
@@ -115,6 +117,8 @@ class QrActions {
       _code('add_private_institution_account');
   static int get privateInstitutionGovernance =>
       _code('propose_private_institution_governance');
+  static int get privateInstitutionPolicy =>
+      _code('propose_private_institution_policy');
   static int get privateInstitutionRegisterRoles =>
       _code('register_private_institution_roles');
   static int get multisigTransfer => _code('propose_transfer');

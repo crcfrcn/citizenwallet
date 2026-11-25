@@ -12,6 +12,7 @@ import 'package:polkadart_keyring/polkadart_keyring.dart';
 import 'package:citizenwallet/signing/institution_code.dart';
 import 'package:citizenwallet/signing/chain_constants.dart';
 import 'package:citizenwallet/signing/payload_decoder.dart';
+import 'package:citizenwallet/wallet/native_sr25519.dart';
 import 'package:citizenwallet/signing/role_permission_codec.dart';
 import 'package:citizenwallet/protocol/qr_protocols.dart';
 
@@ -671,6 +672,112 @@ void main() {
               : 'propose_public_institution_governance',
           reason: year);
     }
+  });
+
+  test('原生政策、Configure及新增账户逐字节金标，截断和尾随拒绝', () {
+    final fixture = jsonDecode(
+            File('test/signing/fixtures/call_data.json').readAsStringSync())
+        as Map<String, dynamic>;
+    final names = <String>{
+      for (final kind in ['public', 'private'])
+        'propose_${kind}_institution_policy',
+      for (final kind in ['public', 'private'])
+        'configure_${kind}_institution_role',
+      for (final kind in ['public', 'private'])
+        'add_${kind}_institution_account'
+    };
+    final rows = (fixture['institution_extensions'] as List)
+        .cast<Map<String, dynamic>>()
+        .where((r) => names.contains(r['name']));
+    expect(rows, hasLength(6));
+    for (final row in rows) {
+      final bytes = bytesFromHex(row['expected_call_data_hex'] as String);
+      expect(bytes.length, row['expected_byte_length']);
+      final decoded = PayloadDecoder.decode(hexOf(withSigningTail(bytes)));
+      expect(decoded, isNotNull, reason: row['name'] as String);
+      final name = row['name'] as String;
+      expect(
+          decoded!.action,
+          name.startsWith('configure_')
+              ? name
+                  .replaceFirst('configure_', 'propose_')
+                  .replaceFirst('_institution_role', '_institution_governance')
+              : name);
+      expect(
+          decoded.fields['cid_number'], (row['fields'] as Map)['cid_number']);
+      if (row['call_index'] == 11) {
+        expect(decoded.fields['governance_detail'], contains('multisig'));
+        expect(decoded.fields['governance_detail'], contains('共同阈值改为2'));
+        expect(decoded.fields['expected_state_hash'], contains('09' * 32));
+        expect(decoded.fields['proposer_role_code'], 'R_GOV');
+      } else if (name.startsWith('configure_')) {
+        expect(decoded.fields['governance_detail'], contains('配置岗位R_POLICY'));
+        expect(decoded.fields['governance_detail'], contains('有任期'));
+      } else {
+        expect(decoded.fields['actor_role_code'], 'R_GOV');
+      }
+      expect(PayloadDecoder.decode(hexOf(withSigningTail([...bytes, 255]))),
+          isNull);
+      expect(
+          PayloadDecoder.decode(
+              hexOf(withSigningTail(bytes.sublist(0, bytes.length - 1)))),
+          isNull);
+    }
+  });
+  test('新增机构载荷经真实原生签名覆盖全部字节，篡改拒绝', () {
+    final fixture = jsonDecode(
+            File('test/signing/fixtures/call_data.json').readAsStringSync())
+        as Map<String, dynamic>;
+    // 公开的全零合成测试向量，不引用任何用户钱包或持久密钥。
+    final vector = Uint8List(32);
+    try {
+      final publicKey = NativeSr25519.publicKeyOf(vector);
+      for (final row in (fixture['institution_extensions'] as List)
+          .cast<Map<String, dynamic>>()) {
+        final payload = withSigningTail(
+            bytesFromHex(row['expected_call_data_hex'] as String));
+        expect(payload.length, lessThan(256));
+        expect(PayloadDecoder.decode(hexOf(payload)), isNotNull);
+        final signature = NativeSr25519.sign(vector, payload);
+        expect(NativeSr25519.verify(publicKey, signature, payload), isTrue);
+        final changed = Uint8List.fromList(payload);
+        changed[bytesFromHex(row['expected_call_data_hex'] as String).length -
+            1] ^= 1;
+        expect(NativeSr25519.verify(publicKey, signature, changed), isFalse);
+      }
+    } finally {
+      vector.fillRange(0, vector.length, 0);
+    }
+  });
+  test('政策拒绝空权限、零阈值、错误操作和动作混淆', () {
+    final cid = 'LN001-CGOV0-944805165-2026';
+    List<int> policy(
+            {int operation = 0, int threshold = 2, bool empty = false}) =>
+        [
+          30,
+          11,
+          ...compactVec(cid),
+          4,
+          ...compactVec('R_POLICY'),
+          if (empty)
+            0
+          else ...[4, ...compactVec('multisig'), ...u32Le(0), operation],
+          1,
+          ...u32Le(threshold),
+          ...compactVec('R_GOV'),
+          ...List<int>.filled(32, 9)
+        ];
+    for (final call in [
+      policy(empty: true),
+      policy(threshold: 0),
+      policy(operation: 2)
+    ]) {
+      expect(PayloadDecoder.decode(hexOf(withSigningTail(call))), isNull);
+    }
+    expect(
+        PayloadDecoder.decode(hexOf(withSigningTail(policy())),
+            expectedAction: 'propose_private_institution_policy'),
+        isNull);
   });
 
   group('PayloadDecoder', () {
@@ -3161,7 +3268,10 @@ void main() {
           as Map<String, dynamic>;
       for (final row in (fixture['cases'] as List)
           .cast<Map<String, dynamic>>()
-          .where((row) => [30, 31].contains(row['pallet_index']))) {
+          .where((row) =>
+              [30, 31].contains(row['pallet_index']) &&
+              [8, 9].contains(row['call_index']) &&
+              !row['name'].toString().startsWith('configure_'))) {
         final registration = row['call_index'] == 9;
         final call = roleCall(
             pallet: row['pallet_index'] as int,

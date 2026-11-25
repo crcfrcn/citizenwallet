@@ -474,6 +474,14 @@ class PayloadDecoder {
             isPublic: isPublic,
           );
         }
+        if (callIndex == PalletRegistry.proposeInstitutionPolicyCall) {
+          final action = isPublic
+              ? 'propose_public_institution_policy'
+              : 'propose_private_institution_policy';
+          if (expectedAction != null && expectedAction != action) return null;
+          return _decodeInstitutionPolicy(bytes,
+              action: action, entityLabel: entityLabel);
+        }
         if (callIndex == PalletRegistry.registerInstitutionRolesCall) {
           final registrationAction = isPublic
               ? 'register_public_institution_roles'
@@ -1540,8 +1548,8 @@ class PayloadDecoder {
     );
   }
 
-  // PublicEntity(30) / PrivateEntity(31) / add_institution_account(7)
-  // SCALE: cid_number + account_names:Vec<BoundedVec<u8>> + actor_cid_number + actor_role_code。
+  // PublicEntity(30) / PrivateEntity(31) / propose_add_institution_account(7)
+  // SCALE: cid_number + account_names:Vec<BoundedVec<u8>> + proposer_role_code。
   static DecodedPayload? _decodeAddInstitutionAccount(
     Uint8List bytes, {
     required String action,
@@ -1566,9 +1574,6 @@ class PayloadDecoder {
       accountNames.add(accountNameRead.$1);
       offset = accountNameRead.$2;
     }
-    final actorRead = _readCidNumber(bytes, offset);
-    if (actorRead == null) return null;
-    offset = actorRead.$2;
     final roleRead = _readRoleCode(bytes, offset);
     if (roleRead == null) return null;
     offset = roleRead.$2;
@@ -1580,7 +1585,7 @@ class PayloadDecoder {
         'cid_number': cidNumber,
         'account_names': accountNames.join('、'),
         'account_count': accountCount.toString(),
-        'actor_cid_number': actorRead.$1,
+        'actor_cid_number': cidNumber,
         'actor_role_code': roleRead.$1,
       },
     );
@@ -1616,6 +1621,57 @@ class PayloadDecoder {
       summary: '$entityLabel ${cid.$1} 发起岗位/任职治理',
       fields: fields,
     );
+  }
+
+  /// 完整审阅call11，权限替换、共同阈值、岗位及状态指纹均来自签名字节。
+  static DecodedPayload? _decodeInstitutionPolicy(Uint8List bytes,
+      {required String action, required String entityLabel}) {
+    final cid = _readCidNumber(bytes, 2);
+    if (cid == null) return null;
+    var offset = cid.$2;
+    final (count, size) = _decodeCompactU32(bytes, offset);
+    if (size == 0 || count > 64) return null;
+    offset += size;
+    final details = <String>[];
+    final seen = <String>{};
+    for (var index = 0; index < count; index++) {
+      final role = _readRoleCode(bytes, offset);
+      if (role == null || !role.$1.startsWith('R_') || !seen.add(role.$1))
+        return null;
+      details.add('替换岗位${role.$1}的全部原生权限');
+      final permissions =
+          _skipRolePermissionSpecs(bytes, role.$2, details: details);
+      if (permissions == null || permissions.$1 == 0) return null;
+      offset = permissions.$2;
+    }
+    if (offset >= bytes.length) return null;
+    final tag = bytes[offset++];
+    if (tag == 1) {
+      if (offset + 4 > bytes.length) return null;
+      final threshold = _readU32Le(bytes, offset);
+      offset += 4;
+      if (threshold < 2) return null;
+      details.add('共同阈值改为$threshold（按原阈值批准，执行后影响后续提案）');
+    } else if (tag != 0 || count == 0) {
+      return null;
+    }
+    final proposer = _readRoleCode(bytes, offset);
+    if (proposer == null || proposer.$2 + 32 > bytes.length) return null;
+    offset = proposer.$2;
+    final stateHash = _bytesToLowerHex(bytes.sublist(offset, offset + 32));
+    offset += 32;
+    if (!_hasValidSigningTail(bytes, offset)) return null;
+    return DecodedPayload(
+        action: action,
+        summary: '$entityLabel ${cid.$1} 发起原生政策',
+        fields: {
+          'cid_number': cid.$1,
+          'governance_detail': details.join('；'),
+          'proposer_role_code': proposer.$1,
+          'expected_state_hash': stateHash,
+          'fee_payer_description': _reviewValue(
+              'fee_payer_description', {'actor_cid_number': cid.$1}),
+        });
   }
 
   // 登记只含role_mutations、assignment_changes；没有旧治理枚举或法代Option槽。
@@ -4642,6 +4698,19 @@ class PayloadDecoder {
         );
         if (assignments == null || assignments.$1 > seats) return null;
         offset = assignments.$2;
+      } else if (variant == 3) {
+        final code = _readRoleCode(bytes, offset);
+        if (code == null || !code.$1.startsWith('R_') || !seen.add(code.$1))
+          return null;
+        offset = code.$2;
+        if (offset + 6 > bytes.length || bytes[offset] > 1) return null;
+        final term = bytes[offset++] == 1;
+        final seats = _readU32Le(bytes, offset);
+        offset += 4;
+        final status = bytes[offset++];
+        if (seats == 0 || seats > 1989 || status > 1) return null;
+        details.add(
+            '配置岗位${code.$1}：席位$seats，${term ? '有任期' : '无任期'}，${status == 0 ? '启用' : '停用'}');
       } else if (variant == 1 || variant == 2) {
         final code = _readRoleCode(bytes, offset);
         if (code == null || !seen.add(code.$1)) return null;

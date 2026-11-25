@@ -5,6 +5,11 @@ import 'package:citizenwallet/protocol/qr_protocols.dart';
 import 'package:citizenwallet/signing/pallet_registry.dart';
 
 void main() {
+  test('公私机构政策采用追加call11且不复用退役10', () {
+    expect(PalletRegistry.proposeInstitutionPolicyCall, 11);
+    expect(QrActions.publicInstitutionPolicy, 0x1e0b);
+    expect(QrActions.privateInstitutionPolicy, 0x1f0b);
+  });
   group('PalletRegistry', () {
     // PalletRegistry 只登记 pallet/call 索引,放行由 decoder 两色识别决定。
 

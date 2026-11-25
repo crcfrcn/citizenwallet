@@ -109,5 +109,73 @@
       },
       "expected_call_data_hex": "0x1f09684c4e3030312d4e524330472d3934343830353136352d32303236040024e8b4a2e58aa1e5b2970002000000041c7265732d69737300000000000868434e3232302d43545a4e322d3139383830353230302d32303236000000000000000001000068434e3935312d43545a4e312d3533393539383433352d32303236000000000000000001000000685a533030312d46524730372d3234393437343530332d3230323618524348414952abababababababababababababababababababababababababababababababab0102000000"
     }
+  ],
+  "institution_extensions": [
+    {
+      "name": "propose_public_institution_policy",
+      "pallet_index": 30,
+      "call_index": 11,
+      "fields": {
+        "cid_number": "LN001-CGOV0-944805165-2026",
+        "proposer_role_code": "R_GOV"
+      },
+      "expected_call_data_hex": "0x1e0b684c4e3030312d43474f56302d3934343830353136352d323032360420525f504f4c49435904206d756c74697369670000000000010200000014525f474f560909090909090909090909090909090909090909090909090909090909090909",
+      "expected_byte_length": 97
+    },
+    {
+      "name": "configure_public_institution_role",
+      "pallet_index": 30,
+      "call_index": 8,
+      "fields": {
+        "cid_number": "LN001-CGOV0-944805165-2026",
+        "proposer_role_code": "R_GOV"
+      },
+      "expected_call_data_hex": "0x1e08684c4e3030312d43474f56302d3934343830353136352d32303236040320525f504f4c4943590102000000000000684c4e3030312d43474f56302d3934343830353136352d3230323614525f474f56",
+      "expected_byte_length": 81
+    },
+    {
+      "name": "add_public_institution_account",
+      "pallet_index": 30,
+      "call_index": 7,
+      "fields": {
+        "cid_number": "LN001-CGOV0-944805165-2026",
+        "proposer_role_code": "R_GOV"
+      },
+      "expected_call_data_hex": "0x1e07684c4e3030312d43474f56302d3934343830353136352d323032360430e4b89ae58aa1e8b4a6e688b714525f474f56",
+      "expected_byte_length": 49
+    },
+    {
+      "name": "propose_private_institution_policy",
+      "pallet_index": 31,
+      "call_index": 11,
+      "fields": {
+        "cid_number": "LN001-CCOR0-944805165-2026",
+        "proposer_role_code": "R_GOV"
+      },
+      "expected_call_data_hex": "0x1f0b684c4e3030312d43434f52302d3934343830353136352d323032360420525f504f4c49435904206d756c74697369670000000000010200000014525f474f560909090909090909090909090909090909090909090909090909090909090909",
+      "expected_byte_length": 97
+    },
+    {
+      "name": "configure_private_institution_role",
+      "pallet_index": 31,
+      "call_index": 8,
+      "fields": {
+        "cid_number": "LN001-CCOR0-944805165-2026",
+        "proposer_role_code": "R_GOV"
+      },
+      "expected_call_data_hex": "0x1f08684c4e3030312d43434f52302d3934343830353136352d32303236040320525f504f4c4943590102000000000000684c4e3030312d43434f52302d3934343830353136352d3230323614525f474f56",
+      "expected_byte_length": 81
+    },
+    {
+      "name": "add_private_institution_account",
+      "pallet_index": 31,
+      "call_index": 7,
+      "fields": {
+        "cid_number": "LN001-CCOR0-944805165-2026",
+        "proposer_role_code": "R_GOV"
+      },
+      "expected_call_data_hex": "0x1f07684c4e3030312d43434f52302d3934343830353136352d323032360430e4b89ae58aa1e8b4a6e688b714525f474f56",
+      "expected_byte_length": 49
+    }
   ]
 }

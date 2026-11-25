@@ -117,6 +117,9 @@ class PalletRegistry {
   static const int proposeInstitutionGovernanceCall = 8;
   static const int registerInstitutionRolesCall = 9;
 
+  /// 普通机构原生权限及共同阈值政策。
+  static const int proposeInstitutionPolicyCall = 11;
+
   // ---- Personal (7) · 个人多签生命周期与成员治理 ----
   // 个人多签独立 pallet,MODULE_TAG = b"per-mgmt",
   // ACTION enum 独立命名空间(ACTION_CREATE=0/ACTION_CLOSE=1)。
