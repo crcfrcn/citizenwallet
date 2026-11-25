@@ -10,9 +10,9 @@ class ChainConstants {
   static const String genesisHash =
       '0x18847a5dfd263272f2e7727836fe6582f8c4463ff48609df7b96d5e4d9dd24dd';
 
-  /// 本轮Runtime升级目标的唯一交易版本；钱包与节点按同一升级批次切换。
+  /// 当前已部署链的唯一交易版本；Runtime升级生效后再同步切换钱包。
   /// V5 交易格式号不等于 transaction_version。其他模块和测试仅引用此值。
-  static const int transactionVersion = 7;
+  static const int transactionVersion = 6;
 
   /// 钱包交易版本有效性的唯一判断入口。
   static bool supportsTransactionVersion(int version) =>

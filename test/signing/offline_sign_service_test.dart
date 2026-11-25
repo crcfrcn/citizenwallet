@@ -862,7 +862,7 @@ void main() {
       );
     });
 
-    test('链交易仅接受交易版本7，拒绝6和未知版本，不锁 spec_version', () {
+    test('链交易仅接受当前交易版本6，拒绝候选7和未知版本，不锁 spec_version', () {
       const callData =
           '0x0400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0100000000000000000000000000000000';
 
@@ -878,15 +878,15 @@ void main() {
           .status;
 
       expect(
-        verify(signingPayloadHex(callData, transactionVersion: 7)),
+        verify(signingPayloadHex(callData, transactionVersion: 6)),
         SignDecisionStatus.normal,
       );
       expect(
         verify(signingPayloadHex(callData, genesisHash: '0x${'99' * 32}')),
         SignDecisionStatus.reject,
       );
-      // 按已核验的本轮 Wasm 目标覆盖上一版本及未知版本的拒签边界。
-      for (final version in [6, 8, 0xffffffff]) {
+      // 钱包以已部署链为准，候选版本不得在Runtime生效前取得签名资格。
+      for (final version in [5, 7, 8, 0xffffffff]) {
         expect(
           verify(signingPayloadHex(callData, transactionVersion: version)),
           SignDecisionStatus.reject,
@@ -911,6 +911,38 @@ void main() {
         highSpec.decoded?.reviewFields['transaction_version'],
         ChainConstants.transactionVersion.toString(),
       );
+      expect(walletManager.signCallCount, 0);
+    });
+
+    test('自助占号完整审阅CID和签名账户，仅接受当前交易版本6', () {
+      const cid = 'CN739-CTZN3-996321164-2026';
+      final callData = '0x${_toHex([10, 5, cid.length << 2, ...cid.codeUnits])}';
+      for (final version in [6, 7, 8, 0xffffffff]) {
+        final request = _buildTestRequest(
+          requestId: 'offline-cid-version-$version',
+          signerPublicKey: signingAccount.accountId,
+          payloadHex: signingPayloadHex(
+            callData,
+            specVersion: 7,
+            transactionVersion: version,
+          ),
+          action: QrActions.fromDecodedAction('self_occupy_cid'),
+        );
+        final verification = service.verifyPayload(request);
+        expect(
+          verification.status,
+          version == 6 ? SignDecisionStatus.normal : SignDecisionStatus.reject,
+        );
+        if (version == 6) {
+          expect(verification.decoded!.reviewFields['cid_number'], cid);
+          expect(
+            verification.decoded!.reviewFields['account_id'],
+            signingAccount.accountId,
+          );
+          expect(verification.decoded!.reviewFields['spec_version'], '7');
+          expect(verification.decoded!.reviewFields['transaction_version'], '6');
+        }
+      }
       expect(walletManager.signCallCount, 0);
     });
 
