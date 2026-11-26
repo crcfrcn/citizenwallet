@@ -247,6 +247,26 @@ void main() {
 
     tearDown(() => WalletIsar.instance.resetForTest());
 
+    test('官方Utility27完整审阅与真实签名绑定全部子项，模式篡改拒签', () async {
+      final fixture=jsonDecode(File('test/signing/fixtures/call_data.json').readAsStringSync()) as Map<String,dynamic>;
+      for(final name in ['batch','batch_all','force_batch']) {
+        final entry=(fixture['cases'] as List).singleWhere((v)=>v['name']==name) as Map<String,dynamic>;
+        final payload=signingPayloadHex(entry['expected_call_data_hex'] as String,specVersion:9);
+        final request=_buildTestRequest(requestId:'utility-$name',signerPublicKey:signingAccount.accountId,payloadHex:payload,action:QrActions.fromDecodedAction(name));
+        final verification=service.verifyPayload(request);
+        expect(verification.status,SignDecisionStatus.normal);
+        expect(verification.decoded!.reviewFields['account_id'],signingAccount.accountId);
+        expect(verification.decoded!.reviewFields['transfers'],contains('第8笔'));
+        final response=await service.signParsedRequest(accountId:signingAccount.accountId,request:request);
+        expect(_verifySr25519(signerPublicKeyHex:signingAccount.accountId,message:_messageForRequest(request),signatureHex:response.body.signatureHex),isTrue);
+        final wrong=_buildTestRequest(requestId:'wrong-$name',signerPublicKey:signingAccount.accountId,payloadHex:payload,action:QrActions.fromDecodedAction(name=='batch_all'?'force_batch':'batch_all'));
+        expect(service.verifyPayload(wrong).status,SignDecisionStatus.reject);
+        final bare=_buildTestRequest(requestId:'bare-$name',signerPublicKey:signingAccount.accountId,payloadHex:entry['expected_call_data_hex'] as String,action:QrActions.fromDecodedAction(name));
+        expect(service.verifyPayload(bare).status,SignDecisionStatus.reject);
+      }
+      expect(walletManager.signCallCount,3);
+    });
+
     test('两阶段冷签完整审阅并真实验签，旧动作/错账户/过期/尾随与重放均拒绝', () async {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final targetSeed = Uint8List.fromList(List.filled(32, 3));
@@ -862,7 +882,7 @@ void main() {
       );
     });
 
-    test('链交易仅接受当前交易版本6，拒绝候选7和未知版本，不锁 spec_version', () {
+    test('链交易仅接受当次交易版本，拒绝其它版本和未知版本，不锁 spec_version', () {
       const callData =
           '0x0400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0100000000000000000000000000000000';
 
@@ -878,7 +898,7 @@ void main() {
           .status;
 
       expect(
-        verify(signingPayloadHex(callData, transactionVersion: 6)),
+        verify(signingPayloadHex(callData, transactionVersion: ChainConstants.transactionVersion)),
         SignDecisionStatus.normal,
       );
       expect(
@@ -886,7 +906,7 @@ void main() {
         SignDecisionStatus.reject,
       );
       // 钱包以已部署链为准，候选版本不得在Runtime生效前取得签名资格。
-      for (final version in [5, 7, 8, 0xffffffff]) {
+      for (final version in [5, 6, 7, 9, 0xffffffff]) {
         expect(
           verify(signingPayloadHex(callData, transactionVersion: version)),
           SignDecisionStatus.reject,
@@ -914,10 +934,10 @@ void main() {
       expect(walletManager.signCallCount, 0);
     });
 
-    test('自助占号完整审阅CID和签名账户，仅接受当前交易版本6', () {
+    test('自助占号完整审阅CID和签名账户，仅接受当次交易版本', () {
       const cid = 'CN739-CTZN3-996321164-2026';
       final callData = '0x${_toHex([10, 5, cid.length << 2, ...cid.codeUnits])}';
-      for (final version in [6, 7, 8, 0xffffffff]) {
+      for (final version in [6, 7, ChainConstants.transactionVersion, 9, 0xffffffff]) {
         final request = _buildTestRequest(
           requestId: 'offline-cid-version-$version',
           signerPublicKey: signingAccount.accountId,
@@ -931,16 +951,16 @@ void main() {
         final verification = service.verifyPayload(request);
         expect(
           verification.status,
-          version == 6 ? SignDecisionStatus.normal : SignDecisionStatus.reject,
+          version == ChainConstants.transactionVersion ? SignDecisionStatus.normal : SignDecisionStatus.reject,
         );
-        if (version == 6) {
+        if (version == ChainConstants.transactionVersion) {
           expect(verification.decoded!.reviewFields['cid_number'], cid);
           expect(
             verification.decoded!.reviewFields['account_id'],
             signingAccount.accountId,
           );
           expect(verification.decoded!.reviewFields['spec_version'], '7');
-          expect(verification.decoded!.reviewFields['transaction_version'], '6');
+          expect(verification.decoded!.reviewFields['transaction_version'], ChainConstants.transactionVersion.toString());
         }
       }
       expect(walletManager.signCallCount, 0);

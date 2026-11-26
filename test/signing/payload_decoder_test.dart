@@ -328,6 +328,27 @@ void main() {
   Uint8List withSigningTail(List<int> callData, {int nonce = 1, int tip = 0}) =>
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
 
+  test('官方Utility27金标完整审阅八项及逐笔费用，非法子调用与尾随拒签', () {
+    final fixture=jsonDecode(File('test/signing/fixtures/call_data.json').readAsStringSync()) as Map<String,dynamic>;
+    for(final name in ['batch','batch_all','force_batch']) {
+      final entry=(fixture['cases'] as List).singleWhere((v)=>v['name']==name) as Map<String,dynamic>;
+      final call=_institutionBytes(entry['expected_call_data_hex'] as String);
+      final payload=withSigningTail(call);
+      final decoded=PayloadDecoder.decode(hexOf(payload));
+      expect(decoded,isNotNull);expect(decoded!.action,name);
+      expect(decoded.reviewFields['transfer_count'],'8');
+      expect(decoded.reviewFields['amount_yuan'],startsWith('840.00'));
+      expect(decoded.reviewFields['fee_yuan'],startsWith('8.88'));
+      expect(decoded.reviewFields['transfers'],contains('第8笔'));
+      expect(decoded.reviewFields['transfers'],contains('转账'));
+      expect(decoded.reviewFields['transfers'],isNot(contains('...')));
+      expect(payload.length,greaterThan(256));
+      for(final bad in [Uint8List.fromList([...call,0]),call.sublist(0,call.length-1),Uint8List.fromList([...call.take(3),27,...call.skip(4)]),Uint8List.fromList([...call.take(2),0x21,0,...call.skip(3)])]) {
+        expect(PayloadDecoder.decode(hexOf(withSigningTail(bad))),isNull);
+      }
+    }
+  });
+
   test('删除的机构钱包call10、治理钱包枚举、登记钱包维护和动作21均拒签', () {
     final old =
         readRolePermissionFixture()['rejected_legacy'] as Map<String, dynamic>;

@@ -108,6 +108,39 @@
         "initial_threshold": 2
       },
       "expected_call_data_hex": "0x1f09684c4e3030312d4e524330472d3934343830353136352d32303236040024e8b4a2e58aa1e5b2970002000000041c7265732d69737300000000000868434e3232302d43545a4e322d3139383830353230302d32303236000000000000000001000068434e3935312d43545a4e312d3533393539383433352d32303236000000000000000001000000685a533030312d46524730372d3234393437343530332d3230323618524348414952abababababababababababababababababababababababababababababababab0102000000"
+    },
+    {
+      "call_index": 0,
+      "expected_call_data_hex": "0x1b00200400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a6",
+      "fields": {
+        "amount_fen": "84000",
+        "fee_fen": "888",
+        "transfer_count": 8
+      },
+      "name": "batch",
+      "pallet_index": 27
+    },
+    {
+      "call_index": 2,
+      "expected_call_data_hex": "0x1b02200400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a6",
+      "fields": {
+        "amount_fen": "84000",
+        "fee_fen": "888",
+        "transfer_count": 8
+      },
+      "name": "batch_all",
+      "pallet_index": 27
+    },
+    {
+      "call_index": 4,
+      "expected_call_data_hex": "0x1b04200400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a60400aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0429000000000000000000000000000018e8bdace8b4a6",
+      "fields": {
+        "amount_fen": "84000",
+        "fee_fen": "888",
+        "transfer_count": 8
+      },
+      "name": "force_batch",
+      "pallet_index": 27
     }
   ],
   "institution_extensions": [

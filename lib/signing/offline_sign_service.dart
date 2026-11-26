@@ -1,6 +1,7 @@
 // 核验离线请求与解码动作，决定是否允许签名并组织确认结果。
 
 import 'dart:typed_data';
+import 'dart:convert';
 
 import 'chain_constants.dart';
 import '../protocol/qr_protocols.dart';
@@ -178,6 +179,12 @@ class OfflineSignService {
         rejectReason: '充值目标账户与签名账户不一致，已拒绝签名',
       );
     }
+    if (decoded != null && decoded.fields.containsKey('recipient_account_ids')) {
+      final accounts = jsonDecode(decoded.fields['recipient_account_ids']!) as List;
+      if (accounts.contains(body.signerPublicKeyHex)) {
+        return OfflineSignVerification(decoded: decoded, status: SignDecisionStatus.reject, actionLabel: qrActionLabel, rejectReason: '收款账户不能与付款账户相同，已拒绝签名');
+      }
+    }
     if (decoded == null) {
       return OfflineSignVerification(
         decoded: null,
@@ -245,6 +252,8 @@ class OfflineSignService {
       final contextFields = <String, String>{
         // 自助占号的 RuntimeCall 不含账户参数；外层请求指定实际签名/绑定账户。
         // signParsedRequest 仍须逐字比较用户所选账户，展示不能代替该校验。
+        if (const {'transfer', 'batch', 'batch_all', 'force_batch'}.contains(decoded.action))
+          'account_id': body.signerPublicKeyHex,
         if (decoded.action == 'self_occupy_cid')
           'account_id': body.signerPublicKeyHex,
         // call9的新账户来自交易origin，不能伪造为call参数或展示旧账户。

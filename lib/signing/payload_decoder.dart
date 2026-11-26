@@ -321,6 +321,12 @@ class PayloadDecoder {
       final palletIndex = bytes[0];
       final callIndex = bytes[1];
 
+      // 动作坐标直接复用生成注册表，避免再手写27号映射。
+      final utilityAction = GeneratedQrActionRegistry.actionKeyForCode((palletIndex << 8) | callIndex);
+      if (const {'batch', 'batch_all', 'force_batch'}.contains(utilityAction)) {
+        return _decodeUtility(bytes, utilityAction!);
+      }
+
       // OnchainTransaction / transfer_with_remark
       if (palletIndex == PalletRegistry.onchainTransactionPallet &&
           callIndex == PalletRegistry.transferWithRemarkCall) {
@@ -1067,6 +1073,48 @@ class PayloadDecoder {
     }
   }
 
+  static BigInt _transferFee(BigInt amount, bool hasRemark) {
+    final rounded = (amount + BigInt.from(500)) ~/ BigInt.from(1000);
+    return (rounded < BigInt.from(10) ? BigInt.from(10) : rounded) + (hasRemark ? BigInt.from(100) : BigInt.zero);
+  }
+
+  // 完整解码每个普通转账子项，拒绝嵌套、未知调用、截断及非法UTF-8。
+  static DecodedPayload? _decodeUtility(Uint8List bytes, String action) {
+    var offset = 2;
+    final (count, size) = _decodeCompactU32(bytes, offset);
+    if (size == 0 || count == 0 || size != (count < 64 ? 1 : count < 16384 ? 2 : count < 1073741824 ? 4 : 5)) return null;
+    offset += size;
+    if (count > (bytes.length - offset) ~/ 51) return null;
+    var total = BigInt.zero, fees = BigInt.zero;
+    final max = (BigInt.one << 128) - BigInt.one;
+    final lines = <String>[], accounts = <String>[];
+    for (var i = 0; i < count; i++) {
+      if (offset + 51 > bytes.length || bytes[offset] != PalletRegistry.onchainTransactionPallet || bytes[offset + 1] != PalletRegistry.transferWithRemarkCall) return null;
+      offset += 2;
+      final account = bytes.sublist(offset, offset + 32); offset += 32;
+      final amount = _readU128Le(bytes, offset); offset += 16;
+      if (amount <= BigInt.zero) return null;
+      final (length, lengthSize) = _decodeCompactU32(bytes, offset);
+      if (lengthSize == 0 || length > 99 || lengthSize != (length < 64 ? 1 : 2)) return null;
+      offset += lengthSize;
+      if (offset + length > bytes.length) return null;
+      final remark = utf8.decode(bytes.sublist(offset, offset + length), allowMalformed: false); offset += length;
+      final fee = _transferFee(amount, length > 0);
+      total += amount; fees += fee;
+      if (total > max || fees > max || total + fees > max) return null;
+      accounts.add(_bytesToLowerHex(account));
+      final ss58 = Keyring().encodeAddress(account.toList(), _ss58Prefix);
+      lines.add('第${i + 1}笔\n收款地址：$ss58\n金额：${_fenToYuan(amount)} 元\n备注：${remark.isEmpty ? "无" : remark}\n成功时手续费：${_fenToYuan(fee)} 元');
+    }
+    if (!_hasValidSigningTail(bytes, offset)) return null;
+    final review = <String, String>{
+      'transfers': lines.join('\n\n'), 'transfer_count': count.toString(),
+      'amount_yuan': '${_fenToYuan(total)} 元', 'fee_yuan': '${_fenToYuan(fees)} 元（全部成功）',
+      'fee_policy': action == 'batch_all' ? '全部成功逐笔收费；任一笔失败，整批本金、手续费及分账回滚。' : action == 'force_batch' ? '各笔独立执行，失败不影响后续，仅成功项按原费率收费并逐笔分账。' : '遇错停止，仅此前成功项收费，失败及未执行项不收费。',
+    };
+    return DecodedPayload(action: action, summary: '$count笔转账，本金${_fenToYuan(total)}元', fields: {...review, 'recipient_account_ids': jsonEncode(accounts)}, reviewFields: review);
+  }
+
   // OnchainTransaction(4) / transfer_with_remark(0)
   // 格式：[0x04][0x00][beneficiary_account_id:AccountId32][amount:u128_le]
   //      [remark:BoundedVec<u8>]
@@ -1090,7 +1138,7 @@ class PayloadDecoder {
 
     // remark: BoundedVec<u8>
     final (remarkLen, remarkLenSize) = _decodeCompactU32(bytes, offset);
-    if (remarkLenSize == 0) return null;
+    if (remarkLenSize == 0 || remarkLen > 99 || amountFen <= BigInt.zero) return null;
     offset += remarkLenSize;
     if (offset + remarkLen > bytes.length) return null;
     if (!_hasValidSigningTail(bytes, offset + remarkLen)) return null;
@@ -1098,7 +1146,7 @@ class PayloadDecoder {
         ? ''
         : utf8.decode(
             bytes.sublist(offset, offset + remarkLen),
-            allowMalformed: true,
+            allowMalformed: false,
           );
 
     final amountYuan = _fenToYuan(amountFen);
@@ -1111,6 +1159,8 @@ class PayloadDecoder {
         'recipient_account_id': _bytesToLowerHex(toAccountId),
         'amount_yuan': '$amountYuan 元',
         'remark': remark,
+        'fee_yuan': '${_fenToYuan(_transferFee(amountFen, remarkLen > 0))} 元',
+        'fee_policy': '仅转账成功收费，失败本金、手续费及分账一起回滚。',
       },
     );
   }
@@ -1636,8 +1686,9 @@ class PayloadDecoder {
     final seen = <String>{};
     for (var index = 0; index < count; index++) {
       final role = _readRoleCode(bytes, offset);
-      if (role == null || !role.$1.startsWith('R_') || !seen.add(role.$1))
+      if (role == null || !role.$1.startsWith('R_') || !seen.add(role.$1)) {
         return null;
+      }
       details.add('替换岗位${role.$1}的全部原生权限');
       final permissions =
           _skipRolePermissionSpecs(bytes, role.$2, details: details);
@@ -4125,12 +4176,12 @@ class PayloadDecoder {
     offset += 1;
     // CheckNonce: Compact<u32>
     final (nonceValue, nonceSize) = _decodeCompactBigInt(bytes, offset);
-    if (nonceValue == null || nonceSize == 0) return false;
+    if (nonceValue == null || nonceSize == 0 || nonceValue > BigInt.from(0xffffffff) || nonceSize != (nonceValue < BigInt.from(64) ? 1 : nonceValue < BigInt.from(16384) ? 2 : nonceValue < (BigInt.one << 30) ? 4 : 5)) return false;
     offset += nonceSize;
     // ChargeTransactionPayment: Compact<u128> tip
     final (tipValue, tipSize) = _decodeCompactBigInt(bytes, offset);
     // tip 不属于五类交易费；冷钱包必须在签名前拒绝任何非零 tip。
-    if (tipValue == null || tipSize == 0 || tipValue != BigInt.zero) {
+    if (tipValue == null || tipSize != 1 || tipValue != BigInt.zero) {
       return false;
     }
     offset += tipSize;
@@ -4700,8 +4751,9 @@ class PayloadDecoder {
         offset = assignments.$2;
       } else if (variant == 3) {
         final code = _readRoleCode(bytes, offset);
-        if (code == null || !code.$1.startsWith('R_') || !seen.add(code.$1))
+        if (code == null || !code.$1.startsWith('R_') || !seen.add(code.$1)) {
           return null;
+        }
         offset = code.$2;
         if (offset + 6 > bytes.length || bytes[offset] > 1) return null;
         final term = bytes[offset++] == 1;

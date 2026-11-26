@@ -5,6 +5,7 @@ import 'package:citizenwallet/signing/chain_constants.dart';
 // 不再自相矛盾)。normal + decoded==null 是 runtime 升级哈希签唯一产生的组合,
 // 旧代码在明细里错误地走了“拒绝签名”分支。
 import 'dart:convert';
+import 'dart:io';
 
 import '../signing/payload_decoder_test.dart'
     show cidRebindPayload, selfRebindCall;
@@ -65,6 +66,23 @@ void main() {
     accountId: signerPk,
     accountName: '账户1',
   );
+
+  testWidgets('批量八笔完整中文审阅复用原页面，清单不截断', (tester) async {
+    final fixture=jsonDecode(File('test/signing/fixtures/call_data.json').readAsStringSync()) as Map<String,dynamic>;
+    final entry=(fixture['cases'] as List).singleWhere((v)=>v['name']=='force_batch') as Map<String,dynamic>;
+    final now=DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final request=QrEnvelope<SignRequestBody>(kind:QrKind.signRequest,id:'utility-full-page',expiresAt:now+90,body:SignRequestBody.fromHex(action:QrActions.fromDecodedAction('force_batch'),signerPublicKeyHex:signerPk,payloadHex:signingPayloadHex(entry['expected_call_data_hex'] as String,specVersion:9)));
+    await tester.pumpWidget(MaterialApp(home:OfflineSignPage(account:account,walletName:'钱包1',raw:QrSigner().encodeRequest(request))));
+    await ScreenshotGuard.waitForIdleForTest();await tester.pump();
+    expect(find.text('完整转账清单'),findsOneWidget);
+    expect(find.text('逐笔成功'),findsWidgets);
+    final field=find.textContaining('第8笔');expect(field,findsOneWidget);
+    final text=tester.widget<Text>(field);
+    expect(text.maxLines,isNull);expect(text.overflow,isNot(TextOverflow.ellipsis));
+    expect(text.data,contains('第1笔'));expect(text.data,isNot(contains('...')));
+    expect(find.text('拒绝签名'),findsNothing);expect(tester.takeException(),isNull);
+    await releasePage(tester);
+  });
 
   testWidgets('两阶段自助换绑展示中文授权和新账户交易，均为绿色可签', (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
