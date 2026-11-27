@@ -1333,7 +1333,7 @@ void main() {
       expect(PayloadDecoder.decode(hexOf(withSigningTail(trailing))), isNull);
     });
 
-    group('OnchainIssuance(23) strict SCALE decode', () {
+    group('OnchainIssue(23) strict SCALE decode', () {
       final executionAccount = List<int>.generate(32, (i) => i + 1);
       final fromAccount = List<int>.filled(32, 0x31);
       final toAccount = List<int>.filled(32, 0x42);
@@ -2220,7 +2220,7 @@ void main() {
       },
     );
 
-    test('decodes AddressRegistry calls with actor CID', () {
+    test('decodes Address calls with actor CID', () {
       final catalogHash = List<int>.filled(32, 0x77);
       final catalog = [
         33,
@@ -2561,11 +2561,11 @@ void main() {
     test('rejects deleted business wrappers (pallet=17/13/12/15)', () {
       // Phase 4 物理删除的 call_index 不应再被解码识别。
       final cases = <List<int>>[
-        [0x11, 0x03], // MultisigTransfer(17) execute_transfer
+        [0x11, 0x03], // Multisig(17) execute_transfer
         [0x11, 0x04], // execute_safety_fund_transfer
         [0x11, 0x05], // execute_sweep_to_main
-        [0x0d, 0x01], // ResolutionDestroy(13) execute_destroy
-        [0x0c, 0x01], // RuntimeUpgrade(12) call_index=1 留洞;冷钱包不解码协议升级
+        [0x0d, 0x01], // Destroy(13) execute_destroy
+        [0x0c, 0x01], // Upgrade(12) call_index=1 留洞;冷钱包不解码协议升级
         [0x0f, 0x02], // cancel_failed_replace_grandpa_key
       ];
       for (final c in cases) {
@@ -3022,7 +3022,7 @@ void main() {
 
     test('rejects unknown out-of-range pallet index', () {
       // 新号表 pallet 连续 0..34(SquarePost=34);0x23=35 不存在 → decoder 拒签。
-      // (旧“淘汰机构生命周期 pallet 17”已随连续化消失,17 现为 MultisigTransfer。)
+      // (旧“淘汰机构生命周期 pallet 17”已随连续化消失,17 现为 Multisig。)
       final payload = Uint8List.fromList([
         0x23,
         0x01,
@@ -3806,9 +3806,9 @@ void main() {
     });
   });
 
-  // 立法院 LegislationYuan(25) + 立法投票 LegislationVote(26),布局逐字段对齐
+  // 立法院 Legislation(25) + 立法投票 LegislationVote(26),布局逐字段对齐
   // citizenchain runtime + citizenapp legislation_codec。夹具必须带签名扩展尾。
-  group('立法 pallet 解码(LegislationYuan 25 / LegislationVote 26)', () {
+  group('立法 pallet 解码(Legislation 25 / LegislationVote 26)', () {
     const firstHouseCid = 'ZS001-NLG0H-100000001-2026';
     const secondHouseCid = 'ZS001-NLG0H-100000002-2026';
     const executiveCid = 'ZS001-PRS0G-100000003-2026';

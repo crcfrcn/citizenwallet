@@ -4,7 +4,7 @@ class PalletRegistry {
   const PalletRegistry._();
 
   // ---- Onchain (4) ----
-  static const int onchainTransactionPallet = 4;
+  static const int onchainPallet = 4;
   static const int transferWithRemarkCall = 0;
 
   // ---- VotingEngine (9) · 引擎核心 ----
@@ -23,7 +23,7 @@ class PalletRegistry {
   static const int cancelPassedProposalCall = 5;
 
   // ---- Identity (10) · 公民链上身份 ----
-  static const int citizenIdentityPallet = 10;
+  static const int identityPallet = 10;
 
   /// `register_voting_identity(actor_cid_number, payload, citizen_signature)`。
   static const int registerVotingIdentityCall = 0;
@@ -93,13 +93,13 @@ class PalletRegistry {
 
   // ---- Multisig (17) ----
   // call_index 3/4/5 留洞不复用。
-  static const int multisigTransferPallet = 17;
+  static const int multisigPallet = 17;
   static const int proposeTransferCall = 0;
   static const int proposeSafetyFundCall = 1;
   static const int proposeSweepCall = 2;
 
   // ---- 协议升级 Upgrade (12) ----
-  static const int runtimeUpgradePallet = 12;
+  static const int upgradePallet = 12;
   static const int proposeRuntimeUpgradeCall = 0;
   static const int developerDirectUpgradeCall = 2;
 
@@ -135,7 +135,7 @@ class PalletRegistry {
 
   // ---- Destroy (13) ----
   // call_index 1 留洞不复用。
-  static const int resolutionDestroyPallet = 13;
+  static const int destroyPallet = 13;
   static const int proposeDestroyCall = 0;
 
   static bool isPersonalAdminSetChangeCall(int palletIndex, int callIndex) {
@@ -144,7 +144,7 @@ class PalletRegistry {
   }
 
   // ---- GrandpaKey (15) ----
-  static const int grandpaKeyChangePallet = 15;
+  static const int grandpaKeyPallet = 15;
   static const int proposeEmergencyGrandpaKeyRecoveryCall = 0;
   static const int scheduleGrandpaKeyRotationCall = 1;
 
@@ -155,7 +155,7 @@ class PalletRegistry {
   // 属预期行为(冷钱包不签矿工绑定交易),不是遗漏。
 
   // ---- ResolutionIssue (8) ----
-  static const int resolutionIssuancePallet = 8;
+  static const int resolutionIssuePallet = 8;
   static const int proposeIssuanceCall = 0;
 
   // ---- OnchainIssue (23) · 链上发行代币(Plain FT) ----
@@ -164,7 +164,7 @@ class PalletRegistry {
   // 十个调用都以 actor_cid_number 开头；仅 propose_issue 紧随
   // execution_account_id，机构身份不得从该账户反推。
   // 投票/重试/取消统一走 InternalVote(20)/JointVote(21)/VotingEngine(9.4/9.5)。
-  static const int onchainIssuancePallet = 23;
+  static const int onchainIssuePallet = 23;
   // 业务 propose
   static const int proposeIssueCall = 0;
   static const int proposeMintCall = 1;
@@ -181,7 +181,7 @@ class PalletRegistry {
   // ---- Legislation (25) · 立法院(立法/修法/废法发起)----
   // 法律结构化上链(章>节>条>款),发起类提案 QR 由节点端生成,冷钱包仅解码核对。
   // 投票/签署统一走 LegislationVote(26),本 pallet 仅承载 3 条 propose_X。
-  static const int legislationYuanPallet = 25;
+  static const int legislationPallet = 25;
   static const int proposeEnactLawCall = 0;
   static const int proposeAmendLawCall = 1;
   static const int proposeRepealLawCall = 2;
@@ -197,7 +197,7 @@ class PalletRegistry {
   static const int guardVoteCall = 5;
 
   // ---- Offchain (19) · 清算行 L2 体系 ----
-  static const int offchainTransactionPallet = 19;
+  static const int offchainPallet = 19;
   static const int bindClearingBankCall = 30;
   static const int depositCall = 31;
   static const int withdrawCall = 32;
@@ -210,7 +210,7 @@ class PalletRegistry {
   static const int unregisterClearingBankCall = 52;
 
   // ---- Address (33) · 注册局地址目录 ----
-  static const int addressRegistryPallet = 33;
+  static const int addressPallet = 33;
   static const int setAddressCatalogVersionCall = 0;
   static const int setAddressNameCall = 1;
   static const int removeAddressNameCall = 2;
@@ -222,7 +222,7 @@ class PalletRegistry {
   // 未识别请求必须红色拒签，禁止仅因存在 pallet35 就按原生交易签名。
 
   // ---- Square (34) · 广场发布与会员订阅 ----
-  static const int squarePostPallet = 34;
+  static const int squarePallet = 34;
   static const int publishPostCall = 0;
   static const int subscribeCall = 1;
   static const int cancelSubscriptionCall = 2;

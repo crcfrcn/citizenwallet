@@ -328,7 +328,7 @@ class PayloadDecoder {
       }
 
       // Onchain / transfer_with_remark
-      if (palletIndex == PalletRegistry.onchainTransactionPallet &&
+      if (palletIndex == PalletRegistry.onchainPallet &&
           callIndex == PalletRegistry.transferWithRemarkCall) {
         return _decodeTransferWithRemark(bytes);
       }
@@ -378,7 +378,7 @@ class PayloadDecoder {
       }
 
       // ── Identity(10) · 公民链上投票/参选身份注册 + 注册局占号/吊销 ──
-      if (palletIndex == PalletRegistry.citizenIdentityPallet) {
+      if (palletIndex == PalletRegistry.identityPallet) {
         if (callIndex == PalletRegistry.selfOccupyCidCall) {
           return _decodeSelfOccupyCid(bytes);
         }
@@ -415,7 +415,7 @@ class PayloadDecoder {
       // 投票入口统一到 InternalVote::cast(20.0),
       // 手动重试入口统一到 VotingEngine::retry_passed_proposal(9.4),
       // 本 pallet 仅保留 3 条 propose_X。
-      if (palletIndex == PalletRegistry.multisigTransferPallet) {
+      if (palletIndex == PalletRegistry.multisigPallet) {
         if (callIndex == PalletRegistry.proposeTransferCall) {
           return _decodeProposeTransfer(bytes);
         }
@@ -528,7 +528,7 @@ class PayloadDecoder {
 
       // ── ResolutionIssue(8) · 决议发行联合提案 ──
       // 全国人口快照随联合提案创建由投票引擎内联生成。
-      if (palletIndex == PalletRegistry.resolutionIssuancePallet) {
+      if (palletIndex == PalletRegistry.resolutionIssuePallet) {
         if (callIndex == PalletRegistry.proposeIssuanceCall) {
           return _decodeProposeResolutionIssuance(bytes);
         }
@@ -536,7 +536,7 @@ class PayloadDecoder {
 
       // ── Destroy(13) ──
       // execute_destroy 走 VotingEngine::retry_passed_proposal。
-      if (palletIndex == PalletRegistry.resolutionDestroyPallet) {
+      if (palletIndex == PalletRegistry.destroyPallet) {
         if (callIndex == PalletRegistry.proposeDestroyCall) {
           return _decodeProposeDestroy(bytes);
         }
@@ -545,7 +545,7 @@ class PayloadDecoder {
       // ── GrandpaKey(15) ──
       // call 0 = 旧私钥不可用后的本机构内部投票恢复；
       // call 1 = 单个委员发起、旧/新 GRANDPA 私钥共同签名的正常更换。
-      if (palletIndex == PalletRegistry.grandpaKeyChangePallet) {
+      if (palletIndex == PalletRegistry.grandpaKeyPallet) {
         if (callIndex ==
             PalletRegistry.proposeEmergencyGrandpaKeyRecoveryCall) {
           return _decodeGrandpaKeyChange(bytes, emergencyRecovery: true);
@@ -556,7 +556,7 @@ class PayloadDecoder {
       }
 
       // ── Offchain(19) · 清算行 L2 体系 ──
-      if (palletIndex == PalletRegistry.offchainTransactionPallet) {
+      if (palletIndex == PalletRegistry.offchainPallet) {
         if (callIndex == PalletRegistry.bindClearingBankCall) {
           return _decodeInstitutionCidCall(
             bytes,
@@ -602,12 +602,12 @@ class PayloadDecoder {
       }
 
       // ── Address(33) · 注册局地址目录 ──
-      if (palletIndex == PalletRegistry.addressRegistryPallet) {
+      if (palletIndex == PalletRegistry.addressPallet) {
         return _decodeAddressRegistryCall(bytes, callIndex);
       }
 
       // ── Square(34) · 广场发布、会员订阅与平台调价 ──
-      if (palletIndex == PalletRegistry.squarePostPallet) {
+      if (palletIndex == PalletRegistry.squarePallet) {
         return switch (callIndex) {
           PalletRegistry.publishPostCall => _decodePublishPost(bytes),
           PalletRegistry.subscribeCall => _decodeSubscriptionChange(
@@ -634,7 +634,7 @@ class PayloadDecoder {
       }
 
       // ── OnchainIssue(23) · 链上发行代币(Plain FT) ──
-      if (palletIndex == PalletRegistry.onchainIssuancePallet) {
+      if (palletIndex == PalletRegistry.onchainIssuePallet) {
         return switch (callIndex) {
           PalletRegistry.proposeIssueCall => _decodeProposeAssetIssue(bytes),
           PalletRegistry.proposeMintCall => _decodeProposeAssetMint(bytes),
@@ -660,7 +660,7 @@ class PayloadDecoder {
 
       // ── Legislation(25) · 立法/修法/废法发起 ──
       // 发起类 QR 由节点端生成(法律全文 SCALE 入 payload),冷钱包逐字段解码核对。
-      if (palletIndex == PalletRegistry.legislationYuanPallet) {
+      if (palletIndex == PalletRegistry.legislationPallet) {
         if (callIndex == PalletRegistry.proposeEnactLawCall) {
           return _decodeProposeEnactLaw(bytes);
         }
@@ -1089,7 +1089,7 @@ class PayloadDecoder {
     final max = (BigInt.one << 128) - BigInt.one;
     final lines = <String>[], accounts = <String>[];
     for (var i = 0; i < count; i++) {
-      if (offset + 51 > bytes.length || bytes[offset] != PalletRegistry.onchainTransactionPallet || bytes[offset + 1] != PalletRegistry.transferWithRemarkCall) return null;
+      if (offset + 51 > bytes.length || bytes[offset] != PalletRegistry.onchainPallet || bytes[offset + 1] != PalletRegistry.transferWithRemarkCall) return null;
       offset += 2;
       final account = bytes.sublist(offset, offset + 32); offset += 32;
       final amount = _readU128Le(bytes, offset); offset += 16;

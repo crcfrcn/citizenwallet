@@ -15,23 +15,23 @@ void main() {
 
     test('pallet 索引常量已定义且互不相同', () {
       const pallets = {
-        // 普通转账统一走 OnchainTransaction(4).transfer_with_remark(0),不再暴露 Balances 直签入口。
-        PalletRegistry.onchainTransactionPallet,
-        PalletRegistry.multisigTransferPallet,
+        // 普通转账统一走 Onchain(4).transfer_with_remark(0),不再暴露 Balances 直签入口。
+        PalletRegistry.onchainPallet,
+        PalletRegistry.multisigPallet,
         PalletRegistry.publicEntityPallet,
         PalletRegistry.privateEntityPallet,
         PalletRegistry.votingEnginePallet,
-        PalletRegistry.runtimeUpgradePallet,
-        PalletRegistry.resolutionDestroyPallet,
+        PalletRegistry.upgradePallet,
+        PalletRegistry.destroyPallet,
         PalletRegistry.personalPallet,
-        PalletRegistry.grandpaKeyChangePallet,
-        PalletRegistry.resolutionIssuancePallet,
-        PalletRegistry.offchainTransactionPallet,
-        PalletRegistry.citizenIdentityPallet,
+        PalletRegistry.grandpaKeyPallet,
+        PalletRegistry.resolutionIssuePallet,
+        PalletRegistry.offchainPallet,
+        PalletRegistry.identityPallet,
         PalletRegistry.electionVotePallet,
-        PalletRegistry.onchainIssuancePallet,
-        PalletRegistry.addressRegistryPallet,
-        PalletRegistry.squarePostPallet,
+        PalletRegistry.onchainIssuePallet,
+        PalletRegistry.addressPallet,
+        PalletRegistry.squarePallet,
       };
       // 个人生命周期与成员治理合并为同一个Personal(7)，原29不再登记。
       expect(pallets.length, 16);
@@ -91,9 +91,9 @@ void main() {
       expect(PalletRegistry.proposePersonalAdminSetChangeCall, 3);
     });
 
-    test('CitizenIdentity(10) 身份注册 + 注册局占号/吊销 call_index', () {
+    test('Identity(10) 身份注册 + 注册局占号/吊销 call_index', () {
       // 0..4 为身份登记管理，5 为公民自主首次绑定，6..8 为注册局代办绑定管理。
-      expect(PalletRegistry.citizenIdentityPallet, 10);
+      expect(PalletRegistry.identityPallet, 10);
       expect(PalletRegistry.registerVotingIdentityCall, 0);
       expect(PalletRegistry.upgradeToCandidateIdentityCall, 1);
       expect(PalletRegistry.updateVotingIdentityCall, 2);
@@ -112,8 +112,8 @@ void main() {
       expect(PalletRegistry.cancelPassedProposalCall, 5);
     });
 
-    test('OnchainIssuance 十个调用与 runtime ABI 对齐', () {
-      expect(PalletRegistry.onchainIssuancePallet, 23);
+    test('OnchainIssue 十个调用与 runtime ABI 对齐', () {
+      expect(PalletRegistry.onchainIssuePallet, 23);
       expect(PalletRegistry.proposeIssueCall, 0);
       expect(PalletRegistry.proposeMintCall, 1);
       expect(PalletRegistry.proposeBurnCall, 2);
@@ -126,7 +126,7 @@ void main() {
       expect(PalletRegistry.proposeMonitorForceCloseCall, 14);
     });
 
-    test('清算行 OffchainTransaction call_index 与 runtime 对齐', () {
+    test('清算行 Offchain call_index 与 runtime 对齐', () {
       expect(PalletRegistry.bindClearingBankCall, 30);
       expect(PalletRegistry.depositCall, 31);
       expect(PalletRegistry.withdrawCall, 32);
@@ -139,8 +139,8 @@ void main() {
       expect(PalletRegistry.unregisterClearingBankCall, 52);
     });
 
-    test('AddressRegistry call_index 与 runtime 对齐', () {
-      expect(PalletRegistry.addressRegistryPallet, 33);
+    test('Address call_index 与 runtime 对齐', () {
+      expect(PalletRegistry.addressPallet, 33);
       expect(PalletRegistry.setAddressCatalogVersionCall, 0);
       expect(PalletRegistry.setAddressNameCall, 1);
       expect(PalletRegistry.removeAddressNameCall, 2);
@@ -149,7 +149,7 @@ void main() {
     });
 
     test('SquarePost 全部钱包账户调用 call_index 与 runtime 对齐', () {
-      expect(PalletRegistry.squarePostPallet, 34);
+      expect(PalletRegistry.squarePallet, 34);
       expect(PalletRegistry.publishPostCall, 0);
       expect(PalletRegistry.subscribeCall, 1);
       expect(PalletRegistry.cancelSubscriptionCall, 2);

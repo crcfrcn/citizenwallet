@@ -853,7 +853,7 @@ void main() {
     });
 
     test('verifyPayload decodes transfer payload', () {
-      // OnchainTransaction::transfer_with_remark: pallet=4, call=0。
+      // Onchain::transfer_with_remark: pallet=4, call=0。
       // beneficiary 32B, amount u128_le, remark 空 Vec。
       final request = _buildTestRequest(
         requestId: 'offline-req-test-known',
