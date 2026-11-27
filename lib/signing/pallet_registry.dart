@@ -3,7 +3,7 @@
 class PalletRegistry {
   const PalletRegistry._();
 
-  // ---- OnchainTransaction (4) ----
+  // ---- Onchain (4) ----
   static const int onchainTransactionPallet = 4;
   static const int transferWithRemarkCall = 0;
 
@@ -22,7 +22,7 @@ class PalletRegistry {
   /// `cancel_passed_proposal(proposal_id, reason)` — 已通过但确认不可执行的提案取消入口。
   static const int cancelPassedProposalCall = 5;
 
-  // ---- CitizenIdentity (10) · 公民链上身份 ----
+  // ---- Identity (10) · 公民链上身份 ----
   static const int citizenIdentityPallet = 10;
 
   /// `register_voting_identity(actor_cid_number, payload, citizen_signature)`。
@@ -91,14 +91,14 @@ class PalletRegistry {
   // 投票统一走 `InternalVote(20).cast(0)`,手动重试/取消统一走
   // `VotingEngine(9).retry_passed_proposal(4)` / `cancel_passed_proposal(5)`。
 
-  // ---- MultisigTransfer (17) ----
+  // ---- Multisig (17) ----
   // call_index 3/4/5 留洞不复用。
   static const int multisigTransferPallet = 17;
   static const int proposeTransferCall = 0;
   static const int proposeSafetyFundCall = 1;
   static const int proposeSweepCall = 2;
 
-  // ---- 协议升级 RuntimeUpgrade (12) ----
+  // ---- 协议升级 Upgrade (12) ----
   static const int runtimeUpgradePallet = 12;
   static const int proposeRuntimeUpgradeCall = 0;
   static const int developerDirectUpgradeCall = 2;
@@ -133,7 +133,7 @@ class PalletRegistry {
   static const int proposePersonalAdminSetChangeCall = 3;
   // pallet 29 已关闭，不保留个人成员调用入口。
 
-  // ---- ResolutionDestroy (13) ----
+  // ---- Destroy (13) ----
   // call_index 1 留洞不复用。
   static const int resolutionDestroyPallet = 13;
   static const int proposeDestroyCall = 0;
@@ -143,22 +143,22 @@ class PalletRegistry {
         callIndex == proposePersonalAdminSetChangeCall;
   }
 
-  // ---- GrandpaKeyChange (15) ----
+  // ---- GrandpaKey (15) ----
   static const int grandpaKeyChangePallet = 15;
   static const int proposeEmergencyGrandpaKeyRecoveryCall = 0;
   static const int scheduleGrandpaKeyRotationCall = 1;
 
-  // ---- FullnodeIssuance (6) · 有意不登记 ----
+  // ---- FullnodeIssue (6) · 有意不登记 ----
   // 链端 pallet_index=6 承载 bind_reward_account(0) / rebind_reward_account(1),
   // 由矿工(citizenchain 桌面全节点)用其 PoW 热钥自签绑定奖励账户,不经冷钱包扫码冷签。
   // 故此处刻意不登记该 pallet/call——冷钱包扫到它会按两色严格模式判为无法识别而红拒(拒签),
   // 属预期行为(冷钱包不签矿工绑定交易),不是遗漏。
 
-  // ---- ResolutionIssuance (8) ----
+  // ---- ResolutionIssue (8) ----
   static const int resolutionIssuancePallet = 8;
   static const int proposeIssuanceCall = 0;
 
-  // ---- OnchainIssuance (23) · 链上发行代币(Plain FT) ----
+  // ---- OnchainIssue (23) · 链上发行代币(Plain FT) ----
   // call_index 5..=9 / 15+ 留洞不复用(永久 ABI)。
   // 业务调用走 propose_X(InternalVote),监管调用走 propose_monitor_X(JointVote)。
   // 十个调用都以 actor_cid_number 开头；仅 propose_issue 紧随
@@ -178,7 +178,7 @@ class PalletRegistry {
   static const int proposeMonitorForceTransferCall = 13;
   static const int proposeMonitorForceCloseCall = 14;
 
-  // ---- LegislationYuan (25) · 立法院(立法/修法/废法发起)----
+  // ---- Legislation (25) · 立法院(立法/修法/废法发起)----
   // 法律结构化上链(章>节>条>款),发起类提案 QR 由节点端生成,冷钱包仅解码核对。
   // 投票/签署统一走 LegislationVote(26),本 pallet 仅承载 3 条 propose_X。
   static const int legislationYuanPallet = 25;
@@ -196,7 +196,7 @@ class PalletRegistry {
   static const int overrideSignCall = 4;
   static const int guardVoteCall = 5;
 
-  // ---- OffchainTransaction (19) · 清算行 L2 体系 ----
+  // ---- Offchain (19) · 清算行 L2 体系 ----
   static const int offchainTransactionPallet = 19;
   static const int bindClearingBankCall = 30;
   static const int depositCall = 31;
@@ -209,7 +209,7 @@ class PalletRegistry {
   static const int updateClearingBankEndpointCall = 51;
   static const int unregisterClearingBankCall = 52;
 
-  // ---- AddressRegistry (33) · 注册局地址目录 ----
+  // ---- Address (33) · 注册局地址目录 ----
   static const int addressRegistryPallet = 33;
   static const int setAddressCatalogVersionCall = 0;
   static const int setAddressNameCall = 1;
@@ -221,7 +221,7 @@ class PalletRegistry {
   // SetOrigin 转换入口；普通 call/upload/map_account 亦不属于本钱包签名范围。
   // 未识别请求必须红色拒签，禁止仅因存在 pallet35 就按原生交易签名。
 
-  // ---- SquarePost (34) · 广场发布与会员订阅 ----
+  // ---- Square (34) · 广场发布与会员订阅 ----
   static const int squarePostPallet = 34;
   static const int publishPostCall = 0;
   static const int subscribeCall = 1;

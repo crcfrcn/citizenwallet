@@ -139,7 +139,7 @@ class QrActions {
   static int get castPopularVote => _code('cast_popular_vote');
   static int get castMutualVote => _code('cast_mutual_vote');
 
-  // 链上资产 OnchainIssuance(23 = 0x17)。动作码与 runtime call_index 一一对应。
+  // 链上资产 OnchainIssue(23 = 0x17)。动作码与 runtime call_index 一一对应。
   static int get proposeAssetIssue => _code('propose_asset_issue');
   static int get proposeAssetMint => _code('propose_asset_mint');
   static int get proposeAssetBurn => _code('propose_asset_burn');
@@ -154,7 +154,7 @@ class QrActions {
   static int get proposeMonitorForceClose =>
       _code('propose_monitor_force_close');
 
-  // 注册局地址目录 AddressRegistry(33 = 0x21)
+  // 注册局地址目录 Address(33 = 0x21)
   static int get setAddressCatalogVersion =>
       _code('set_address_catalog_version');
   static int get setAddressName => _code('set_address_name');
@@ -162,7 +162,7 @@ class QrActions {
   static int get setAddress => _code('set_address');
   static int get removeAddress => _code('remove_address');
 
-  // 广场发布、会员订阅与平台调价 SquarePost(34 = 0x22)
+  // 广场发布、会员订阅与平台调价 Square(34 = 0x22)
   static int get publishPost => _code('publish_post');
   static int get subscribe => _code('subscribe');
   static int get cancel => _code('cancel');
@@ -171,7 +171,7 @@ class QrActions {
   static int get proposeSetPlatformPrice => _code('propose_set_platform_price');
   static int get updateCreatorTierName => _code('update_creator_tier_name');
 
-  // 立法院 LegislationYuan(25 = 0x19)
+  // 立法院 Legislation(25 = 0x19)
   static int get proposeEnactLaw => _code('propose_enact_law');
   static int get proposeAmendLaw => _code('propose_amend_law');
   static int get proposeRepealLaw => _code('propose_repeal_law');

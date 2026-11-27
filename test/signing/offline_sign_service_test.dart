@@ -906,7 +906,7 @@ void main() {
         SignDecisionStatus.reject,
       );
       // 钱包以已部署链为准，候选版本不得在Runtime生效前取得签名资格。
-      for (final version in [5, 6, 7, 9, 0xffffffff]) {
+      for (final version in [0, 5, 6, 8, 9, 0xffffffff]) {
         expect(
           verify(signingPayloadHex(callData, transactionVersion: version)),
           SignDecisionStatus.reject,
@@ -937,7 +937,7 @@ void main() {
     test('自助占号完整审阅CID和签名账户，仅接受当次交易版本', () {
       const cid = 'CN739-CTZN3-996321164-2026';
       final callData = '0x${_toHex([10, 5, cid.length << 2, ...cid.codeUnits])}';
-      for (final version in [6, 7, ChainConstants.transactionVersion, 9, 0xffffffff]) {
+      for (final version in [0, 6, ChainConstants.transactionVersion, 8, 9, 0xffffffff]) {
         final request = _buildTestRequest(
           requestId: 'offline-cid-version-$version',
           signerPublicKey: signingAccount.accountId,
