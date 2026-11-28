@@ -263,76 +263,112 @@ class _ScanPageState extends State<ScanPage> {
         title: const Text('扫码签名'),
         centerTitle: true,
       ),
-      body: Stack(
-        fit: StackFit.expand,
+      body: Column(
         children: [
-          ScannerView(
-            controller: _controller,
-            onRawValue: (raw) => unawaited(_handleCode(raw)),
-            onFailure: _showScannerFailure,
-          ),
-          CustomPaint(
-            painter: ScanOverlayPainter(
-              scanBoxSize: scanBoxSize,
-              offsetY: scanBoxOffsetY,
-            ),
-            child: const SizedBox.expand(),
-          ),
-          Center(
-            child: Transform.translate(
-              offset: const Offset(0, scanBoxOffsetY),
-              child: SizedBox(
-                width: scanBoxSize,
-                height: scanBoxSize,
-                child: CustomPaint(painter: ScanCornerPainter()),
-              ),
-            ),
-          ),
-          Center(
-            child: Transform.translate(
-              offset: const Offset(0, scanBoxOffsetY + scanBoxSize / 2 + 28),
-              child: Text(
-                _progress > 0 && _progress < 100
-                    ? '正在接收签名请求 $_progress%'
-                    : '扫描「${widget.wallet.walletName}」的签名请求',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white60,
-                  fontSize: 14,
-                  letterSpacing: 0.3,
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ScannerView(
+                  controller: _controller,
+                  onRawValue: (raw) => unawaited(_handleCode(raw)),
+                  onFailure: _showScannerFailure,
                 ),
-              ),
+                CustomPaint(
+                  painter: ScanOverlayPainter(
+                    scanBoxSize: scanBoxSize,
+                    offsetY: scanBoxOffsetY,
+                  ),
+                  child: const SizedBox.expand(),
+                ),
+                Center(
+                  child: Transform.translate(
+                    offset: const Offset(0, scanBoxOffsetY),
+                    child: SizedBox(
+                      width: scanBoxSize,
+                      height: scanBoxSize,
+                      child: CustomPaint(painter: ScanCornerPainter()),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Transform.translate(
+                    offset: const Offset(
+                      0,
+                      scanBoxOffsetY + scanBoxSize / 2 + 28,
+                    ),
+                    child: Text(
+                      '扫描「${widget.wallet.walletName}」的签名请求',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 14,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    margin: const EdgeInsets.only(
+                      bottom: 48,
+                      left: 48,
+                      right: 48,
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceCard.withAlpha(200),
+                      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                      border: Border.all(color: AppTheme.border.withAlpha(80)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _buildToolButton(
+                          icon: Icons.photo_library_outlined,
+                          label: '相册',
+                          onTap: _scanFromGallery,
+                          active: false,
+                        ),
+                        Container(width: 1, height: 32, color: AppTheme.border),
+                        _buildToolButton(
+                          icon: _torchOn
+                              ? Icons.flashlight_on_rounded
+                              : Icons.flashlight_off_outlined,
+                          label: _torchOn ? '关闭' : '手电筒',
+                          onTap: _toggleTorch,
+                          active: _torchOn,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 48, left: 48, right: 48),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceCard.withAlpha(200),
-                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                border: Border.all(color: AppTheme.border.withAlpha(80)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildToolButton(
-                    icon: Icons.photo_library_outlined,
-                    label: '相册',
-                    onTap: _scanFromGallery,
-                    active: false,
+          // 与展示侧时间采用相同的底部说明位置，进度不叠加到摄像画面。
+          SafeArea(
+            top: false,
+            child: SizedBox(
+              height: 32,
+              child: Center(
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _progress > 0 && _progress < 100
+                        ? '正在接收签名请求 $_progress%'
+                        : '',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textSecondary,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  Container(width: 1, height: 32, color: AppTheme.border),
-                  _buildToolButton(
-                    icon: _torchOn
-                        ? Icons.flashlight_on_rounded
-                        : Icons.flashlight_off_outlined,
-                    label: _torchOn ? '关闭' : '手电筒',
-                    onTap: _toggleTorch,
-                    active: _torchOn,
-                  ),
-                ],
+                ),
               ),
             ),
           ),
