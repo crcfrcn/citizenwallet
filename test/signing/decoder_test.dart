@@ -334,6 +334,18 @@ void _registerDecoder() {
   Uint8List withSigningTail(List<int> callData, {int nonce = 1, int tip = 0}) =>
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
 
+  test('决议发行按真源读取岗位码，缺岗位的旧布局拒绝', () {
+    final fixture = jsonDecode(File('test/signing/call.json').readAsStringSync()) as Map<String, dynamic>;
+    final row = (fixture['cases'] as List).cast<Map<String, dynamic>>().singleWhere((v) => v['name'] == 'propose_issuance');
+    final call = _institutionBytes(row['expected_call_data_hex'] as String);
+    final decoded = PayloadDecoder.decode(hexOf(withSigningTail(call)));
+    expect(decoded, isNotNull);
+    expect(decoded!.action, 'propose_issuance');
+    expect(decoded.fields['proposer_role_code'], 'COMMITTEE_MEMBER');
+    final rejected = (fixture['rejected_calls'] as List).cast<Map<String, dynamic>>().singleWhere((v) => v['name'] == 'propose_issuance_without_role');
+    expect(PayloadDecoder.decode(hexOf(withSigningTail(_institutionBytes(rejected['expected_call_data_hex'] as String)))), isNull);
+  });
+
   test('官方Utility27金标完整审阅八项及逐笔费用，非法子调用与尾随拒签', () {
     final fixture=jsonDecode(File('test/signing/call.json').readAsStringSync()) as Map<String,dynamic>;
     for(final name in ['batch','batch_all','force_batch']) {
@@ -4060,12 +4072,7 @@ void _registerDecoder() {
     final file = File(
       'test/signing/binary.json',
     );
-    if (!file.existsSync()) {
-      test('二进制前缀域金标 fixture 尚未生成', () {
-        markTestSkipped('缺少 fixture —— 由 Rust 切片导出');
-      }, skip: '缺少 fixture');
-      return;
-    }
+    if (!file.existsSync()) throw StateError('缺少链端权威金标：test/signing/binary.json');
     final root = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
     final vectors = (root['vectors'] as List).cast<Map<String, dynamic>>();
     final byTag = {for (final v in vectors) v['op_tag'] as String: v};
@@ -4085,7 +4092,7 @@ void _registerDecoder() {
       },
     );
 
-    test('DECRYPT fixture payload → decode 解出 clearing_decrypt + cid_number',
+    test('CLEARING_DECRYPT fixture payload → decode 解出 clearing_decrypt + cid_number',
         () {
       final v = byTag['0x19']!;
       final inputs = v['sample_inputs'] as Map<String, dynamic>;
@@ -4117,7 +4124,7 @@ Uint8List _institutionBytes(String value) {
 // 本文件不做任何 compact 编码。这样测的是「解码器能否正确解析链端真值」,
 // 而不是「解码器与本测试的编码实现是否自洽」。
 //
-// 真源:citizenchain/runtime/primitives/tests/fixtures/scale_codec_vectors.json
+// 真源:citizenchain/runtime/primitives/tests/fixtures/scale.json
 // 生成器:citizenchain/runtime/primitives/tests/scale_codec_golden.rs
 
 const String _vectorsPath =

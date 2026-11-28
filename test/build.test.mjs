@@ -6,10 +6,25 @@ import {mkdtempSync,mkdirSync,cpSync,readFileSync,writeFileSync,rmSync,existsSyn
 import {join,dirname,basename} from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {root,displayName,run,artifactBaseName,packageProduct,uploadAndroid,selectRelease,localTools,progress,seedGradle,seedPub} from '../scripts/build.mjs';
+import {root,displayName,run,artifactBaseName,packageProduct,uploadAndroid,selectRelease,localTools,progress,seedGradle,seedPub,verifyGoldens} from '../scripts/build.mjs';
 import {describeAction} from '../scripts/config.mjs';
 import {platforms,repository,tools} from '../scripts/config.mjs';
 const platform=Object.keys(platforms)[0];
+test('金标真源检查拒绝缺失、改名、额外内容及空向量，完整副本通过',t=>{
+ const work=mkdtempSync(join(root,'target/test/golden-'));t.after(()=>rmSync(work,{recursive:true,force:true}));
+ const chain=join(work,'chain'),project=join(work,'project'),source=join(chain,'runtime/primitives/tests/fixtures'),mirror=join(project,'test/signing');
+ mkdirSync(source,{recursive:true});mkdirSync(mirror,{recursive:true});
+ const valid='{"vectors":[{"op_tag":"0x10"}]}\n';
+ for(const name of ['binary.json','domain.json','scale.json','call.json','permission.json']){
+  writeFileSync(join(source,name),valid);writeFileSync(join(mirror,name),valid);
+ }
+ assert.doesNotThrow(()=>verifyGoldens(project,chain));
+ assert.throws(()=>verifyGoldens(project,''),/真源/);
+ writeFileSync(join(mirror,'binary.json'),valid+' ');assert.throws(()=>verifyGoldens(project,chain),/不一致/);
+ rmSync(join(mirror,'binary.json'));writeFileSync(join(mirror,'other.json'),valid);assert.throws(()=>verifyGoldens(project,chain),/名称或集合/);rmSync(join(mirror,'other.json'));
+ writeFileSync(join(mirror,'binary.json'),valid);rmSync(join(source,'domain.json'));assert.throws(()=>verifyGoldens(project,chain),/ENOENT/);
+ writeFileSync(join(source,'domain.json'),'{"vectors":[]}');writeFileSync(join(mirror,'domain.json'),'{"vectors":[]}');assert.throws(()=>verifyGoldens(project,chain),/向量缺失/);
+});
 test('配置仅声明和引用，导入不派发、不生成现场',async()=>{
  const config=await import('../scripts/config.mjs');assert.equal(config.describeConfiguration().schema,1);
  const source=readFileSync(join(root,'scripts/config.mjs'),'utf8');assert.doesNotMatch(source,/\b(?:spawn|execFile|fetch|dispatch|readFile|writeFile)\s*\(/u);

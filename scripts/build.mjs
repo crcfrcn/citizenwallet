@@ -450,8 +450,12 @@ async function prepare(work,platform,env){
  // 直接引用唯一核心；缺少本机源码时仅为本轮构建浅克隆公民链，不复制或生成模块实现。
  const localChain=resolve(root,'../citizenchain'),chain=existsSync(join(localChain,'runtime/transaction/mldsa/Cargo.toml'))?localChain:join(work,'citizenchain');
  if(chain!==localChain)await run('git',['clone','--depth=1','--branch','main','https://github.com/'+chainRepository+'.git',chain],{env});
+ env.CITIZENCHAIN_ROOT=chain;
  const signingManifest=join(project,'signing/Cargo.toml'),sharedMldsa=relative(dirname(signingManifest),join(chain,'runtime/transaction/mldsa')).split(sep).join('/');
- writeFileSync(signingManifest,readFileSync(signingManifest,'utf8').replace('path = "../../citizenchain/runtime/transaction/mldsa"','path = '+JSON.stringify(sharedMldsa)));
+ const sharedProtocol=relative(dirname(signingManifest),join(chain,'crates/protocol')).split(sep).join('/');
+ writeFileSync(signingManifest,readFileSync(signingManifest,'utf8').replace('path = "../../citizenchain/runtime/transaction/mldsa"','path = '+JSON.stringify(sharedMldsa)).replace('path = "../../citizenchain/crates/protocol"','path = '+JSON.stringify(sharedProtocol)));
+ copyFileSync(join(chain,'crates/protocol/NOTICE'),join(project,'icons/NOTICE'));
+ writeFileSync(join(project,'pubspec.yaml'),readFileSync(join(project,'pubspec.yaml'),'utf8').replace('    - icons/citizen-logo.png','    - icons/citizen-logo.png\n    - icons/NOTICE'));
  put(join(project,'analysis_options.yaml'),'include: package:flutter_lints/flutter.yaml\nanalyzer:\n  exclude:\n    - "**/*.g.dart"\n');
  if(platform==='android'){
   const sdk=env.ANDROID_HOME||process.env.ANDROID_HOME||process.env.ANDROID_SDK_ROOT;if(!sdk)throw Error('缺少官方Android SDK');
@@ -485,7 +489,8 @@ export async function native(target,project,work,env){
  // iOS验收已生成的机器码符号，官方选项避免Apple nm解析Rust上游bitcode；保留四个 sr 导出并核对全部 mldsa 共用接口。
  const symbols=await run(target==='android'?join(ndk,'toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-nm'):'nm',target==='android'?['-D','--defined-only',file]:['-g',...(target==='ios'?['--no-llvm-bc']:[]),file],{env,capture:true});
  for(const name of ['derive_hard','public_key','sign','verify'])if(!new RegExp('(?:^|\\s)_?citizen_sr25519_'+name+'(?:\\s|$)','mu').test(symbols))throw Error('原生签名导出缺失：'+name);
- for(const name of ['mldsa_default_algorithm','mldsa_public_key','mldsa_sign','mldsa_verify','mldsa_account_id','mldsa_review_message','mldsa_signature_encode','mldsa_signature_decode','qr_encode','qr_join'])if(!new RegExp('(?:^|\\s)_?gmb_'+name+'(?:\\s|$)','mu').test(symbols))throw Error('原生签名导出缺失：gmb_'+name);
+ for(const name of ['mldsa_default_algorithm','mldsa_public_key','mldsa_sign','mldsa_verify','mldsa_account_id','mldsa_review_message','mldsa_signature_encode','mldsa_signature_decode'])if(!new RegExp('(?:^|\\s)_?gmb_'+name+'(?:\\s|$)','mu').test(symbols))throw Error('原生签名导出缺失：gmb_'+name);
+ for(const name of ['wallet_qr_open','wallet_qr_step','wallet_qr_close'])if(!new RegExp('(?:^|\\s)_?'+name+'(?:\\s|$)','mu').test(symbols))throw Error('原生二维码导出缺失：'+name);
  if(target==='ios'){const output=directory(join(work,'native/ios'));copy(file,join(output,basename(file)));env.CITIZENWALLET_NATIVE_IOS_DIR=output;}
  if(target==='android'){
   const output=directory(join(work,'native/android/arm64-v8a'));copy(file,join(output,basename(file)));env.CITIZENWALLET_NATIVE_ANDROID_DIR=dirname(output);
@@ -493,6 +498,19 @@ export async function native(target,project,work,env){
   const headers=await run(readelf,['-lW',file],{env,capture:true});const loads=headers.split('\n').filter(line=>/^\s*LOAD\s/u.test(line));if(!loads.length||loads.some(line=>parseInt(line.trim().split(/\s+/u).at(-1),16)<16384))throw Error('Android签名库不满足16KB对齐');
  }
  return file;
+}
+// 金标仅从代码所有者真源完整同步；缺失、改名、内容或集合漂移均停止验收。
+export function verifyGoldens(project,chain){
+ if(!chain||!isAbsolute(chain))throw Error('金标检查缺少准确链端真源');
+ const names=['binary.json','domain.json','scale.json','call.json','permission.json'];
+ if(JSON.stringify(readdirSync(join(project,'test/signing')).filter(name=>name.endsWith('.json')).sort())!==JSON.stringify([...names].sort()))throw Error('金标文件名称或集合不一致');
+ for(const name of names){
+  const source=join(chain,'runtime/primitives/tests/fixtures',name),mirror=join(project,'test/signing',name);
+  const bytes=readFileSync(source),value=JSON.parse(bytes);
+  const rows=value.vectors||value.cases;
+  if(rows&&(!Array.isArray(rows)||!rows.length))throw Error('真源向量缺失：'+name);
+  if(!readFileSync(mirror).equals(bytes))throw Error('金标副本与真源不一致：'+name);
+ }
 }
 export async function testProduct(platform='android',{installed,stage=silentProgress}={}){
  nodeCheck();
@@ -502,6 +520,7 @@ export async function testProduct(platform='android',{installed,stage=silentProg
  try{
   if(!installed)await prepareTools(work,platform,env);
   const project=await stage('测试工程与原锁依赖准备',()=>prepare(work,platform,env));
+  await stage('金标真源一致性',()=>verifyGoldens(project,env.CITIZENCHAIN_ROOT));
   await stage('Rust 回归与宿主签名库构建',async()=>{
    await run('cargo',['test','--locked','--manifest-path',join(project,'signing/Cargo.toml')],{cwd:project,env});
    await native('host',project,work,env);

@@ -1,6 +1,7 @@
 // 统一扫描框布局，绘制遮罩挖空区域和边角标记。
 
 import 'package:citizenwallet/pages/theme.dart';
+import 'package:citizenwallet/scanner/scanner.dart' show NativeQrTransport;
 import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/identity.dart';
 import 'package:citizenwallet/protocol/qr.dart';
@@ -134,17 +135,16 @@ Future<void> showWalletQrDialog(
   return showDialog<void>(
     context: context,
     builder: (context) => Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(accountName,
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            Text(
+              accountName,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
@@ -153,27 +153,29 @@ Future<void> showWalletQrDialog(
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppTheme.border),
               ),
-              child: QrImageView(
-                data: qrData,
-                version: QrVersions.auto,
-                size: 240,
-                eyeStyle: const QrEyeStyle(
-                  eyeShape: QrEyeShape.square,
-                  color: AppTheme.primaryDark,
-                ),
-                dataModuleStyle: const QrDataModuleStyle(
-                  dataModuleShape: QrDataModuleShape.square,
-                  color: AppTheme.primaryDark,
-                ),
-              ),
+              child: Builder(builder: (context) {
+                final code=QrValidator.validate(data:qrData,version:QrVersions.auto,errorCorrectionLevel:QrErrorCorrectLevel.M).qrCode;
+                if(code==null)return const Text('二维码生成失败');
+                final ratio=MediaQuery.devicePixelRatioOf(context),quiet=NativeQrTransport.quietZone;
+                final modules=code.moduleCount+2*quiet;
+                final unit=(240*ratio/modules).floorToDouble()/ratio;
+                return SizedBox(width:240,height:240,child:Center(child:QrImageView.withQr(
+                  qr:code,version:code.typeNumber,size:unit*modules,
+                  padding:EdgeInsets.all(unit*quiet),backgroundColor:NativeQrTransport.background,
+                  errorCorrectionLevel:QrErrorCorrectLevel.M,
+                  eyeStyle:QrEyeStyle(eyeShape:QrEyeShape.square,color:NativeQrTransport.foreground),
+                  dataModuleStyle:QrDataModuleStyle(dataModuleShape:QrDataModuleShape.square,color:NativeQrTransport.foreground),
+                )));
+              }),
             ),
             const SizedBox(height: 12),
             SelectableText(
               ss58Address,
               style: const TextStyle(
-                  fontSize: 11,
-                  color: AppTheme.textSecondary,
-                  fontFamily: 'monospace'),
+                fontSize: 11,
+                color: AppTheme.textSecondary,
+                fontFamily: 'monospace',
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
@@ -193,8 +195,9 @@ Future<void> showWalletQrDialog(
                       Clipboard.setData(ClipboardData(text: ss58Address));
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                            content: Text('账户地址已复制'),
-                            duration: Duration(seconds: 1)),
+                          content: Text('账户地址已复制'),
+                          duration: Duration(seconds: 1),
+                        ),
                       );
                     },
                     child: const Text('复制'),

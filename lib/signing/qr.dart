@@ -4,18 +4,19 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+
 import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/qr.dart';
 import 'package:citizenwallet/protocol/sign.dart';
 import 'package:citizenwallet/signing/decoder.dart';
-import 'package:citizenwallet/wallet/mldsa.dart';
+import 'package:citizenwallet/scanner/scanner.dart' show NativeQrTransport;
 import 'package:citizenwallet/wallet/sr25519.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:pointycastle/digests/blake2b.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-/// 此处仅播放传输帧，分帧编码与完整性校验统一归 mldsa 模块。
+/// 此处仅播放公共UR核心的连续帧，参数及完整性校验只归协议包。
 class AnimatedSigningQr extends StatefulWidget {
   const AnimatedSigningQr({super.key, required this.data, this.size = 360});
   final String data;
@@ -26,18 +27,51 @@ class AnimatedSigningQr extends StatefulWidget {
 
 class _AnimatedSigningQrState extends State<AnimatedSigningQr> {
   Timer? _timer;
-  List<String> _frames = const [];
+  NativeQrTransport? _encoder;
+  final List<String> _history = [];
   int _index = 0;
+  bool _animated = false, _paused = false, _reduceMotion = false;
+  Object? _error;
   void _load() {
     _timer?.cancel();
+    _encoder?.close();
+    _history.clear();
     _index = 0;
-    _frames = utf8.encode(widget.data).length <= 2331
-        ? [widget.data]
-        : NativeMldsa.frames(widget.data);
-    if (_frames.length > 1) {
-      _timer = Timer.periodic(const Duration(milliseconds: 400), (_) {
-        if (mounted) setState(() => _index = (_index + 1) % _frames.length);
+    _paused = _reduceMotion;
+    _error = null;
+    try {
+      _encoder = NativeQrTransport.encoder(widget.data);
+      final first = _encoder!.next();
+      _history.add(first.text);
+      _animated = first.animated;
+      if (_animated) {
+        _timer = Timer.periodic(
+          Duration(milliseconds: NativeQrTransport.intervalMs),
+          (_) {
+            if (mounted && !_paused) _next();
+          },
+        );
+      }
+    } catch (error) {
+      _error = error;
+    }
+  }
+
+  void _next() {
+    try {
+      if (_index + 1 < _history.length) {
+        setState(() => _index++);
+        return;
+      }
+      final frame = _encoder!.next();
+      setState(() {
+        _history.add(frame.text);
+        if (_history.length > 64) _history.removeAt(0);
+        _index = _history.length - 1;
       });
+    } catch (error) {
+      _timer?.cancel();
+      setState(() => _error = error);
     }
   }
 
@@ -48,6 +82,12 @@ class _AnimatedSigningQrState extends State<AnimatedSigningQr> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    if (reduced != _reduceMotion) { _reduceMotion = reduced; _paused = reduced; }
+  }
+  @override
   void didUpdateWidget(covariant AnimatedSigningQr oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.data != widget.data) _load();
@@ -56,19 +96,97 @@ class _AnimatedSigningQrState extends State<AnimatedSigningQr> {
   @override
   void dispose() {
     _timer?.cancel();
+    _encoder?.close();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) =>
-      Column(mainAxisSize: MainAxisSize.min, children: [
-        QrImageView(
-            data: _frames[_index],
-            version: QrVersions.auto,
-            size: widget.size,
-            errorCorrectionLevel: QrErrorCorrectLevel.M),
-        if (_frames.length > 1) Text('${_index + 1}/${_frames.length}'),
-      ]);
+  Widget build(BuildContext context) {
+    if (_error != null || _history.isEmpty) return const Text('二维码生成失败，请重新打开');
+    final data = _history[_index];
+    QrCode? selected;
+    // UR已统一大写，必须显式用字母数字模式；默认addData会退成更密的字节模式。
+    for (
+      var version = _animated ? NativeQrTransport.maxVersion : 1;
+      version <= NativeQrTransport.maxVersion;
+      version++
+    ) {
+      try {
+        final candidate = QrCode(version, QrErrorCorrectLevel.M)
+          ..addAlphaNumeric(data);
+        QrImage(candidate); // 用上游公开矩阵构造器验证容量。
+        selected = candidate;
+        break;
+      } on InputTooLongException {
+        continue;
+      }
+    }
+    final code = selected;
+    if (code == null) return const Text('二维码生成失败');
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final desired = _animated && widget.size < 320 ? 320.0 : widget.size;
+        final available =
+            constraints.maxWidth.isFinite && constraints.maxWidth < desired
+            ? constraints.maxWidth
+            : desired;
+        final modules = code.moduleCount + 2 * NativeQrTransport.quietZone,
+            ratio = MediaQuery.devicePixelRatioOf(context);
+        final unit = (available * ratio / modules).floorToDouble() / ratio;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            QrImageView.withQr(
+              key: ValueKey(data),
+              qr: code,
+              version: code.typeNumber,
+              size: unit * modules,
+              padding: EdgeInsets.all(unit * NativeQrTransport.quietZone),
+              backgroundColor: NativeQrTransport.background,
+              errorCorrectionLevel: QrErrorCorrectLevel.M,
+              eyeStyle: QrEyeStyle(
+                eyeShape: QrEyeShape.square,
+                color: NativeQrTransport.foreground,
+              ),
+              dataModuleStyle: QrDataModuleStyle(
+                dataModuleShape: QrDataModuleShape.square,
+                color: NativeQrTransport.foreground,
+              ),
+            ),
+            if (_animated) ...[
+              const Text('请持续扫码，接收端会显示进度'),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: _index == 0
+                        ? null
+                        : () => setState(() {
+                            _paused = true;
+                            _index--;
+                          }),
+                    child: const Text('上一帧'),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _paused = !_paused),
+                    child: Text(_paused ? '继续' : '暂停'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      _paused = true;
+                      _next();
+                    },
+                    child: const Text('下一帧'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
 }
 
 // 构造各业务签名原文、请求标识和二维码响应，并调用账户签名。

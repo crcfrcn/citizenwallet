@@ -10,12 +10,52 @@ import 'package:citizenwallet/protocol/sign.dart';
 import 'package:citizenwallet/signing/login.dart';
 import 'package:citizenwallet/signing/qr.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:citizenwallet/scanner/scanner.dart' show NativeQrTransport;
 import 'package:pointycastle/digests/blake2b.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 
 import 'decoder_test.dart' show topupText, cidRebindPayload;
 
 void main() {
+  testWidgets('公共400字节UR以字母数字模式显示绿色二维码，每800毫秒切帧并可暂停查看', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedSigningQr(
+            data: List.filled(300, 'public PQ response').join(),
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    final first = tester.widget<QrImageView>(find.byType(QrImageView));
+    expect(first.version, NativeQrTransport.maxVersion);
+    expect(first.errorCorrectionLevel, QrErrorCorrectLevel.M);
+    expect(first.eyeStyle.color, NativeQrTransport.foreground);
+    expect(first.dataModuleStyle.color, NativeQrTransport.foreground);
+    final key = first.key;
+    await tester.pump(const Duration(milliseconds: 799));
+    expect(tester.widget<QrImageView>(find.byType(QrImageView)).key, key);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(
+      tester.widget<QrImageView>(find.byType(QrImageView)).key,
+      isNot(key),
+    );
+    await tester.tap(find.text('暂停'));
+    await tester.pump();
+    final paused = tester.widget<QrImageView>(find.byType(QrImageView)).key;
+    await tester.pump(const Duration(milliseconds: 1600));
+    expect(tester.widget<QrImageView>(find.byType(QrImageView)).key, paused);
+    await tester.tap(find.text('下一帧'));
+    await tester.pump();
+    expect(
+      tester.widget<QrImageView>(find.byType(QrImageView)).key,
+      isNot(paused),
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
   group('qr', _registerQr);
   group('domain', _registerDomain);
 }
@@ -29,23 +69,23 @@ List<int> _u64Le(int value) =>
     List<int>.generate(8, (index) => (value >> (index * 8)) & 0xff);
 
 List<int> _occupyAuthorizationTemplate(String cid, int expiresAt) => [
-      ...List<int>.filled(32, 0x44),
-      cid.length << 2,
-      ...cid.codeUnits,
-      ...List<int>.filled(32, 0),
-      ..._u64Le(0),
-      ..._u64Le(expiresAt),
-    ];
+  ...List<int>.filled(32, 0x44),
+  cid.length << 2,
+  ...cid.codeUnits,
+  ...List<int>.filled(32, 0),
+  ..._u64Le(0),
+  ..._u64Le(expiresAt),
+];
 
 List<int> _rebindAuthorizationTemplate(String cid, int expiresAt) => [
-      ...List<int>.filled(32, 0x44),
-      cid.length << 2,
-      ...cid.codeUnits,
-      ...List<int>.filled(32, 0x55),
-      ...List<int>.filled(32, 0),
-      ..._u64Le(7),
-      ..._u64Le(expiresAt),
-    ];
+  ...List<int>.filled(32, 0x44),
+  cid.length << 2,
+  ...cid.codeUnits,
+  ...List<int>.filled(32, 0x55),
+  ...List<int>.filled(32, 0),
+  ..._u64Le(7),
+  ..._u64Le(expiresAt),
+];
 
 void _registerQr() {
   late QrSigner signer;
@@ -74,24 +114,33 @@ void _registerQr() {
   });
   test('自助换绑完整授权只做一次GMB+0x11摘要，与App和Runtime原金标相同', () {
     final payload = cidRebindPayload(
-        genesisHash: '0x${'22' * 32}', revision: BigInt.from(0x01020304));
+      genesisHash: '0x${'22' * 32}',
+      revision: BigInt.from(0x01020304),
+    );
     final body = SignRequestBody.fromHex(
-        action: QrActions.cidRebind,
-        signerPublicKeyHex: '0x${'33' * 32}',
-        payloadHex: '0x${_hexBytes(payload)}');
+      action: QrActions.cidRebind,
+      signerPublicKeyHex: '0x${'33' * 32}',
+      payloadHex: '0x${_hexBytes(payload)}',
+    );
     final digest = QrSigner.signingBytesFor(body);
     expect(payload.length, 131);
-    expect(_hexBytes(digest),
-        '648df90f231b32d1e0665fd54a9dca94381a739689a665a69d83857941520d4d');
-    final registrar = SignRequestBody.fromHex(
-        action: QrActions.citizenRebind,
-        signerPublicKeyHex: '',
-        payloadHex:
-            '0x${_hexBytes(_rebindAuthorizationTemplate('CN951-CTZN1-539598435-2026', 0x11121314))}');
     expect(
-        QrSigner.signingBytesFor(registrar,
-            selfAccountId: Uint8List.fromList(List.filled(32, 0x11))),
-        isNot(digest));
+      _hexBytes(digest),
+      '648df90f231b32d1e0665fd54a9dca94381a739689a665a69d83857941520d4d',
+    );
+    final registrar = SignRequestBody.fromHex(
+      action: QrActions.citizenRebind,
+      signerPublicKeyHex: '',
+      payloadHex:
+          '0x${_hexBytes(_rebindAuthorizationTemplate('CN951-CTZN1-539598435-2026', 0x11121314))}',
+    );
+    expect(
+      QrSigner.signingBytesFor(
+        registrar,
+        selfAccountId: Uint8List.fromList(List.filled(32, 0x11)),
+      ),
+      isNot(digest),
+    );
   });
 
   group('QrSigner.generateRequestId', () {
@@ -602,9 +651,10 @@ void _registerQr() {
     for (final length in [255, 256, 257, 400]) {
       final bytes = Uint8List.fromList(List<int>.filled(length, 0x55));
       final body = SignRequestBody.fromHex(
-          action: 0x0400,
-          signerPublicKeyHex: '0x${'07' * 32}',
-          payloadHex: '0x${_hexBytes(bytes)}');
+        action: 0x0400,
+        signerPublicKeyHex: '0x${'07' * 32}',
+        payloadHex: '0x${_hexBytes(bytes)}',
+      );
       expect(QrSigner.signingBytesFor(body), bytes);
     }
   });
@@ -648,7 +698,7 @@ void _registerQr() {
 ///
 /// 该域此前对**裸 JSON 文本直签**(无 GMB 前缀、无 op_tag、不进 SIGN_OP_TAGS),
 /// 2026-08-06 审计后收敛到统一哈希域。金标真源:
-/// `citizenchain/runtime/primitives/tests/fixtures/signing_domain_vectors.json`
+/// `citizenchain/runtime/primitives/tests/fixtures/domain.json`
 void _onchinaConfirmSigningDomain() {
   test('onchina 治理动作签 signing_message(0x20),与链端金标逐字节相同', () {
     // 金标向量:op_tag=0x20, scale_payload=0102030405060708
@@ -666,7 +716,7 @@ void _onchinaConfirmSigningDomain() {
     expect(
       hex,
       '466ec54a3b9e92db537733a0ee4c386c8968d8b4d54ac7ae2b18bdb192028c6b',
-      reason: '与 signing_domain_vectors.json 的 0x20 向量不一致 = 冷端与链端签名域漂移',
+      reason: '与 domain.json 的 0x20 向量不一致 = 冷端与链端签名域漂移',
     );
   });
 }
@@ -685,7 +735,7 @@ void _onchinaConfirmSigningDomain() {
 //
 // 本文件的期望值一律来自真源(Rust 生成),自证由此变他证。
 //
-// 真源:citizenchain/runtime/primitives/tests/fixtures/signing_domain_vectors.json
+// 真源:citizenchain/runtime/primitives/tests/fixtures/domain.json
 // 规范实现:citizenchain/runtime/primitives/src/sign.rs::signing_message
 // 契约:被签消息 = blake2_256( GMB(3B) || op_tag(1B) || payload )
 
@@ -723,7 +773,11 @@ void _registerDomain() {
   final file = File(_vectorsPath);
   final canonical = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
   final domain = canonical['domain'] as String;
-  final vectors = (canonical['vectors'] as List).cast<Map<String, dynamic>>();
+  final registered = (canonical['vectors'] as List)
+      .cast<Map<String, dynamic>>();
+  final rejected = (canonical['rejected_vectors'] as List)
+      .cast<Map<String, dynamic>>();
+  final vectors = [...registered, ...rejected];
   final gmbPrefix = utf8.encode(domain);
 
   group('哈希域摘要原语与已验真链端镜像一致', () {
@@ -758,7 +812,7 @@ void _registerDomain() {
     // 端到端验证「冷钱包实际签的字节」== 链端金标。
     //
     // 可直接覆盖 OP_SIGN_CITIZEN_IDENTITY 与默认账户切换；另两个域
-    // (cid_occupy / cid_admin_rebind)
+    // (cid_occupy / cid_registrar_rebind)
     // 要求 payload 是结构化的 Authorization 模板并原位替换账户槽,真源向量的
     // 任意字节 payload 套不进该结构。这两个域的槽位与 op_tag 组装由
     // qr_signer_test.dart 覆盖,其摘要正确性已由上一组独立锁住。
@@ -855,17 +909,20 @@ void _registerDomain() {
       );
     });
 
-    test('冷钱包哈希域的 op_tag 均在真源登记', () {
+    test('冷钱包现行哈希域完整登记，已撤销域单列且不恢复', () {
       // 冷钱包私有常量 _opSignCitizenIdentity/_opSignCidOccupy/_opSignCidAdminRebind
       // 测试访问不到,改为断言真源侧登记值,任一端重排域编号都会在此暴露。
       expect(vectorNamed('OP_SIGN_CITIZEN_IDENTITY')?['op_tag'], '0x10');
       expect(vectorNamed('cid_occupy')?['op_tag'], '0x12');
-      expect(vectorNamed('cid_admin_rebind')?['op_tag'], '0x1f');
+      expect(vectorNamed('cid_registrar_rebind')?['op_tag'], '0x1f');
       expect(vectorNamed('OP_SIGN_SWITCH_DEFAULT_ACCOUNT')?['op_tag'], '0x21');
       expect(vectorNamed('OP_SIGN_SQUARE_ACTION')?['op_tag'], '0x1d');
       expect(vectorNamed('OP_SIGN_MLS_DEVICE_BIND')?['op_tag'], '0x1c');
       expect(vectorNamed('OP_SIGN_PUBLISH')?['op_tag'], '0x24');
       expect(vectorNamed('OP_SIGN_INSTITUTION_WALLET')?['op_tag'], '0x25');
+      expect(registered, hasLength(16));
+      expect(registered.any((row) => row['op_tag'] == '0x25'), isFalse);
+      expect(rejected.map((row) => row['op_tag']), ['0x25']);
     });
   });
 }

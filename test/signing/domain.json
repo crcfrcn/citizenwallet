@@ -1,6 +1,14 @@
 {
-  "_comment": "签名协议金标向量的公民钱包镜像。公开真源为 citizenchain/runtime/primitives/tests/fixtures/signing_domain_vectors.json；Flutter 测试只读取本仓镜像，更新时须与公开真源一致。被签消息为 blake2_256(GMB || op_tag || scale_payload)；二进制前缀域另见 binary_prefix_domain_vectors.json。镜像不得单方面改值。",
+  "_comment": "跨端金标唯一真源。有效签名域由现行 SIGN_OP_TAGS 定义；已撤销域单列为拒绝及摘要原语覆盖，不重新登记。签名域由 primitives/tests/sign_golden.rs 验证，二进制载荷及Runtime调用由 runtime/tests/golden.rs 通过真实类型生成和验证。App与钱包副本必须同名且内容完整一致；所属产品原测试入口直接检查，缺失或漂移立即失败。",
   "domain": "GMB",
+  "rejected_vectors": [
+    {
+      "message_hex": "13377a0b08652a43a2bd6485de40e741baf59e75bec33ce6c97aa6d97c6e803a",
+      "name": "OP_SIGN_INSTITUTION_WALLET",
+      "op_tag": "0x25",
+      "scale_payload_hex": "696e737469747574696f6e2d77616c6c6574"
+    }
+  ],
   "vectors": [
     {
       "message_hex": "19e050b3476dfd7db0aae9d527e205da44b8f9d00e5ddf4f81f4830ab0c00568",
@@ -70,13 +78,13 @@
     },
     {
       "message_hex": "c8d1bf2d1f5a3c4e36aaa7d40eecaede9831639ce042f070ec0c27dd5342fc0c",
-      "name": "cid_admin_rebind",
+      "name": "cid_registrar_rebind",
       "op_tag": "0x1f",
       "scale_payload_hex": "c0ffee00c0ffee11"
     },
     {
       "message_hex": "466ec54a3b9e92db537733a0ee4c386c8968d8b4d54ac7ae2b18bdb192028c6b",
-      "name": "OP_SIGN_ONCHINA_ADMIN",
+      "name": "OP_SIGN_ONCHINA_CONFIRM",
       "op_tag": "0x20",
       "scale_payload_hex": "0102030405060708"
     },
@@ -97,12 +105,6 @@
       "name": "OP_SIGN_PUBLISH",
       "op_tag": "0x24",
       "scale_payload_hex": "7075626c697368"
-    },
-    {
-      "message_hex": "13377a0b08652a43a2bd6485de40e741baf59e75bec33ce6c97aa6d97c6e803a",
-      "name": "OP_SIGN_INSTITUTION_WALLET",
-      "op_tag": "0x25",
-      "scale_payload_hex": "696e737469747574696f6e2d77616c6c6574"
     }
   ]
 }

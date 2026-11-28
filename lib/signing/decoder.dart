@@ -134,7 +134,7 @@ class PayloadDecoder {
   /// 返回 null 表示无法识别或解码失败 → strict 模式下 Reject → 禁止签名。
   // 二进制前缀域:
   //   ROLE_ACCESS → 前 4 字节 GMB(3B) || 0x18
-  //   DECRYPT        → 前 4 字节 GMB(3B) || 0x19
+  //   CLEARING_DECRYPT        → 前 4 字节 GMB(3B) || 0x19
   // 这两个域签的是**原始可解析字节**:冷钱包对整段 payloadHex 直接 sr25519 签名,
   // 本 decoder 仅读 4 字节前缀跳过 + 按偏移取字段展示。与
   // primitives::sign::signing_message(blake2_256(GMB||op_tag||SCALE)) 的哈希域
@@ -145,7 +145,7 @@ class PayloadDecoder {
   //     transaction/.../settlement/admin_unlock.rs(build_challenge_payload)
   //   - CitizenApp通过SDK的roleAccess/clearingDecrypt唯一编码原语构造。
   // 金标布局: citizenchain/runtime/primitives/tests/fixtures/
-  //   binary_prefix_domain_vectors.json(本仓副本 test/signing/fixtures/)。
+  //   binary.json(本仓副本 test/signing/binary.json)。
   //
   // 前缀 = core_const::GMB(0x47 0x4D 0x42)|| op_tag(1B)。单源对齐
   // primitives::sign::binary_domain_prefix / BINARY_PREFIX_LEN。
@@ -170,7 +170,7 @@ class PayloadDecoder {
   /// ROLE_ACCESS op_tag(对齐 OP_SIGN_ROLE_ACCESS)。
   static const _opSignRoleAccess = 0x18;
 
-  /// DECRYPT op_tag(对齐 OP_SIGN_CLEARING_DECRYPT)。
+  /// CLEARING_DECRYPT op_tag(对齐 OP_SIGN_CLEARING_DECRYPT)。
   static const _opSignClearingDecrypt = 0x19;
 
   /// ROLE_ACCESS 4 字节二进制前缀 GMB || 0x18。
@@ -179,7 +179,7 @@ class PayloadDecoder {
     _opSignRoleAccess,
   ]);
 
-  /// DECRYPT 4 字节二进制前缀 GMB || 0x19。
+  /// CLEARING_DECRYPT 4 字节二进制前缀 GMB || 0x19。
   static final _clearingDecryptPrefix = Uint8List.fromList([
     ..._gmbPrefix,
     _opSignClearingDecrypt,
@@ -296,7 +296,7 @@ class PayloadDecoder {
           _hasPrefix(raw, _roleAccessPrefix)) {
         return _decodeRoleAccess(raw);
       }
-      // DECRYPT challenge = prefix(4) + cid_number(32) + signer_public_key(32)
+      // CLEARING_DECRYPT challenge = prefix(4) + cid_number(32) + signer_public_key(32)
       //   + timestamp(8) + nonce(16)，长度由 primitives 单源常量锁定。
       if (raw.length == _clearingDecryptPayloadLen &&
           _hasPrefix(raw, _clearingDecryptPrefix)) {

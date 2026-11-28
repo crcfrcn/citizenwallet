@@ -1,6 +1,6 @@
-// 验证钱包详情、创建和备份交互。
-import 'dart:async';
+// 验证钱包详情、备份保护及扫码请求的钱包归属边界。
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -11,11 +11,18 @@ import 'package:citizenwallet/pages/setup.dart';
 import 'package:citizenwallet/pages/wallet.dart';
 import 'package:citizenwallet/helpers/sensitive.dart';
 import 'package:citizenwallet/wallet/manager.dart';
+import 'package:citizenwallet/pages/scan.dart';
 
+void main() {
+  group('wallet', _registerWallet);
+  group('scan', _registerScan);
+}
+
+// 验证钱包详情、创建和备份交互。
 const String kDevPhrase =
     'bottom drive obey lake curtain smoke basket hold race lonely fit walk';
 
-void main() {
+void _registerWallet() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   const securityChannel = MethodChannel('citizenwallet/security');
   const securityEvents = MethodChannel('citizenwallet/security_events');
@@ -447,5 +454,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('选择账户签名方式'), findsNothing);
     await releasePage(tester);
+  });
+}
+
+// 验证扫码请求的钱包归属边界。
+void _registerScan() {
+  const walletA =
+      '0x2afba9278e30ccf6a6ceb3a8b6e336b70068f045c666f2e7f4f9cc5f47db8972';
+  const walletB =
+      '0xb606fc73f57f03cdb4c932d475ab426043e429cecc2ffff0d2672b0df8398c48';
+
+  group('accountBelongsToWallet', () {
+    test('同钱包账户放行', () {
+      expect(accountBelongsToWallet(walletA, walletA), isTrue);
+    });
+
+    test('跨钱包账户拒绝', () {
+      expect(accountBelongsToWallet(walletB, walletA), isFalse);
+      expect(accountBelongsToWallet(walletA, walletB), isFalse);
+    });
   });
 }

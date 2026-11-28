@@ -1,6 +1,5 @@
 // 扫描相机或相册二维码，仅接受当前钱包所属账户的签名请求。
 
-import 'package:citizenwallet/wallet/mldsa.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -26,11 +25,7 @@ bool accountBelongsToWallet(String accountMasterId, String walletMasterId) =>
     accountMasterId == walletMasterId;
 
 class ScanPage extends StatefulWidget {
-  const ScanPage({
-    super.key,
-    required this.wallet,
-    this.scannerController,
-  });
+  const ScanPage({super.key, required this.wallet, this.scannerController});
 
   /// 只扫本钱包账户的签名请求;跨钱包(账户不属于本钱包)一律拒绝。
   final Wallet wallet;
@@ -47,7 +42,8 @@ class _ScanPageState extends State<ScanPage> {
       widget.scannerController ?? ScannerController();
   final WalletManager _walletManager = WalletManager();
   bool _handled = false;
-  final Set<String> _qrFrames = {};
+  NativeQrTransport? _transport;
+  int _progress = 0;
   bool _torchOn = false;
   bool _closing = false;
 
@@ -55,6 +51,7 @@ class _ScanPageState extends State<ScanPage> {
 
   @override
   void dispose() {
+    _transport?.close();
     if (_ownsController) {
       unawaited(_controller.dispose());
     }
@@ -97,25 +94,18 @@ class _ScanPageState extends State<ScanPage> {
 
   Future<void> _handleCode(String raw) async {
     if (_handled) return;
-    if (raw.startsWith('GMBQR1:')) {
+    if (raw.toLowerCase().startsWith('ur:')) {
       try {
-        if (_qrFrames.isNotEmpty &&
-            _qrFrames.first.split(':')[1] != raw.split(':')[1]) {
-          _qrFrames.clear();
-        }
-        if (_qrFrames.length >= 64 && !_qrFrames.contains(raw)) {
-          throw const FormatException('Too many QR frames');
-        }
-        _qrFrames.add(raw);
-        final complete = NativeMldsa.joinFrames(_qrFrames);
-        if (complete == null) {
+        final received = (_transport ??= NativeQrTransport.decoder()).next(raw);
+        if (mounted) setState(() => _progress = received.progress);
+        if (!received.complete) {
           _controller.resetDetection();
           return;
         }
-        raw = complete;
-        _qrFrames.clear();
+        raw = received.text;
+        _transport!.close();
+        _transport = null;
       } on Object {
-        _qrFrames.clear();
         _controller.resetDetection();
         return;
       }
@@ -152,8 +142,9 @@ class _ScanPageState extends State<ScanPage> {
         return;
       }
     } else {
-      account =
-          await _walletManager.getAccountByAccountId(body.signerPublicKeyHex);
+      account = await _walletManager.getAccountByAccountId(
+        body.signerPublicKeyHex,
+      );
       if (!mounted) return;
       if (account == null) {
         await _showErrorAndResume('本设备没有该签名请求指定的账户，无法签名');
@@ -161,7 +152,8 @@ class _ScanPageState extends State<ScanPage> {
       }
       if (!accountBelongsToWallet(account.masterId, widget.wallet.masterId)) {
         await _showErrorAndResume(
-            '该签名请求的账户不属于「${widget.wallet.walletName}」，无法在此钱包签名');
+          '该签名请求的账户不属于「${widget.wallet.walletName}」，无法在此钱包签名',
+        );
         return;
       }
     }
@@ -174,9 +166,15 @@ class _ScanPageState extends State<ScanPage> {
       MaterialPageRoute(
         builder: (_) => isLogin
             ? LoginSignPage(
-                account: signingAccount, walletName: walletName, raw: raw)
+                account: signingAccount,
+                walletName: walletName,
+                raw: raw,
+              )
             : OfflineSignPage(
-                account: signingAccount, walletName: walletName, raw: raw),
+                account: signingAccount,
+                walletName: walletName,
+                raw: raw,
+              ),
       ),
     );
 
@@ -252,9 +250,8 @@ class _ScanPageState extends State<ScanPage> {
     final message = failure.kind == ScannerFailureKind.noQrCode
         ? '未识别到二维码'
         : failure.message;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -276,7 +273,9 @@ class _ScanPageState extends State<ScanPage> {
           ),
           CustomPaint(
             painter: ScanOverlayPainter(
-                scanBoxSize: scanBoxSize, offsetY: scanBoxOffsetY),
+              scanBoxSize: scanBoxSize,
+              offsetY: scanBoxOffsetY,
+            ),
             child: const SizedBox.expand(),
           ),
           Center(
@@ -293,10 +292,15 @@ class _ScanPageState extends State<ScanPage> {
             child: Transform.translate(
               offset: const Offset(0, scanBoxOffsetY + scanBoxSize / 2 + 28),
               child: Text(
-                '扫描「${widget.wallet.walletName}」的签名请求',
+                _progress > 0 && _progress < 100
+                    ? '正在接收签名请求 $_progress%'
+                    : '扫描「${widget.wallet.walletName}」的签名请求',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    color: Colors.white60, fontSize: 14, letterSpacing: 0.3),
+                  color: Colors.white60,
+                  fontSize: 14,
+                  letterSpacing: 0.3,
+                ),
               ),
             ),
           ),
@@ -350,10 +354,13 @@ class _ScanPageState extends State<ScanPage> {
         children: [
           Icon(icon, size: 26, color: active ? AppTheme.gold : Colors.white),
           const SizedBox(height: 6),
-          Text(label,
-              style: TextStyle(
-                  color: active ? AppTheme.gold : Colors.white70,
-                  fontSize: 12)),
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? AppTheme.gold : Colors.white70,
+              fontSize: 12,
+            ),
+          ),
         ],
       ),
     );
