@@ -1,13 +1,10 @@
 // 编解码并校验QR_V1信封，限制码型及临时请求有效期。
 
 import 'dart:convert';
-
-import 'package:citizenwallet/protocol/qr_protocols.dart';
-import 'package:citizenwallet/protocol/generated/qr_bodies.g.dart';
-import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
-import 'package:citizenwallet/protocol/bodies/sign_response_body.dart';
-import 'package:citizenwallet/protocol/bodies/user_contact_body.dart';
-import 'package:citizenwallet/protocol/bodies/account_id_code_body.dart';
+import 'package:citizenwallet/protocol/identity.dart';
+import 'package:citizenwallet/protocol/qr_bodies.g.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+import 'package:citizenwallet/protocol/sign.dart';
 
 /// 临时签名请求统一使用300秒上限，供登录、离线签名和MLS绑定共用。
 const int maxQrRequestLifetimeSeconds = 300;
@@ -100,4 +97,28 @@ class QrEnvelope<T extends QrBody> {
 
 abstract class QrBody {
   Map<String, dynamic> toJson();
+}
+
+// 按QR_V1公开合同拼接二维码请求和响应的签名原文。
+
+/// 本仓唯一的签名原文拼接函数，遵循公开 QR_V1 签名合同。
+///
+/// 格式:
+/// ```
+/// QR_V1|<k>|<i>|<system 或空>|<e 或 0>|<principal>
+/// ```
+String buildSignatureMessage({
+  required QrKind kind,
+  required String id,
+  String? system,
+  int? expiresAt,
+  required String principal,
+}) {
+  final sys = system ?? '';
+  final exp = expiresAt ?? 0;
+  if (!RegExp(r'^0x[0-9a-f]{64}$').hasMatch(principal)) {
+    throw const FormatException('principal 必须是小写 0x 加 64 位十六进制');
+  }
+  final pp = principal.substring(2);
+  return '${QrProtocols.qrV1}|${kind.code}|$id|$sys|$exp|$pp';
 }

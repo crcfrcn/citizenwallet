@@ -6,13 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 
-import 'security/app_lock_service.dart';
-import 'security/emergency_wipe_platform.dart';
-import 'pages/pin_input_page.dart';
-import 'security/secure_storage.dart';
-import 'pages/app_theme.dart';
-import 'pages/widgets/biometric_auth_text.dart';
-import 'pages/home_page.dart';
+import 'package:citizenwallet/security/lock.dart';
+
+import 'package:citizenwallet/pages/pin.dart';
+import 'package:citizenwallet/security/vault.dart';
+import 'package:citizenwallet/pages/theme.dart';
+import 'package:citizenwallet/pages/biometric.dart';
+import 'package:citizenwallet/pages/home.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_darwin/local_auth_darwin.dart';
 
-import 'package:citizenwallet/pages/widgets/biometric_auth_text.dart';
+import 'package:citizenwallet/pages/biometric.dart';
 
 /// 生物识别对话框文案口径:默认中文,只有英文手机显示英文,其余语言一律回落中文。
 /// 与 CitizenApp 热端同一条规则(双端一致铁律)。

@@ -1,7 +1,7 @@
 // 验证CID显示缩写、系统标签及选区复制时恢复完整标识的规则。
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/helpers/identity_cid_display.dart';
+import 'package:citizenwallet/helpers/format.dart';
 
 void main() {
   const full = 'GZ018-CREGM-159197206-2026';

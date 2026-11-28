@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/wallet/wallet_password.dart';
+import 'package:citizenwallet/wallet/password.dart';
 
 void main() {
   test('空 password 表示沿用现有钱包', () {

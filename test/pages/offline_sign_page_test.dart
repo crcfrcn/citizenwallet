@@ -1,26 +1,25 @@
 // 验证离线签名页面的中文审阅、可签状态和拒绝状态。
 
-import 'package:citizenwallet/signing/chain_constants.dart';
+import 'package:citizenwallet/signing/registry.dart';
 // 离线签名页 widget 测试(既有基线修复:runtime 升级哈希签的绿 banner 与明细
 // 不再自相矛盾)。normal + decoded==null 是 runtime 升级哈希签唯一产生的组合,
 // 旧代码在明细里错误地走了“拒绝签名”分支。
 import 'dart:convert';
 import 'dart:io';
 
-import '../signing/payload_decoder_test.dart'
-    show cidRebindPayload, selfRebindCall;
+import '../signing/payload_decoder_test.dart' show cidRebindPayload, selfRebindCall;
 import '../signing/offline_sign_service_test.dart' show signingPayloadHex;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
+import 'package:citizenwallet/protocol/qr.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
-import 'package:citizenwallet/signing/qr_signer.dart';
-import 'package:citizenwallet/pages/offline_sign_page.dart';
-import 'package:citizenwallet/helpers/screenshot_guard.dart';
-import 'package:citizenwallet/wallet/wallet_manager.dart';
+import 'package:citizenwallet/protocol/sign.dart';
+import 'package:citizenwallet/signing/qr.dart';
+import 'package:citizenwallet/pages/sign.dart';
+import 'package:citizenwallet/helpers/sensitive.dart';
+import 'package:citizenwallet/wallet/manager.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();

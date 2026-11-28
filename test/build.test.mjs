@@ -360,7 +360,7 @@ test('正式版本按平台选择，失败、草稿和预发行不递增',async 
  await assert.rejects(selectRelease('ios',async route=>route.startsWith('/releases?')?[release('ios','1.0.7',7)]:{...(await read(route)),head_sha:'wrong'}),/成功Run不符/);
 });
 test('设置页只显示设备已安装版本，版本初值只有pubspec一处',()=>{
- const page=readFileSync(join(root,'lib/pages/settings_page.dart'),'utf8');
+ const page=readFileSync(join(root,'lib/pages/settings.dart'),'utf8');
  assert.match(page,/PackageInfo\.fromPlatform\(\)/u);assert.match(page,/版本未知/u);
  assert.doesNotMatch(page,/api\.github\.com|itunes\.apple\.com|checkUpdate|downloadUpdate/u);
  assert.doesNotMatch(readFileSync(join(root,'scripts/config.mjs'),'utf8'),/initialVersion/u);

@@ -1,7 +1,7 @@
 // 验证账户0及其他账户均使用带序号的硬派生路径。
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/wallet/wallet_manager.dart';
+import 'package:citizenwallet/wallet/manager.dart';
 
 void main() {
   Account account(int index) => Account(

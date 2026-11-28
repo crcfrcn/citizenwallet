@@ -2,7 +2,7 @@
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/security/hardware_secretvault.dart';
+import 'package:citizenwallet/security/vault.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

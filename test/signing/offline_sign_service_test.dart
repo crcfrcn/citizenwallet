@@ -4,23 +4,22 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:io';
 
-import 'payload_decoder_test.dart'
-    show topupText, cidRebindPayload, selfRebindCall;
+import 'payload_decoder_test.dart' show topupText, cidRebindPayload, selfRebindCall;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/wallet/wallet_mini_secret.dart';
-import 'package:citizenwallet/signing/chain_constants.dart';
-import 'package:citizenwallet/wallet/native_sr25519.dart';
-import 'package:citizenwallet/wallet/native_mldsa.dart';
+import 'package:citizenwallet/wallet/keys.dart';
+import 'package:citizenwallet/signing/registry.dart';
+import 'package:citizenwallet/wallet/sr25519.dart';
+import 'package:citizenwallet/wallet/mldsa.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
-import 'package:citizenwallet/signing/offline_sign_service.dart';
-import 'package:citizenwallet/signing/payload_decoder.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
+import 'package:citizenwallet/signing/service.dart';
+import 'package:citizenwallet/signing/decoder.dart';
+import 'package:citizenwallet/protocol/qr.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
-import 'package:citizenwallet/signing/qr_signer.dart';
-import 'package:citizenwallet/storage/wallet_isar.dart';
-import 'package:citizenwallet/wallet/wallet_manager.dart';
+import 'package:citizenwallet/protocol/sign.dart';
+import 'package:citizenwallet/signing/qr.dart';
+import 'package:citizenwallet/storage/store.dart';
+import 'package:citizenwallet/wallet/manager.dart';
 
 /// 构造解码测试样本；正常版本统一引用钱包的唯一声明。
 /// 链上载荷必须携带完整签名上下文，裸 call_data 拒签。

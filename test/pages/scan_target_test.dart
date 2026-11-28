@@ -1,6 +1,6 @@
 // 每钱包扫码作用域谓词单测(安全边界:跨钱包签名请求必须拒绝)。
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/pages/scan_page.dart';
+import 'package:citizenwallet/pages/scan.dart';
 
 void main() {
   const walletA =

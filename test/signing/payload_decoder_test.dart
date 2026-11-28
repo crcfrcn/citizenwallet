@@ -3,18 +3,18 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:citizenwallet/signing/offline_sign_service.dart';
+import 'package:citizenwallet/signing/service.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
+import 'package:citizenwallet/protocol/sign.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
-import 'package:citizenwallet/signing/institution_code.dart';
-import 'package:citizenwallet/signing/chain_constants.dart';
-import 'package:citizenwallet/signing/payload_decoder.dart';
-import 'package:citizenwallet/wallet/native_sr25519.dart';
-import 'package:citizenwallet/signing/role_permission_codec.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
+import 'package:citizenwallet/signing/registry.dart';
+
+import 'package:citizenwallet/signing/decoder.dart';
+import 'package:citizenwallet/wallet/sr25519.dart';
+import 'package:citizenwallet/signing/permission.dart';
+import 'package:citizenwallet/protocol/qr.dart';
 
 /// 公布合同的合成充值原文，供冷签审阅/字节一致性回归共用。
 String topupText() => [

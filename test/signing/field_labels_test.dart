@@ -4,9 +4,9 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart' show Keyring;
-import 'package:citizenwallet/signing/chain_constants.dart';
-import 'package:citizenwallet/signing/action_labels.dart';
-import 'package:citizenwallet/signing/field_labels.dart';
+import 'package:citizenwallet/signing/registry.dart';
+import 'package:citizenwallet/signing/labels.dart';
+
 
 void main() {
   group('action labels', () {

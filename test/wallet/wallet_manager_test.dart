@@ -6,14 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
-import 'package:citizenwallet/storage/wallet_isar.dart';
+import 'package:citizenwallet/storage/store.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
-import 'package:citizenwallet/protocol/signature_message.dart';
-import 'package:citizenwallet/wallet/wallet_manager.dart';
-import 'package:citizenwallet/wallet/native_mldsa.dart';
-import 'package:citizenwallet/wallet/native_sr25519.dart';
-import 'package:citizenwallet/wallet/wallet_secure_keys.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+
+import 'package:citizenwallet/wallet/manager.dart';
+import 'package:citizenwallet/wallet/mldsa.dart';
+import 'package:citizenwallet/wallet/sr25519.dart';
+import 'package:citizenwallet/wallet/keys.dart';
 
 const String kDevPhrase =
     'bottom drive obey lake curtain smoke basket hold race lonely fit walk';

@@ -7,9 +7,9 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pointycastle/digests/blake2b.dart';
 
-import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
-import 'package:citizenwallet/signing/qr_signer.dart';
+import 'package:citizenwallet/protocol/sign.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+import 'package:citizenwallet/signing/qr.dart';
 
 // 冷钱包哈希域金标锁(citizenwallet ⇔ citizenchain)。
 //

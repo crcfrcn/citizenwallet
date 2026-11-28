@@ -1,0 +1,295 @@
+// 按引用计数启停屏幕保护，并统一订阅截屏和录屏事件。
+
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+/// 截屏保护工具（进程级全局资源，引用计数管理）。
+///
+/// - Android: 通过 FLAG_SECURE 阻止截屏和屏幕录制。
+/// - iOS: 进入后台时添加模糊遮罩；前台截屏时通过事件通知 Flutter
+///   隐藏敏感内容；检测到录屏时主动通知隐藏。
+///
+/// 多个敏感页可能同时需要保护（如钱包详情揭示助记词后进入账户详情揭示私钥）。
+/// 因平台侧的 FLAG_SECURE 是**全局单一开关**,这里用**引用计数**管理:每个页面
+/// `enable(cb)` 计数 +1、`disable(cb)` 计数 -1,只有计数归零才真正关闭平台保护;
+/// 回调用**集合**保存,截屏事件广播给所有在用页面——避免子页 dispose 单方面关掉
+/// 父页仍在用的保护。
+class ScreenshotGuard {
+  const ScreenshotGuard._();
+
+  // 内部通道与 Android/iOS 应用标识解耦，两端只共享产品级稳定名称。
+  static const MethodChannel _channel = MethodChannel('citizenwallet/security');
+
+  static const EventChannel _eventChannel = EventChannel(
+    'citizenwallet/security_events',
+  );
+
+  static StreamSubscription<dynamic>? _eventSubscription;
+
+  // 原生 FLAG_SECURE 是全局开关；串行化跨页开关，避免先关闭后开启的异步乱序。
+  static Future<void>? _operation;
+
+  /// 当前持有保护的页面数(引用计数)。
+  static int _refCount = 0;
+  static bool _recordingActive = false;
+  static bool _eventStreamFailed = false;
+
+  /// 已启用保护的页面仍需在异步解密或签名结束前复查采集状态。
+  static bool get canDisplaySensitiveContent =>
+      !_recordingActive && !_eventStreamFailed;
+
+  /// 截屏/录屏事件监听器集合(多页共存时每个在用页各注册一份)。
+  ///
+  /// 事件类型：
+  /// - `screenshot_taken`：用户在前台截屏（iOS，截屏已完成）
+  /// - `screen_recording_started`：屏幕录制开始（iOS）
+  /// - `screen_recording_stopped`：屏幕录制结束（iOS）
+  static final Set<void Function(String event)> _listeners = {};
+
+  static Future<void> _enqueue(Future<void> Function() action) {
+    // 空闲时在当前调用区创建新 Future；已结束的旧区 Future 不跨页面或测试保留。
+    final pending = (_operation ?? Future<void>.value()).then((_) => action());
+    // 队列自身恢复到可用状态；调用者仍收到原始失败，不能把启用失败当作成功。
+    final recovered = pending.catchError((Object _) {});
+    _operation = recovered;
+    unawaited(
+      recovered.then((_) {
+        if (identical(_operation, recovered)) _operation = null;
+      }),
+    );
+    return pending;
+  }
+
+  /// 组件测试卸载敏感页面后等待其异步原生关闭完成，避免跨测试遗留队列。
+  @visibleForTesting
+  static Future<void> waitForIdleForTest() =>
+      _operation ?? Future<void>.value();
+
+  /// 原生确认保护启用后才允许调用方展示秘密；失败不增加引用计数。
+  static Future<void> enable([void Function(String event)? onEvent]) =>
+      _enqueue(() async {
+        if (_recordingActive || _eventStreamFailed) {
+          throw StateError('屏幕采集或保护事件通道不可用');
+        }
+        if (_refCount == 0) {
+          final captured = await _channel.invokeMethod<bool>(
+            'enableScreenshotProtection',
+          );
+          if (captured == true) {
+            // iOS 已处于录屏时不等待状态变更事件；本次不交付任何保护租约。
+            try {
+              await _channel.invokeMethod('disableScreenshotProtection');
+            } catch (_) {}
+            throw StateError('屏幕录制正在进行');
+          }
+        }
+        _refCount++;
+        if (onEvent != null) _listeners.add(onEvent);
+        if (_refCount == 1) _startListening();
+      });
+
+  /// 关闭截屏保护;传入的回调从集合移除。引用计数 -1,归零才真正关闭平台保护。
+  static Future<void> disable([void Function(String event)? onEvent]) =>
+      _enqueue(() async {
+        if (_refCount == 0) return;
+        if (onEvent != null) _listeners.remove(onEvent);
+        _refCount--;
+        if (_refCount == 0) {
+          // 进程级事件订阅只建立一次，避免页面切换时原生 cancel/listen 乱序。
+          // 无租约时 _broadcast 忽略事件；平台保护开关仍按引用计数关闭。
+          _recordingActive = false;
+          // 事件通道失效不能凭一次页面关闭恢复，进程重启前持续拒绝展示秘密。
+          try {
+            await _channel.invokeMethod('disableScreenshotProtection');
+          } catch (_) {
+            // 关闭失败只会保留更严格的平台保护；下次启用仍重新向原生确认。
+          }
+        }
+      });
+
+  /// 检测设备是否已 root（Android）或越狱（iOS）。
+  static Future<bool> isDeviceRooted() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('isDeviceRooted');
+      return result ?? false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  static void _startListening() {
+    if (_eventSubscription != null) return;
+    _eventSubscription = _eventChannel.receiveBroadcastStream().listen(
+      (event) {
+        if (event is String) _broadcast(event);
+      },
+      onError: (_) {
+        // iOS 录屏事件通道失效时立即隐藏各页敏感内容。
+        if (_refCount == 0) {
+          _eventStreamFailed = true;
+          return;
+        }
+        _broadcast('protection_failed');
+      },
+    );
+  }
+
+  static void _broadcast(String event) {
+    // 无页面持有保护时忽略事件，不污染下一次保护租约。
+    if (_refCount == 0) return;
+    if (event == 'screen_recording_started') _recordingActive = true;
+    if (event == 'screen_recording_stopped') _recordingActive = false;
+    if (event == 'protection_failed') _eventStreamFailed = true;
+    for (final listener in List.of(_listeners)) {
+      listener(event);
+    }
+  }
+}
+
+// 为敏感页面管理屏幕保护，遇到截屏或录屏时遮蔽内容。
+
+/// 敏感页面 mixin：自动启用截屏保护，响应截屏/录屏事件隐藏内容。
+///
+/// 使用方式：
+/// ```dart
+/// class _MyPageState extends State<MyPage> with SensitivePageMixin {
+///   @override
+///   Widget build(BuildContext context) {
+///     if (sensitiveContentHidden) {
+///       return buildHiddenPlaceholder(); // mixin 提供的遮罩
+///     }
+///     return ... // 正常内容
+///   }
+/// }
+/// ```
+mixin SensitivePageMixin<T extends StatefulWidget> on State<T> {
+  /// 原生保护确认前及截屏/录屏后始终隐藏敏感内容。
+  bool sensitiveContentHidden = true;
+  bool sensitiveProtectionFailed = false;
+  bool _guardAcquired = false;
+  Future<void>? _guardOpening;
+  bool _securityEventSeen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(retryScreenshotProtection());
+  }
+
+  /// 保护失败时允许重试；只在原生确认成功且期间没有安全事件时解除遮罩。
+  Future<void> retryScreenshotProtection() =>
+      _guardOpening ??= _openScreenshotProtection().whenComplete(() {
+        _guardOpening = null;
+      });
+
+  /// 非敏感的创建选项可先显示，但生成钱包前必须确认保护可用。
+  Future<bool> ensureScreenshotProtection() async {
+    if (sensitiveContentHidden || !_guardAcquired) {
+      await retryScreenshotProtection();
+    }
+    return mounted &&
+        _guardAcquired &&
+        !sensitiveContentHidden &&
+        !sensitiveProtectionFailed &&
+        ScreenshotGuard.canDisplaySensitiveContent;
+  }
+
+  Future<void> _openScreenshotProtection() async {
+    try {
+      if (_guardAcquired) {
+        await ScreenshotGuard.disable(_onSecurityEvent);
+        _guardAcquired = false;
+      }
+      _securityEventSeen = false;
+      sensitiveProtectionFailed = false;
+      await ScreenshotGuard.enable(_onSecurityEvent);
+      if (!mounted) {
+        await ScreenshotGuard.disable(_onSecurityEvent);
+        return;
+      }
+      _guardAcquired = true;
+      setState(() => sensitiveContentHidden = _securityEventSeen);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          sensitiveProtectionFailed = true;
+          sensitiveContentHidden = true;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_guardAcquired) unawaited(ScreenshotGuard.disable(_onSecurityEvent));
+    super.dispose();
+  }
+
+  void _onSecurityEvent(String event) {
+    if (!mounted) return;
+    if (event == 'screenshot_taken' || event == 'protection_failed') {
+      _securityEventSeen = true;
+      // 截屏已发生或事件通道失效，隐藏内容并提醒用户。
+      setState(() {
+        sensitiveContentHidden = true;
+        if (event == 'protection_failed') sensitiveProtectionFailed = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            event == 'protection_failed'
+                ? '屏幕保护不可用，敏感信息已隐藏'
+                : '检测到截屏，敏感信息已隐藏。请勿截屏保存密钥信息。',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } else if (event == 'screen_recording_started') {
+      _securityEventSeen = true;
+      // 录屏开始，立即隐藏
+      setState(() => sensitiveContentHidden = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('检测到屏幕录制，敏感信息已隐藏'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } else if (event == 'screen_recording_stopped') {
+      // 录屏结束，可恢复显示（用户需重新点击查看）
+      // 不自动恢复，保持隐藏状态
+    }
+  }
+
+  /// 敏感内容被隐藏时的占位 Widget。
+  Widget buildHiddenPlaceholder({String message = '敏感信息已隐藏'}) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('安全提醒'), centerTitle: true),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.shield, size: 64, color: Colors.orange.shade400),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              sensitiveProtectionFailed ? '请重试屏幕保护' : '请返回上一页重新操作',
+              style: const TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: sensitiveProtectionFailed
+                  ? retryScreenshotProtection
+                  : () => Navigator.of(context).pop(),
+              child: Text(sensitiveProtectionFailed ? '重试' : '返回'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

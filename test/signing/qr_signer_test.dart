@@ -9,11 +9,11 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pointycastle/digests/blake2b.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
-import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
+import 'package:citizenwallet/protocol/sign.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
-import 'package:citizenwallet/signing/login_qr_handler.dart';
-import 'package:citizenwallet/signing/qr_signer.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+import 'package:citizenwallet/signing/login.dart';
+import 'package:citizenwallet/signing/qr.dart';
 
 String _hexBytes(List<int> bytes) =>
     bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();

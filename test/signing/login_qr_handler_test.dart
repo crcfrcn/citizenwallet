@@ -1,10 +1,10 @@
 // 验证登录请求标识、响应关联及有效期边界。
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
+import 'package:citizenwallet/protocol/qr.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/bodies/sign_request_body.dart';
-import 'package:citizenwallet/signing/login_qr_handler.dart';
+import 'package:citizenwallet/protocol/sign.dart';
+import 'package:citizenwallet/signing/login.dart';
 
 String _loginRaw(String id, {int? expiresAt}) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;

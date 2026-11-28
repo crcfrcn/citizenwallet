@@ -3,12 +3,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:citizenwallet/protocol/bodies/account_id_code_body.dart';
+import 'package:citizenwallet/protocol/identity.dart';
 import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
-import 'package:citizenwallet/pages/account_detail_page.dart';
-import 'package:citizenwallet/pages/widgets/wallet_qr_dialog.dart';
-import 'package:citizenwallet/wallet/wallet_manager.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+import 'package:citizenwallet/pages/account.dart';
+import 'package:citizenwallet/pages/qr.dart';
+import 'package:citizenwallet/wallet/manager.dart';
 
 void main() {
   const account = Account(

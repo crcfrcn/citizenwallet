@@ -1,8 +1,8 @@
 // 验证链上pallet与call索引以及现行统一交易入口。
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/protocol/qr_protocols.dart';
-import 'package:citizenwallet/signing/pallet_registry.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+import 'package:citizenwallet/signing/registry.dart';
 
 void main() {
   test('公私机构政策采用追加call11且不复用退役10', () {

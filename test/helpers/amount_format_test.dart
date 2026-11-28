@@ -1,7 +1,7 @@
 // 验证金额的小数位、千分位、币种后缀和既有字符串格式化。
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/helpers/amount_format.dart';
+import 'package:citizenwallet/helpers/format.dart';
 
 void main() {
   group('AmountFormat.format', () {

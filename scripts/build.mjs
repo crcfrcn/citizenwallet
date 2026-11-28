@@ -631,7 +631,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&!
 export async function generatedHeaders(source) {
  const {readFile,writeFile}=await import('node:fs/promises');
  const files={
-  "lib/storage/wallet_isar.g.dart": "定义钱包、账户和已签请求的Isar结构、序列化及查询扩展。"
+  "lib/storage/store.g.dart": "定义钱包、账户和已签请求的Isar结构、序列化及查询扩展。"
 };
  for(const [name,intro] of Object.entries(files)){
   const path=join(source,name);let text;

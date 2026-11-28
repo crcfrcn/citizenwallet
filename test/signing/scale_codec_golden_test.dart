@@ -7,8 +7,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 
-import 'package:citizenwallet/signing/chain_constants.dart';
-import 'package:citizenwallet/signing/payload_decoder.dart';
+import 'package:citizenwallet/signing/registry.dart';
+import 'package:citizenwallet/signing/decoder.dart';
 
 // SCALE **解码**金标锁(citizenwallet ⇔ citizenchain)。
 //

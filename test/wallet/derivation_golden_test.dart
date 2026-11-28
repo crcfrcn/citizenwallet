@@ -3,8 +3,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:citizenwallet/wallet/wallet_mini_secret.dart';
-import 'package:citizenwallet/wallet/native_sr25519.dart';
+import 'package:citizenwallet/wallet/keys.dart';
+import 'package:citizenwallet/wallet/sr25519.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
 
 /// 固定测试助记词（substrate dev 助记词，全网公开，仅测试用）。

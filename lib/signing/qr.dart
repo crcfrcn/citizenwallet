@@ -1,0 +1,349 @@
+// 播放签名响应的二维码传输帧，分帧编解码交由原生核心。
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
+import 'package:citizenwallet/protocol/envelope.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+import 'package:citizenwallet/protocol/sign.dart';
+import 'package:citizenwallet/signing/decoder.dart';
+import 'package:citizenwallet/wallet/mldsa.dart';
+import 'package:citizenwallet/wallet/sr25519.dart';
+import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
+import 'package:pointycastle/digests/blake2b.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+/// 此处仅播放传输帧，分帧编码与完整性校验统一归 mldsa 模块。
+class AnimatedSigningQr extends StatefulWidget {
+  const AnimatedSigningQr({super.key, required this.data, this.size = 360});
+  final String data;
+  final double size;
+  @override
+  State<AnimatedSigningQr> createState() => _AnimatedSigningQrState();
+}
+
+class _AnimatedSigningQrState extends State<AnimatedSigningQr> {
+  Timer? _timer;
+  List<String> _frames = const [];
+  int _index = 0;
+  void _load() {
+    _timer?.cancel();
+    _index = 0;
+    _frames = utf8.encode(widget.data).length <= 2331
+        ? [widget.data]
+        : NativeMldsa.frames(widget.data);
+    if (_frames.length > 1) {
+      _timer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+        if (mounted) setState(() => _index = (_index + 1) % _frames.length);
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnimatedSigningQr oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.data != widget.data) _load();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Column(mainAxisSize: MainAxisSize.min, children: [
+        QrImageView(
+            data: _frames[_index],
+            version: QrVersions.auto,
+            size: widget.size,
+            errorCorrectionLevel: QrErrorCorrectLevel.M),
+        if (_frames.length > 1) Text('${_index + 1}/${_frames.length}'),
+      ]);
+}
+
+// 构造各业务签名原文、请求标识和二维码响应，并调用账户签名。
+
+enum QrSignErrorCode {
+  invalidFormat,
+  invalidField,
+  invalidProtocol,
+  expired,
+  mismatchedRequest,
+  mismatchedAccount,
+  mismatchedSignerPublicKey,
+  mismatchedPayloadHash,
+  invalidSignature,
+}
+
+class QrSignException implements Exception {
+  const QrSignException(this.code, this.message);
+
+  final QrSignErrorCode code;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+typedef SignRequestEnvelope = QrEnvelope<SignRequestBody>;
+typedef SignResponseEnvelope = QrEnvelope<SignResponseBody>;
+
+class QrSigner {
+  static const int maxPayloadChars = 32768;
+  static const List<int> _gmbPrefix = [0x47, 0x4D, 0x42];
+  static const int _opSignCitizenIdentity = 0x10;
+  static const int _opSignCidOccupy = 0x12;
+  static const int _opSignCidRebind = 0x11;
+  static const int _opSignCidAdminRebind = 0x1F;
+
+  /// 链上中国岗位人员确认动作;与 primitives::sign::OP_SIGN_ONCHINA_CONFIRM 同值。
+  static const int _opSignOnchinaConfirm = 0x20;
+
+  /// 本机默认账户切换；与 primitives::sign::OP_SIGN_SWITCH_DEFAULT_ACCOUNT 同值。
+  static const int _opSignSwitchDefaultAccount = 0x21;
+
+  /// 同一MLS公钥登记；与primitives的OP_SIGN_MLS_DEVICE_BIND=0x1C一致。
+  static const int _opSignMlsDeviceBind = 0x1c;
+
+  /// 广场账户敏感动作；与 primitives::sign::OP_SIGN_SQUARE_ACTION 同值。
+  static const int _opSignSquareAction = 0x1d;
+
+  /// 产品正式发布授权；对齐 primitives::sign::OP_SIGN_PUBLISH。
+  static const int _opSignPublish = 0x24;
+  static final RegExp _idPattern = RegExp(r'^[A-Za-z0-9_-]{16,128}$');
+
+  /// 请求 ID 合法性(共享单源:登录/离线签名同一规则,防两处漂移)。
+  static bool isValidRequestId(String id) => _idPattern.hasMatch(id);
+
+  static String generateRequestId({String prefix = ''}) {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    final token = base64Url.encode(bytes).replaceAll('=', '');
+    final id = prefix.isEmpty ? token : '$prefix$token';
+    return id.length > 128 ? id.substring(0, 128) : id;
+  }
+
+  /// 解析 sign_request envelope(CitizenWallet 公民钱包从 CitizenApp 扫到的内容)。
+  SignRequestEnvelope parseRequest(String raw) {
+    if (raw.isEmpty || raw.length > maxPayloadChars) {
+      throw const QrSignException(
+        QrSignErrorCode.invalidFormat,
+        '扫码数据格式错误:内容为空或超出长度限制',
+      );
+    }
+    // JSON 只解码一次；仍先核对 kind，再解析完整 body，保留非签名码的明确错误。
+    QrEnvelope<QrBody> env;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('QR 内容不是 JSON 对象');
+      }
+      if (QrKind.fromWire(decoded['k']) != QrKind.signRequest) {
+        throw const QrSignException(
+          QrSignErrorCode.invalidField,
+          '二维码类型不是签名请求',
+        );
+      }
+      env = QrEnvelope.fromJson(decoded);
+    } on QrSignException {
+      rethrow;
+    } on FormatException catch (e) {
+      throw QrSignException(QrSignErrorCode.invalidFormat, e.message);
+    }
+    if (env.kind != QrKind.signRequest) {
+      throw const QrSignException(QrSignErrorCode.invalidField, '二维码类型不是签名请求');
+    }
+    final body = env.body as SignRequestBody;
+    _validateRequestId(env.id!);
+    _validateExpiry(expiresAt: env.expiresAt!);
+    return QrEnvelope<SignRequestBody>(
+      kind: QrKind.signRequest,
+      id: env.id,
+      expiresAt: env.expiresAt,
+      body: body,
+    );
+  }
+
+  /// 构造 sign_response envelope(CitizenWallet 公民钱包签名完成后生成)。
+  SignResponseEnvelope buildResponse({
+    required SignRequestEnvelope request,
+    required String signatureHex,
+    String? signerPublicKeyHexOverride,
+    int? nowEpochSeconds,
+  }) {
+    final requestBody = request.body;
+    _validateHexField(signatureHex, 'signature');
+    // 占号/换绑:请求 b.u 留空,响应 b.u 用钱包自选账户(override)带回,供 OnChina 取 account_id。
+    final responseSignerPublicKeyHex =
+        signerPublicKeyHexOverride ?? requestBody.signerPublicKeyHex;
+    return QrEnvelope<SignResponseBody>(
+      kind: QrKind.signResponse,
+      id: request.id,
+      expiresAt: request.expiresAt,
+      body: SignResponseBody.fromHex(
+        signerPublicKeyHex: responseSignerPublicKeyHex,
+        signatureHex: signatureHex,
+      ),
+    );
+  }
+
+  String encodeResponse(SignResponseEnvelope response) => response.toRawJson();
+  String encodeRequest(SignRequestEnvelope request) => request.toRawJson();
+
+  static String computePayloadHash(String payloadHex) {
+    final bytes = _hexToBytes(payloadHex);
+    final digest = sha256.convert(bytes);
+    return '0x${digest.toString()}';
+  }
+
+  static bool verifySr25519Signature({
+    required String signerPublicKeyHex,
+    required String signatureHex,
+    required Uint8List message,
+  }) {
+    // 本端 sr25519 唯一实现是原生 schnorrkel（[NativeSr25519]）。
+    // 长度非法、公钥或签名格式错、验签不过一律 false（fail-closed）。
+    try {
+      return NativeSr25519.verify(
+        _hexToBytes(signerPublicKeyHex),
+        _hexToBytes(signatureHex),
+        message,
+      );
+    } on Object {
+      return false;
+    }
+  }
+
+  /// 保留业务签名域；普通链交易由账户签名端将完整审阅材料转换为 V5 摘要。
+  /// Runtime 升级的 hash-only 请求已携带最终摘要，不再次转换。
+  static Uint8List signingBytesFor(
+    SignRequestBody body, {
+    Uint8List? selfAccountId,
+  }) {
+    final payload = body.payloadBytes;
+    // 充值使用完整业务原文，热/冷两端均不预hash，不套用链交易>256B转换。
+    if (body.action == QrActions.topup) return payload;
+    if (body.action == QrActions.citizenIdentity) {
+      return _gmbSigningMessage(_opSignCitizenIdentity, payload);
+    }
+    if (body.action == QrActions.cidRebind) {
+      // 原账户自助换绑只签完整授权的0x11摘要，不填零槽、不使用注册局0x1f域。
+      return _gmbSigningMessage(_opSignCidRebind, payload);
+    }
+    if (QrActions.isSelfAccountDomainAction(body.action)) {
+      if (selfAccountId == null || selfAccountId.length != 32) {
+        return Uint8List(0);
+      }
+      // 两种授权结构的账户槽位置不同，必须严格解析模板并原位替换；
+      // 禁止恢复旧版 `payload ++ account_id` 拼接。
+      final authorization = body.action == QrActions.citizenOccupy
+          ? PayloadDecoder.readCidOccupyAuthorizationTemplate(payload)
+          : PayloadDecoder.readCidRebindAuthorizationTemplate(payload);
+      final exactPayload = authorization?.materialize(selfAccountId);
+      if (exactPayload == null) return Uint8List(0);
+      final opTag = body.action == QrActions.citizenOccupy
+          ? _opSignCidOccupy
+          : _opSignCidAdminRebind;
+      return _gmbSigningMessage(opTag, exactPayload);
+    }
+    // 链上中国治理动作:走统一哈希域,不再对裸 JSON 文本直签。
+    if (body.action == QrActions.onchinaConfirm) {
+      return _gmbSigningMessage(_opSignOnchinaConfirm, payload);
+    }
+    if (body.action == QrActions.switchDefaultAccount) {
+      return _gmbSigningMessage(_opSignSwitchDefaultAccount, payload);
+    }
+    if (body.action == QrActions.mlsDeviceBind) {
+      return _gmbSigningMessage(_opSignMlsDeviceBind, payload);
+    }
+    if (body.action == QrActions.squareAccountAction) {
+      return _gmbSigningMessage(_opSignSquareAction, payload);
+    }
+    if (body.action == QrActions.publish ||
+        body.action == QrActions.citizenserveCloudflarePublish) {
+      return _gmbSigningMessage(_opSignPublish, payload);
+    }
+    if (body.action == QrActions.nodeDeploy) {
+      // 节点部署只在链下使用共享 QR 协议域，不能与发布或链交易签名互认。
+      final prefix = utf8.encode('GMB\u0000TATA_NODE_DEPLOY_V1\u0000');
+      final digest = Blake2bDigest(digestSize: 32)
+        ..update(
+          Uint8List.fromList([...prefix, ...payload]),
+          0,
+          prefix.length + payload.length,
+        );
+      final result = Uint8List(32);
+      digest.doFinal(result, 0);
+      return result;
+    }
+    return payload;
+  }
+
+  static Uint8List _gmbSigningMessage(int opTag, Uint8List payload) {
+    final bytes = Uint8List.fromList([..._gmbPrefix, opTag, ...payload]);
+    final digest = Blake2bDigest(digestSize: 32)
+      ..update(bytes, 0, bytes.length);
+    final out = Uint8List(32);
+    digest.doFinal(out, 0);
+    return out;
+  }
+
+  void _validateRequestId(String requestId) {
+    if (!_idPattern.hasMatch(requestId)) {
+      throw const QrSignException(QrSignErrorCode.invalidField, 'id 格式错误');
+    }
+  }
+
+  void _validateHexField(String value, String field) {
+    // 机读字段统一使用小写 0x hex，拒绝裸 hex、大写和混合大小写。
+    if (!value.startsWith('0x')) {
+      throw QrSignException(QrSignErrorCode.invalidField, '$field 必须以小写 0x 开头');
+    }
+    final text = value.substring(2);
+    if (text.isEmpty || text.length.isOdd) {
+      throw QrSignException(QrSignErrorCode.invalidField, '$field 必须是偶数字节 hex');
+    }
+    if (!RegExp(r'^[0-9a-f]+$').hasMatch(text)) {
+      throw QrSignException(QrSignErrorCode.invalidField, '$field 必须是小写 hex');
+    }
+  }
+
+  void _validateExpiry({required int expiresAt}) {
+    final now = _now();
+    if (expiresAt <= now) {
+      throw const QrSignException(QrSignErrorCode.expired, '交易签名请求已过期');
+    }
+    if (!isQrRequestExpiryValid(expiresAt, now)) {
+      throw const QrSignException(QrSignErrorCode.invalidField, '交易签名请求有效期过长');
+    }
+  }
+
+  int _now() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+  static List<int> _hexToBytes(String input) {
+    if (!input.startsWith('0x')) {
+      throw const FormatException('hex 必须以小写 0x 开头');
+    }
+    final text = input.substring(2);
+    if (text.isEmpty ||
+        text.length.isOdd ||
+        !RegExp(r'^[0-9a-f]+$').hasMatch(text)) {
+      throw const FormatException('hex 必须是小写偶数字节十六进制');
+    }
+    return List<int>.generate(
+      text.length ~/ 2,
+      (i) => int.parse(text.substring(i * 2, i * 2 + 2), radix: 16),
+      growable: false,
+    );
+  }
+}
