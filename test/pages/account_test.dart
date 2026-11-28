@@ -8,6 +8,7 @@ import 'package:citizenwallet/protocol/envelope.dart';
 import 'package:citizenwallet/protocol/qr.dart';
 import 'package:citizenwallet/pages/account.dart';
 import 'package:citizenwallet/pages/qr.dart';
+import 'package:citizenwallet/scanner/scanner.dart' show NativeQrTransport;
 import 'package:citizenwallet/wallet/manager.dart';
 
 void main() {
@@ -92,6 +93,61 @@ void main() {
     expect(find.byType(QrImageView), findsOneWidget);
   });
 
+  for (final screen in [
+    (width: 320.0, height: 640.0, scale: 1.0),
+    (width: 384.0, height: 840.0, scale: 1.0),
+    (width: 430.0, height: 932.0, scale: 1.0),
+    (width: 900.0, height: 430.0, scale: 1.0),
+    (width: 430.0, height: 932.0, scale: 2.0),
+  ]) {
+    final width = screen.width;
+    testWidgets(
+      '账户码适配${width.toInt()}×${screen.height.toInt()}及${screen.scale}倍文字，保留绿色、M纠错和完整静区',
+      (tester) async {
+        tester.view.devicePixelRatio = 3;
+        tester.view.physicalSize = Size(width * 3, screen.height * 3);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: TextScaler.linear(screen.scale)),
+              child: child!,
+            ),
+            home: const AccountDetailPage(account: account, walletName: '钱包1'),
+          ),
+        );
+        await tester.tap(find.byTooltip('显示账户码'));
+        await tester.pumpAndSettle();
+        final image = tester.widget<QrImageView>(find.byType(QrImageView));
+        final rendered = tester.getSize(find.byType(QrImageView));
+        expect(rendered.width, lessThanOrEqualTo(320));
+        expect(rendered.width, lessThanOrEqualTo(width - 64));
+        if (width >= 384 && screen.height >= 640 && screen.scale == 1) {
+          expect(rendered.width, greaterThan(300));
+        }
+        final rect = tester.getRect(find.byType(QrImageView));
+        expect(rect.top, greaterThanOrEqualTo(24));
+        expect(rect.bottom, lessThanOrEqualTo(screen.height - 24));
+        final code = QrValidator.validate(
+          data: buildWalletQr(accountId: account.accountId),
+          version: QrVersions.auto,
+          errorCorrectionLevel: QrErrorCorrectLevel.M,
+        ).qrCode!;
+        final unit =
+            rendered.width /
+            (code.moduleCount + 2 * NativeQrTransport.quietZone);
+        expect(image.padding.left, closeTo(unit * 4, 0.001));
+        expect(unit * 3, closeTo((unit * 3).roundToDouble(), 0.001));
+        expect(image.errorCorrectionLevel, QrErrorCorrectLevel.M);
+        expect(image.eyeStyle.color, NativeQrTransport.foreground);
+        expect(image.backgroundColor, NativeQrTransport.background);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   test('账户码载荷严格为固定 k=5，只含 account_id', () {
     final qrData = buildWalletQr(accountId: account.accountId);
     final envelope = QrEnvelope.parse(qrData);
@@ -112,7 +168,8 @@ void main() {
   });
 
   test('公民钱包拒绝解析收款码', () {
-    const receiveQr = '{"p":"QR_V1","k":4,"i":"pay_test","e":1300,"b":{'
+    const receiveQr =
+        '{"p":"QR_V1","k":4,"i":"pay_test","e":1300,"b":{'
         '"n":"0x1111111111111111111111111111111111111111111111111111111111111111",'
         '"v":"1","t":"GMB","m":"","l":"BANK-1"}}';
     expect(

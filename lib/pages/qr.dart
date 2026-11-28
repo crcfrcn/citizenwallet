@@ -135,9 +135,10 @@ Future<void> showWalletQrDialog(
   return showDialog<void>(
     context: context,
     builder: (context) => Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -146,27 +147,58 @@ Future<void> showWalletQrDialog(
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.border),
+            Flexible(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final code = QrValidator.validate(
+                      data: qrData,
+                      version: QrVersions.auto,
+                      errorCorrectionLevel: QrErrorCorrectLevel.M,
+                    ).qrCode;
+                    if (code == null) return const Text('二维码生成失败');
+                    final ratio = MediaQuery.devicePixelRatioOf(context),
+                        quiet = NativeQrTransport.quietZone;
+                    final modules = code.moduleCount + 2 * quiet;
+                    // 静区已包含在码面内，使用实际可用宽度，避免重复留白挤小账户码。
+                    var side = constraints.maxWidth < 320
+                        ? constraints.maxWidth
+                        : 320.0;
+                    if (constraints.maxHeight < side) {
+                      side = constraints.maxHeight;
+                    }
+                    final unit =
+                        (side * ratio / modules).floorToDouble() / ratio;
+                    return SizedBox(
+                      width: side,
+                      height: side,
+                      child: Center(
+                        child: QrImageView.withQr(
+                          qr: code,
+                          version: code.typeNumber,
+                          size: unit * modules,
+                          padding: EdgeInsets.all(unit * quiet),
+                          backgroundColor: NativeQrTransport.background,
+                          errorCorrectionLevel: QrErrorCorrectLevel.M,
+                          eyeStyle: QrEyeStyle(
+                            eyeShape: QrEyeShape.square,
+                            color: NativeQrTransport.foreground,
+                          ),
+                          dataModuleStyle: QrDataModuleStyle(
+                            dataModuleShape: QrDataModuleShape.square,
+                            color: NativeQrTransport.foreground,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
-              child: Builder(builder: (context) {
-                final code=QrValidator.validate(data:qrData,version:QrVersions.auto,errorCorrectionLevel:QrErrorCorrectLevel.M).qrCode;
-                if(code==null)return const Text('二维码生成失败');
-                final ratio=MediaQuery.devicePixelRatioOf(context),quiet=NativeQrTransport.quietZone;
-                final modules=code.moduleCount+2*quiet;
-                final unit=(240*ratio/modules).floorToDouble()/ratio;
-                return SizedBox(width:240,height:240,child:Center(child:QrImageView.withQr(
-                  qr:code,version:code.typeNumber,size:unit*modules,
-                  padding:EdgeInsets.all(unit*quiet),backgroundColor:NativeQrTransport.background,
-                  errorCorrectionLevel:QrErrorCorrectLevel.M,
-                  eyeStyle:QrEyeStyle(eyeShape:QrEyeShape.square,color:NativeQrTransport.foreground),
-                  dataModuleStyle:QrDataModuleStyle(dataModuleShape:QrDataModuleShape.square,color:NativeQrTransport.foreground),
-                )));
-              }),
             ),
             const SizedBox(height: 12),
             SelectableText(

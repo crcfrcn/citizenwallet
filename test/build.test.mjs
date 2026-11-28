@@ -150,6 +150,12 @@ if(platform!=='web'){
   const parent=join(root,'target/test');mkdirSync(parent,{recursive:true});const work=mkdtempSync(join(parent,'layout-')),project=join(work,'source-view');mkdirSync(project);t.after(()=>rmSync(work,{recursive:true,force:true}));
   for(const name of ['ios','android','icons','Podfile.lock'])cpSync(join(root,name),join(project,name),{recursive:true});materializeInputs(root,project);
   for(const name of ['ios/Runner.xcodeproj/project.pbxproj','ios/Runner/HardwareSecretvaultPlugin.swift','ios/signer/citizenwallet_signer.podspec','android/app/src/test/kotlin/com/crcfrcn/citizenwallet/HardwareSecretvaultPluginTest.kt'])assert.ok(existsSync(join(project,name)),name);
+  // Release必须保留真实Rust导出的全部二维码会话符号，供Dart进程内FFI查找。
+  const podspec=readFileSync(join(project,'ios/signer/citizenwallet_signer.podspec'),'utf8');
+  const transport=/export_transport!\(([^)]+)\)/u.exec(readFileSync(join(root,'signing/lib.rs'),'utf8'))[1].split(',').map(name=>name.trim());
+  assert.equal(transport.length,3);
+  for(const symbol of transport){assert.ok(podspec.includes('-Wl,-u,_'+symbol),symbol);assert.ok(readFileSync(join(root,'lib/scanner/scanner.dart'),'utf8').includes("'"+symbol+"'"),symbol);}
+  assert.doesNotMatch(podspec,/_gmb_qr_(encode|join)\b/u);
   // 此处验证工程装配；iOS四个机器码导出仍由真实编译入口调用nm验收，工具失败不能通过。
   const xcode=JSON.parse(execFileSync('/usr/bin/plutil',['-convert','json','-o','-',join(project,'ios/Runner.xcodeproj/project.pbxproj')],{encoding:'utf8'})),objects=xcode.objects;
   const runner=Object.values(objects).find(value=>value.isa==='PBXNativeTarget'&&value.name==='Runner');

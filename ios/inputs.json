@@ -247,7 +247,7 @@
       "  # 两件事缺一不可，否则运行时 DynamicLibrary.process().lookup 找不到符号：\n",
       "  # 1) -force_load：整库加载。App 侧没有任何 ObjC/Swift 代码引用这些 Rust 符号，\n",
       "  #    普通链接会把整个 .a 当无用直接跳过。\n",
-      "  # 2) -u（force undefined）：把 sr25519 和 mldsa FFI 符号声明为\"必需\"。**Release 开启\n",
+      "  # 2) -u（force undefined）：把 sr25519、mldsa 和二维码传输 FFI 符号声明为\"必需\"。**Release 开启\n",
       "  #    -dead_strip**，即使 force_load 进来了，没被引用的符号仍会被剔除——\n",
       "  #    表现为 Debug 正常、Release 静默失效（实测：release 二进制里连\n",
       "  #    schnorrkel 特征串都没有）。-u 让链接器必须保留它们。\n",
@@ -260,7 +260,7 @@
       "                       '-Wl,-u,_citizen_sr25519_derive_hard ' \\\n",
       "                       '-Wl,-u,_citizen_sr25519_public_key ' \\\n",
       "                       '-Wl,-u,_citizen_sr25519_sign ' \\\n",
-      "                       '-Wl,-u,_citizen_sr25519_verify -Wl,-u,_gmb_mldsa_default_algorithm -Wl,-u,_gmb_mldsa_public_key -Wl,-u,_gmb_mldsa_sign -Wl,-u,_gmb_mldsa_verify -Wl,-u,_gmb_mldsa_account_id -Wl,-u,_gmb_mldsa_review_message -Wl,-u,_gmb_mldsa_signature_encode -Wl,-u,_gmb_mldsa_signature_decode -Wl,-u,_gmb_qr_encode -Wl,-u,_gmb_qr_join',\n",
+      "                       '-Wl,-u,_citizen_sr25519_verify -Wl,-u,_gmb_mldsa_default_algorithm -Wl,-u,_gmb_mldsa_public_key -Wl,-u,_gmb_mldsa_sign -Wl,-u,_gmb_mldsa_verify -Wl,-u,_gmb_mldsa_account_id -Wl,-u,_gmb_mldsa_review_message -Wl,-u,_gmb_mldsa_signature_encode -Wl,-u,_gmb_mldsa_signature_decode -Wl,-u,_wallet_qr_open -Wl,-u,_wallet_qr_step -Wl,-u,_wallet_qr_close',\n",
       "  }\n",
       "end\n"
     ],
