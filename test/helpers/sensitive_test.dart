@@ -1,4 +1,4 @@
-// 验证屏幕保护引用计数、异步平台调用及录屏失败处理。
+// 验证屏幕保护、截屏及录屏事件处理。
 
 import 'dart:async';
 import 'dart:io';
@@ -138,7 +138,7 @@ void main() {
 
   test('永久应用标识、原生通道和 Isar 静态库输出保持统一', () {
     // Flutter 测试运行于本轮已物化工程；原生断言读取任务工程的标准平台路径。
-    final sourceRoot = File('test/helpers/screenshot_guard_test.dart')
+    final sourceRoot = File('test/helpers/sensitive_test.dart')
         .resolveSymbolicLinksSync();
     final root = File(sourceRoot).parent.parent.parent.path;
     File sourceFile(String path) => File('$root/$path');

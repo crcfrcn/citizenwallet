@@ -1,10 +1,10 @@
-// 验证离线请求完整审阅、真实验签、账户绑定及过期和重放拒绝。
+// 验证离线请求、账户绑定及重放拒绝。
 
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:io';
 
-import 'payload_decoder_test.dart' show topupText, cidRebindPayload, selfRebindCall;
+import 'decoder_test.dart' show topupText, cidRebindPayload, selfRebindCall;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/wallet/keys.dart';
@@ -247,7 +247,7 @@ void main() {
     tearDown(() => WalletIsar.instance.resetForTest());
 
     test('官方Utility27完整审阅与真实签名绑定全部子项，模式篡改拒签', () async {
-      final fixture=jsonDecode(File('test/signing/fixtures/call_data.json').readAsStringSync()) as Map<String,dynamic>;
+      final fixture=jsonDecode(File('test/signing/call.json').readAsStringSync()) as Map<String,dynamic>;
       for(final name in ['batch','batch_all','force_batch']) {
         final entry=(fixture['cases'] as List).singleWhere((v)=>v['name']==name) as Map<String,dynamic>;
         final payload=signingPayloadHex(entry['expected_call_data_hex'] as String,specVersion:9);
@@ -1222,7 +1222,7 @@ void main() {
     }
     test('公私权岗位治理和登记完整冷签，经真实原生验签并拒绝重放和错动作', () async {
       final fixture = jsonDecode(
-              File('test/signing/fixtures/call_data.json').readAsStringSync())
+              File('test/signing/call.json').readAsStringSync())
           as Map<String, dynamic>;
       final rows = (fixture['cases'] as List)
           .cast<Map<String, dynamic>>()

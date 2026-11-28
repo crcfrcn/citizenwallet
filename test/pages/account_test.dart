@@ -1,4 +1,4 @@
-// 验证账户公开资料、默认隐藏的私钥、查看确认和固定账户码。
+// 验证账户信息、私钥保护及账户码。
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

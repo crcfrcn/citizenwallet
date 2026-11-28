@@ -1,4 +1,4 @@
-// 验证钱包密码字符和长度边界、规范化及风险确认行为。
+// 验证密码规范化、边界及风险确认。
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

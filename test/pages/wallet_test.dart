@@ -1,4 +1,4 @@
-// 钱包详情与创建备份 widget 测试：保护确认前不展示秘密，备份阶段禁止误退出。
+// 验证钱包详情、创建和备份交互。
 import 'dart:async';
 
 import 'package:flutter/material.dart';

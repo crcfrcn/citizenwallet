@@ -1,4 +1,4 @@
-// 验证摄像头预览只交付一次原文并正确报告启动失败。
+// 验证预览交付及启动失败处理。
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';

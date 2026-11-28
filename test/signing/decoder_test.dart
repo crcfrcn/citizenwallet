@@ -1,20 +1,26 @@
-// 验证交易载荷解码、充值原文和岗位权限审阅及篡改拒绝。
+// 验证载荷解码、权限审阅及SCALE边界。
 
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:citizenwallet/signing/service.dart';
-import 'package:citizenwallet/protocol/envelope.dart';
-import 'package:citizenwallet/protocol/sign.dart';
 
+import 'package:citizenwallet/protocol/envelope.dart';
+import 'package:citizenwallet/protocol/qr.dart';
+import 'package:citizenwallet/protocol/sign.dart';
+import 'package:citizenwallet/signing/decoder.dart';
+import 'package:citizenwallet/signing/permission.dart';
+import 'package:citizenwallet/signing/registry.dart';
+import 'package:citizenwallet/signing/service.dart';
+import 'package:citizenwallet/wallet/sr25519.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:polkadart_keyring/polkadart_keyring.dart';
-import 'package:citizenwallet/signing/registry.dart';
 
-import 'package:citizenwallet/signing/decoder.dart';
-import 'package:citizenwallet/wallet/sr25519.dart';
-import 'package:citizenwallet/signing/permission.dart';
-import 'package:citizenwallet/protocol/qr.dart';
+void main() {
+  group('decoder', _registerDecoder);
+  group('scale', _registerScale);
+}
+
+// 验证交易载荷解码、充值原文和岗位权限审阅及篡改拒绝。
 
 /// 公布合同的合成充值原文，供冷签审阅/字节一致性回归共用。
 String topupText() => [
@@ -74,7 +80,7 @@ Uint8List selfRebindCall({BigInt? revision, List<int>? signature}) {
   ]);
 }
 
-void main() {
+void _registerDecoder() {
   test('联系人整批删除完整审阅，签名字节与App一致', () {
     final account = '0x${'04' * 32}';
     final intent = <String, dynamic>{
@@ -246,7 +252,7 @@ void main() {
   }
 
   Map<String, dynamic> readRolePermissionFixture() {
-    final candidates = [File('test/signing/fixtures/role_permission.json')];
+    final candidates = [File('test/signing/permission.json')];
     final file = candidates.firstWhere((candidate) => candidate.existsSync());
     return jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
   }
@@ -329,7 +335,7 @@ void main() {
       Uint8List.fromList([...callData, ...signingTail(nonce: nonce, tip: tip)]);
 
   test('官方Utility27金标完整审阅八项及逐笔费用，非法子调用与尾随拒签', () {
-    final fixture=jsonDecode(File('test/signing/fixtures/call_data.json').readAsStringSync()) as Map<String,dynamic>;
+    final fixture=jsonDecode(File('test/signing/call.json').readAsStringSync()) as Map<String,dynamic>;
     for(final name in ['batch','batch_all','force_batch']) {
       final entry=(fixture['cases'] as List).singleWhere((v)=>v['name']==name) as Map<String,dynamic>;
       final call=_institutionBytes(entry['expected_call_data_hex'] as String);
@@ -697,7 +703,7 @@ void main() {
 
   test('原生政策、Configure及新增账户逐字节金标，截断和尾随拒绝', () {
     final fixture = jsonDecode(
-            File('test/signing/fixtures/call_data.json').readAsStringSync())
+            File('test/signing/call.json').readAsStringSync())
         as Map<String, dynamic>;
     final names = <String>{
       for (final kind in ['public', 'private'])
@@ -747,7 +753,7 @@ void main() {
   });
   test('新增机构载荷经真实原生签名覆盖全部字节，篡改拒绝', () {
     final fixture = jsonDecode(
-            File('test/signing/fixtures/call_data.json').readAsStringSync())
+            File('test/signing/call.json').readAsStringSync())
         as Map<String, dynamic>;
     // 公开的全零合成测试向量，不引用任何用户钱包或持久密钥。
     final vector = Uint8List(32);
@@ -3204,7 +3210,7 @@ void main() {
     // 协议升级 propose_runtime_upgrade / developer_direct_upgrade 的 SCALE decoder 已删
     // (call_data 含 600KB+ WASM,塞不进 QR;server 在 QR 里只放 32 字节 blake2
     // 哈希,decoder 路径不可达)。改走 OfflineSignService 的"哈希直签例外"。
-    // 相关回归测试见 citizenwallet/test/signing/offline_sign_service_test.dart。
+    // 相关回归测试见 citizenwallet/test/signing/service_test.dart。
     test('已关闭的机构直接创建 call 5 必须拒绝解码', () {
       for (final pallet in [0x1e, 0x1f]) {
         final payload = Uint8List.fromList([
@@ -3285,7 +3291,7 @@ void main() {
 
     test('现行公私权call8/9逐字节匹配独立调用fixture并完整展示席位、权限、人员CID', () {
       final fixture = jsonDecode(
-              File('test/signing/fixtures/call_data.json').readAsStringSync())
+              File('test/signing/call.json').readAsStringSync())
           as Map<String, dynamic>;
       for (final row in (fixture['cases'] as List)
           .cast<Map<String, dynamic>>()
@@ -3636,11 +3642,11 @@ void main() {
     });
     // 跨端 call data 字节一致性金标：
     // 当前金标固化公民账户投票交易与发行提案交易，统一真源在
-    // test/signing/fixtures/（冻结自 runtime fixture），钱包与链协议
+    // test/signing/（冻结自 runtime fixture），钱包与链协议
     // 三处必须产出同一序列。
     // 任何一端编码漂移 → 这里直接断言失败。
     Map<String, dynamic> readFixture() {
-      final candidates = [File('test/signing/fixtures/call_data.json')];
+      final candidates = [File('test/signing/call.json')];
       final file = candidates.firstWhere(
         (candidate) => candidate.existsSync(),
         orElse: () => candidates.first,
@@ -4052,7 +4058,7 @@ void main() {
   // 导出的副本(canonical 真源 primitives/tests/fixtures),四方逐字节锁步。
   group('二进制前缀域金标(node/citizenapp 构造 ↔ 冷钱包 decode 锁步)', () {
     final file = File(
-      'test/signing/fixtures/binary_prefix_domain_vectors.json',
+      'test/signing/binary.json',
     );
     if (!file.existsSync()) {
       test('二进制前缀域金标 fixture 尚未生成', () {
@@ -4095,4 +4101,163 @@ Uint8List _institutionBytes(String value) {
   final raw = value.replaceFirst('0x', '');
   return Uint8List.fromList(List.generate(raw.length ~/ 2,
       (i) => int.parse(raw.substring(i * 2, i * 2 + 2), radix: 16)));
+}
+
+// 用链端黄金向量验证SCALE解码及截断、超长和尾随数据拒绝。
+
+// SCALE **解码**金标锁(citizenwallet ⇔ citizenchain)。
+//
+// 本测试读取本仓镜像；镜像更新必须与公民链公开真源一致。
+//
+// 为什么解码方向必须单独锁:编码错会签出链端不认的交易,当场失败;
+// 解码错则是**冷钱包给用户展示的交易内容与实际要签的不符**——用户在错误信息下
+// 按下签名。后者危险一个量级,而 citizenwallet 正是唯一的出签设备。
+//
+// 关键设计:payload 的长度前缀字节**直接取自真源 hex**(parity-scale-codec 生成),
+// 本文件不做任何 compact 编码。这样测的是「解码器能否正确解析链端真值」,
+// 而不是「解码器与本测试的编码实现是否自洽」。
+//
+// 真源:citizenchain/runtime/primitives/tests/fixtures/scale_codec_vectors.json
+// 生成器:citizenchain/runtime/primitives/tests/scale_codec_golden.rs
+
+const String _vectorsPath =
+    'test/signing/scale.json';
+
+/// transfer_with_remark 的 pallet/call 索引(与 payload_decoder_test.dart 同源)。
+const List<int> _transferCallPrefix = [0x04, 0x00];
+
+Uint8List _hexToBytes(String hex) {
+  final clean = hex.toLowerCase().replaceFirst('0x', '');
+  final out = Uint8List(clean.length ~/ 2);
+  for (var i = 0; i < out.length; i += 1) {
+    out[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
+  }
+  return out;
+}
+
+String _hexOf(List<int> payload) =>
+    '0x${payload.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+
+List<int> _u128Le(BigInt value) {
+  final out = List<int>.filled(16, 0);
+  var tmp = value;
+  for (var i = 0; i < 16; i++) {
+    out[i] = (tmp & BigInt.from(0xFF)).toInt();
+    tmp = tmp >> 8;
+  }
+  return out;
+}
+
+/// compact 编码,仅供**构造非法输入**用(fail-closed 用例)。
+/// 合法路径一律直接使用真源 hex,不经过本函数。
+List<int> _compactU32(int value) {
+  if (value < 64) return [value << 2];
+  if (value < 16384) {
+    final v = (value << 2) | 1;
+    return [v & 0xff, (v >> 8) & 0xff];
+  }
+  final v = (value << 2) | 2;
+  return [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff];
+}
+
+void _registerScale() {
+  final tailGenesis = List<int>.generate(32, (i) => 0x49 ^ i);
+  List<int> signingTail() => [
+        0x00,
+        ..._compactU32(1), // nonce
+        ..._compactU32(0), // tip
+        0x00,
+        1, 0, 0, 0, // spec_version u32 LE
+        ...(ByteData(4)
+          ..setUint32(0, ChainConstants.transactionVersion, Endian.little))
+        .buffer
+        .asUint8List(), // 唯一交易版本声明
+        ...tailGenesis,
+        ...tailGenesis,
+        0x00,
+      ];
+
+  final dest = Keyring.sr25519.fromSeed(Uint8List(32));
+  dest.ss58Format = 2027;
+  // polkadart_keyring 0.7.1 的 bytes() 返回类型没有保留元素泛型；在测试边界
+  // 明确收敛为字节列表，避免非法载荷夹具被推断成 List<dynamic>。
+  final List<int> destBytes = dest.bytes().cast<int>();
+
+  /// 用**给定的原始 remark 段字节**拼一笔完整的 transfer payload。
+  /// remarkSegment 应为 `compact(len) ++ utf8`,合法路径下直接来自真源 hex。
+  String buildTransfer(List<int> remarkSegment) => _hexOf([
+        ..._transferCallPrefix,
+        ...destBytes,
+        ..._u128Le(BigInt.from(23400)),
+        ...remarkSegment,
+        ...signingTail(),
+      ]);
+
+  final file = File(_vectorsPath);
+  final canonical = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+  final stringVectors =
+      (canonical['scale_string'] as List).cast<Map<String, dynamic>>();
+
+  group('SCALE 解码与已验真链端镜像一致', () {
+    test('真源向量可读且非空', () {
+      // 读成空数组时下面的循环一条用例都不生成而整体显示通过,这条挡住金标静默失效。
+      expect(file.existsSync(), isTrue,
+          reason: '真源不可达,cwd=${Directory.current.path}');
+      expect(stringVectors, isNotEmpty);
+    });
+
+    for (final vector in stringVectors) {
+      final value = vector['value'] as String;
+      final utf8Len = vector['utf8_len'] as int;
+      final label = value.length > 20 ? '${value.substring(0, 20)}…' : value;
+
+      test('解码链端编码的 remark(${jsonEncode(label)},$utf8Len 字节)', () {
+        // 长度前缀 + 内容整段来自真源,本测试不做任何 compact 编码。
+        final decoded = PayloadDecoder.decode(
+            buildTransfer(_hexToBytes(vector['hex'] as String)));
+
+        expect(decoded, isNotNull, reason: '解码器拒绝了链端合法编码');
+        expect(decoded!.action, 'transfer');
+        // remark 出现在 summary 的「，备注：」之后;空串时不带该后缀。
+        if (value.isEmpty) {
+          expect(decoded.summary.contains('备注'), isFalse,
+              reason: '空 remark 不应产生备注后缀');
+        } else {
+          expect(decoded.summary.contains(value), isTrue,
+              reason: '解出的 remark 与链端原文不一致(长度前缀解析错误?)');
+        }
+      });
+    }
+  });
+
+  group('解码器 fail-closed 边界', () {
+    // 真源向量只覆盖合法编码。非法长度前缀必须整笔拒绝,不得截断出一段"看起来正常"
+    // 的 remark —— 那会让用户看到与实际签名内容不符的交易摘要。
+    test('声明长度超过剩余字节时整笔拒绝', () {
+      // 声明 200 字节但只给 4 字节内容。
+      final bogus = [..._compactU32(200), 0x61, 0x62, 0x63, 0x64];
+      expect(PayloadDecoder.decode(buildTransfer(bogus)), isNull);
+    });
+
+    test('两字节档前缀被截断时整笔拒绝', () {
+      // 64 字节档的前缀是 2 字节(0x01 0x01),这里只给第一个字节后即结束 remark 段。
+      final truncated = [0x01];
+      expect(PayloadDecoder.decode(buildTransfer(truncated)), isNull);
+    });
+
+    test('声明长度 0 但尾部不是合法签名尾时拒绝', () {
+      // remark 段声明 0 字节,随后塞入非签名尾的垃圾字节。
+      final badTail = [
+        ..._transferCallPrefix,
+        ...destBytes,
+        ..._u128Le(BigInt.from(23400)),
+        ..._compactU32(0),
+        0xde,
+        0xad,
+        0xbe,
+        0xef,
+      ];
+      expect(PayloadDecoder.decode(_hexOf(badTail)), isNull);
+    });
+  });
 }

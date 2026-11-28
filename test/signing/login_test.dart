@@ -1,4 +1,4 @@
-// 验证登录请求标识、响应关联及有效期边界。
+// 验证登录请求、响应关联及有效期。
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/protocol/qr.dart';

@@ -1,4 +1,4 @@
-// 验证离线签名页面的中文审阅、可签状态和拒绝状态。
+// 验证签名页面审阅、可签及拒绝状态。
 
 import 'package:citizenwallet/signing/registry.dart';
 // 离线签名页 widget 测试(既有基线修复:runtime 升级哈希签的绿 banner 与明细
@@ -7,8 +7,8 @@ import 'package:citizenwallet/signing/registry.dart';
 import 'dart:convert';
 import 'dart:io';
 
-import '../signing/payload_decoder_test.dart' show cidRebindPayload, selfRebindCall;
-import '../signing/offline_sign_service_test.dart' show signingPayloadHex;
+import '../signing/decoder_test.dart' show cidRebindPayload, selfRebindCall;
+import '../signing/service_test.dart' show signingPayloadHex;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,7 +67,7 @@ void main() {
   );
 
   testWidgets('批量八笔完整中文审阅复用原页面，清单不截断', (tester) async {
-    final fixture=jsonDecode(File('test/signing/fixtures/call_data.json').readAsStringSync()) as Map<String,dynamic>;
+    final fixture=jsonDecode(File('test/signing/call.json').readAsStringSync()) as Map<String,dynamic>;
     final entry=(fixture['cases'] as List).singleWhere((v)=>v['name']=='force_batch') as Map<String,dynamic>;
     final now=DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final request=QrEnvelope<SignRequestBody>(kind:QrKind.signRequest,id:'utility-full-page',expiresAt:now+90,body:SignRequestBody.fromHex(action:QrActions.fromDecodedAction('force_batch'),signerPublicKeyHex:signerPk,payloadHex:signingPayloadHex(entry['expected_call_data_hex'] as String,specVersion:9)));

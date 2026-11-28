@@ -130,20 +130,20 @@ export function materializeInputs(source,project){
   }
  }
  const move=(from,to)=>copy(join(project,from),join(project,to));
- move('ios/Runner.pbxproj','ios/Runner.xcodeproj/project.pbxproj');
- for(const file of ['AppDelegate.swift','HardwareSecretvaultPlugin.swift'])move('ios/'+file,'ios/Runner/'+file);
+ move('ios/project.pbxproj','ios/Runner.xcodeproj/project.pbxproj');
+ for(const [source,file]of [['app.swift','AppDelegate.swift'],['vault.swift','HardwareSecretvaultPlugin.swift']])move('ios/'+source,'ios/Runner/'+file);
  for(const file of ['Info.plist','Runner-Bridging-Header.h'])move('ios/source/'+file,'ios/Runner/'+file);
  for(const file of ['Main.storyboard','CitizenLaunchScreen.storyboard'])move('ios/resources/'+file,'ios/Runner/Base.lproj/'+file);
- move('ios/resources/InfoPlist.xcstrings','ios/Runner/InfoPlist.xcstrings');move('ios/AppIcon.json','ios/resources/AppIcon.json');
+ move('ios/resources/InfoPlist.xcstrings','ios/Runner/InfoPlist.xcstrings');move('ios/icons.json','ios/resources/AppIcon.json');
  for(const file of ['Debug.xcconfig','Release.xcconfig','AppFrameworkInfo.plist'])move('ios/config/'+file,'ios/Flutter/'+file);
  move('ios/project/Runner.xcscheme','ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
  move('ios/project/Runner.xcworkspacedata','ios/Runner.xcworkspace/contents.xcworkspacedata');
  move('ios/project/project.xcworkspacedata','ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata');
  move('ios/project/citizenwallet_signer.podspec','ios/signer/citizenwallet_signer.podspec');
- move('ios/WalletUITests.swift','ios/RunnerUITests/WalletUITests.swift');move('ios/tests/RunnerUITests.xctestplan','ios/RunnerUITests/RunnerUITests.xctestplan');
+ move('ios/tests.swift','ios/RunnerUITests/WalletUITests.swift');move('ios/tests/RunnerUITests.xctestplan','ios/RunnerUITests/RunnerUITests.xctestplan');
  move('Podfile.lock','ios/Podfile.lock');
- move('android/App.gradle.kts','android/app/build.gradle.kts');
- move('android/MainActivity.kt','android/app/src/main/kotlin/com/crcfrcn/citizenwallet/MainActivity.kt');
+ copy(join(source,'android/build.gradle.kts'),join(project,'android/app/build.gradle.kts'));
+ move('android/main.kt','android/app/src/main/kotlin/com/crcfrcn/citizenwallet/MainActivity.kt');
  move('android/source/AndroidManifest.xml','android/app/src/main/AndroidManifest.xml');
  move('android/app/HardwareSecretvaultPluginTest.kt','android/app/src/test/kotlin/com/crcfrcn/citizenwallet/HardwareSecretvaultPluginTest.kt');
  move('android/gradle-wrapper.properties','android/gradle/wrapper/gradle-wrapper.properties');

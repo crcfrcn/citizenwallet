@@ -1,4 +1,4 @@
-// 每钱包扫码作用域谓词单测(安全边界:跨钱包签名请求必须拒绝)。
+// 验证扫码请求的钱包归属边界。
 import 'package:flutter_test/flutter_test.dart';
 import 'package:citizenwallet/pages/scan.dart';
 
